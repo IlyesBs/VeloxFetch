@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-media"
+description = "Enables the start_media command without any pre-configured scope."
+commands.allow = ["start_media"]
+
+[[permission]]
+identifier = "deny-start-media"
+description = "Denies the start_media command without any pre-configured scope."
+commands.deny = ["start_media"]

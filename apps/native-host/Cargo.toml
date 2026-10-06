@@ -1,0 +1,16 @@
+[package]
+name = "velox-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "velox-native-host"
+path = "src/main.rs"
+
+[dependencies]
+path-safety = { path = "../../crates/path-safety" }
+browser-bridge = { path = "../../crates/browser-bridge" }
+diagnostics = { path = "../../crates/diagnostics" }
+tokio = { workspace = true, features = ["io-std"] }

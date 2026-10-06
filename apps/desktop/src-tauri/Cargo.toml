@@ -1,0 +1,44 @@
+[package]
+name = "velox-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "VeloxFetch desktop shell (Tauri v2)"
+
+[lib]
+name = "velox_desktop_lib"
+
+[features]
+# Serve the bundled frontend instead of the dev server. `tauri build` turns this on; `tauri dev` does not.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+download-manager = { path = "../../../crates/download-manager" }
+browser-bridge = { path = "../../../crates/browser-bridge" }
+system-integration = { path = "../../../crates/system-integration" }
+path-safety = { path = "../../../crates/path-safety" }
+secrets = { path = "../../../crates/secrets" }
+diagnostics = { path = "../../../crates/diagnostics" }
+# The native folder dialog (not a Tauri plugin: the web view gets no dialog API, only our own commands).
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
+serde.workspace = true
+serde_json = "1"
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+# Smart throttle: the names of running programs only (no other sysinfo parts are compiled in).
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+# Watch the WebView2 browser process (the same version Tauri / wry use), see webview_guard.rs.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+# Bring the running instance forward when VeloxFetch is started a second time (same version as wry's).
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation"] }
+
+[dev-dependencies]
+serde_json = "1"

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-confirm-pending-download"
+description = "Enables the confirm_pending_download command without any pre-configured scope."
+commands.allow = ["confirm_pending_download"]
+
+[[permission]]
+identifier = "deny-confirm-pending-download"
+description = "Denies the confirm_pending_download command without any pre-configured scope."
+commands.deny = ["confirm_pending_download"]

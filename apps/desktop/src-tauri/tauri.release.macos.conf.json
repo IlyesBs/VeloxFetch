@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {
+      "../../../target/release/velox-native-host": "velox-native-host",
+      "../../browser-extension/dist/chrome": "extension/chromium",
+      "../../browser-extension/dist/firefox": "extension/firefox"
+    }
+  }
+}

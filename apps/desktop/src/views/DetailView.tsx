@@ -1,0 +1,261 @@
+import { getLang, t as tr, useT, type Key } from "../i18n";
+import { localError } from "../errors";
+import { useEffect, useState, type ReactNode } from "react";
+import { actions } from "../actions";
+import { PrimaryAction } from "../components/DownloadCard";
+import { DiagnosticsCard } from "../components/DiagnosticsCard";
+import { PreviewCard } from "../components/PreviewCard";
+import { FileIcon, kindLabel } from "../components/FileIcon";
+import { SignInDialog } from "../components/SignInDialog";
+import { SegmentMap, SegmentRows } from "../components/SegmentMonitor";
+import { formatBytes, formatEta, formatSpeed, fraction, parseRate, percent } from "../format";
+import { useDetail, useDownload } from "../hooks";
+import { PRIORITIES, type Priority } from "../types";
+import { Icon } from "../ui/icons";
+import { ProgressBar, Sparkline, StatusChip } from "../ui/primitives";
+
+function Stat({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-raised px-3.5 py-3">
+      <div className="label">{label}</div>
+      <div className="num mt-1 text-lg font-semibold leading-tight" data-testid={testId}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Card({ title, right, children, testId }: { title: string; right?: ReactNode; children: ReactNode; testId?: string }) {
+  return (
+    <section className="card p-4" data-testid={testId}>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-[13px] font-semibold">{title}</h2>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Meta({ k, v, mono = false, copy }: { k: string; v: string | null | undefined; mono?: boolean; copy?: boolean }) {
+  return (
+    <div className="grid grid-cols-[7rem_1fr_auto] items-baseline gap-3 py-1.5">
+      <dt className="text-xs text-dim">{k}</dt>
+      <dd className={`min-w-0 break-all ${mono ? "font-mono text-xs" : "text-[13px]"}`}>{v ?? "—"}</dd>
+      {copy && v ? (
+        <button className="text-dim hover:text-fg" aria-label={tr("det.copy", { what: k })} onClick={() => void actions.copy(v)}>
+          <Icon name="copy" size={14} />
+        </button>
+      ) : (
+        <span />
+      )}
+    </div>
+  );
+}
+
+export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
+  const t = useT();
+  const live = useDownload(id);
+  const { detail, speeds, error } = useDetail(id);
+  const [limit, setLimit] = useState("");
+  const [signIn, setSignIn] = useState(false);
+
+  // The download was removed while its view was open.
+  useEffect(() => {
+    if (live === undefined && detail !== null) onBack();
+  }, [live, detail, onBack]);
+
+  if (!detail) {
+    return (
+      <div className="space-y-4">
+        <button className="btn btn-ghost -ms-2" onClick={onBack}>
+          <Icon name="back" className="flip-rtl" /> {t("det.back")}
+        </button>
+        <p className="text-dim">{error ?? t("common.loading")}</p>
+      </div>
+    );
+  }
+
+  const d = live ?? detail.download;
+  const frac = fraction(d.downloaded, d.totalSize);
+  const complete = detail.segments.filter((s) => s.status === "completed").length;
+  const peak = Math.max(0, ...speeds);
+
+  const applyLimit = () => {
+    const bps = limit.trim() ? parseRate(limit) : null;
+    if (limit.trim() && bps === null) return;
+    void actions.setDownloadLimit(id, bps);
+    setLimit("");
+  };
+
+  return (
+    <div className="space-y-4" data-testid="detail-view">
+      {signIn && <SignInDialog download={d} onClose={() => setSignIn(false)} />}
+      <div className="flex items-center gap-3">
+        <button className="btn btn-ghost btn-icon -ms-2" onClick={onBack} aria-label={t("det.backTo")} data-testid="detail-back">
+          <Icon name="back" size={18} className="flip-rtl" />
+        </button>
+        <FileIcon kind={d.kind} />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-lg font-semibold tracking-tight" data-testid="detail-title">
+            {d.filename}
+          </h1>
+          <p className="truncate text-xs text-dim">{d.url}</p>
+        </div>
+        <StatusChip status={d.status} />
+        {d.status !== "cancelled" && (
+          <button className="btn" data-testid="detail-show" onClick={() => void actions.showInFolder({ kind: "download", id })}>
+            <Icon name="folder" size={15} /> {t("mj.showFolder")}
+          </button>
+        )}
+        <PrimaryAction d={d} onSignIn={() => setSignIn(true)} />
+        {!["completed", "cancelled"].includes(d.status) && (
+          <button className="btn" onClick={() => void actions.cancel(id)}>
+            <Icon name="x" size={15} /> {t("common.cancel")}
+          </button>
+        )}
+      </div>
+
+      {d.error && (
+        <section className="card flex items-start gap-3 border-bad/40 p-4" role="alert" data-testid="detail-error">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-bad" />
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-[13px] font-medium">{localError(d.errorCode, d.error)}</p>
+            {d.errorDetail && d.errorDetail !== d.error && (
+              <details className="text-xs text-dim">
+                <summary className="cursor-pointer select-none">{t("det.tech")}</summary>
+                <p className="selectable mt-1 break-all font-mono">{d.errorDetail}</p>
+                {d.errorCode && <p className="mt-1 font-mono" data-testid="detail-error-code">{t("det.errCode", { code: d.errorCode })}</p>}
+              </details>
+            )}
+          </div>
+          {d.status === "failed" && (
+            <div className="flex shrink-0 gap-2">
+              {d.needs === "signIn" && (
+                <button className="btn btn-primary" onClick={() => setSignIn(true)}>
+                  <Icon name="lock" size={15} /> {t("det.signIn")}
+                </button>
+              )}
+              <button className="btn" onClick={() => void actions.retry(id)}>
+                <Icon name="retry" size={15} /> {t("mj.retry")}
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      <Card title={t("det.overview")}>
+        <div className="mb-3 flex items-end justify-between">
+          <span className="num text-3xl font-semibold leading-none tracking-tight" data-testid="detail-percent">
+            {d.totalSize ? `${percent(d.downloaded, d.totalSize).toFixed(1)}%` : "—"}
+          </span>
+          <span className="num text-xs text-dim">
+            {formatBytes(d.downloaded)}
+            {d.totalSize !== null ? ` of ${formatBytes(d.totalSize)}` : ""}
+          </span>
+        </div>
+        <ProgressBar value={d.status === "completed" ? 1 : frac} label={t("det.overall")} tone={d.status === "completed" ? "ok" : "accent"} className="h-2" />
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+          <Stat label={t("det.progress")} value={t("det.chunks", { done: complete, total: detail.segments.length })} />
+          <Stat label={t("det.speed")} value={formatSpeed(d.speedBps)} testId="detail-speed" />
+          <Stat label={t("det.eta")} value={formatEta(d.etaSecs)} />
+          <Stat label={t("dc.conn")} value={d.connections} />
+          <Stat label={t("det.downloaded")} value={formatBytes(d.downloaded)} />
+          <Stat label={t("det.remaining")} value={formatBytes(detail.remaining)} />
+        </div>
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title={t("det.network")}>
+          <Sparkline values={speeds} label={t("det.throughput")} className="h-16" />
+          <dl className="mt-3 divide-y divide-line">
+            <Meta k={t("det.current")} v={formatSpeed(d.speedBps)} />
+            <Meta k={t("det.average")} v={detail.avgSpeedBps > 0 ? formatSpeed(detail.avgSpeedBps) : "—"} />
+            <Meta k={t("det.peak")} v={peak > 0 ? formatSpeed(peak) : "—"} />
+            <Meta k={t("dc.conn")} v={t("det.connVal", { n: d.connections, mode: detail.mode })} />
+            <Meta k={t("det.retries")} v={String(detail.retries)} />
+          </dl>
+        </Card>
+
+        <Card title={t("det.controls")}>
+          <div className="space-y-3">
+            <label className="block space-y-1.5">
+              <span className="label">{t("addd.priority")}</span>
+              <select
+                className="input"
+                value={d.priority}
+                disabled={["completed", "cancelled"].includes(d.status)}
+                onChange={(e) => void actions.setPriority(id, e.target.value as Priority)}
+                data-testid="detail-priority"
+              >
+                {PRIORITIES.map((p) => (
+                  <option key={p} value={p}>
+                    {t(`prio.${p}` as Key)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="space-y-1.5">
+              <span className="label">{t("det.limitThis")}</span>
+              <div className="flex gap-2">
+                <input
+                  className="input"
+                  aria-label={t("det.limitThis")}
+                  placeholder={d.speedLimit ? formatSpeed(d.speedLimit) : t("addd.limitEg")}
+                  value={limit}
+                  onChange={(e) => setLimit(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && applyLimit()}
+                />
+                <button className="btn" onClick={applyLimit}>
+                  {t("common.set")}
+                </button>
+                <button className="btn" disabled={!d.speedLimit} onClick={() => void actions.setDownloadLimit(id, null)}>
+                  {t("det.clear")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Card
+        title={t("det.segments")}
+        testId="segments-card"
+        right={
+          <span className="num text-xs text-dim">
+            {t("det.nComplete", { done: complete, total: detail.segments.length })}
+          </span>
+        }
+      >
+        {detail.segments.length === 0 ? (
+          <p className="text-dim">
+            {detail.mode === "sequential" ? t("det.sequential") : t("det.noChunks")}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <SegmentMap segments={detail.segments} />
+            <SegmentRows segments={detail.segments} />
+          </div>
+        )}
+      </Card>
+
+      {(d.kind === "video" || d.kind === "audio") && <PreviewCard id={id} status={d.status} />}
+
+      <DiagnosticsCard id={id} status={d.status} revision={d} />
+
+      <Card title={t("det.metadata")}>
+        <dl className="divide-y divide-line">
+          <Meta k={t("det.url")} v={d.url} copy />
+          <Meta k={t("det.server")} v={detail.server} />
+          <Meta k={t("det.kind")} v={kindLabel(d.kind)} />
+          <Meta k={t("det.ctype")} v={detail.contentType} />
+          <Meta k={t("det.size")} v={d.totalSize !== null ? t("det.bytes", { size: formatBytes(d.totalSize), n: d.totalSize.toLocaleString(getLang()) }) : null} />
+          <Meta k={t("det.etag")} v={detail.etag} mono />
+          <Meta k={t("det.modified")} v={detail.lastModified} />
+          <Meta k={t("det.checksum")} v={detail.checksum} mono />
+          <Meta k={t("det.savedTo")} v={d.destination} copy />
+        </dl>
+      </Card>
+    </div>
+  );
+}

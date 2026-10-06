@@ -1,0 +1,18 @@
+[package]
+name = "velox-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "velox"
+path = "src/main.rs"
+
+[dependencies]
+path-safety = { path = "../../crates/path-safety" }
+downloader-core = { path = "../../crates/downloader-core" }
+persistence = { path = "../../crates/persistence" }
+diagnostics = { path = "../../crates/diagnostics" }
+tokio.workspace = true
+clap = { version = "4", features = ["derive", "env"] }

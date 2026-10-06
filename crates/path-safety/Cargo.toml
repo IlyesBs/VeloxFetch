@@ -1,0 +1,9 @@
+[package]
+name = "path-safety"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

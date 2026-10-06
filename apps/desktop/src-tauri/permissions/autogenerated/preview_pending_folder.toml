@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-pending-folder"
+description = "Enables the preview_pending_folder command without any pre-configured scope."
+commands.allow = ["preview_pending_folder"]
+
+[[permission]]
+identifier = "deny-preview-pending-folder"
+description = "Denies the preview_pending_folder command without any pre-configured scope."
+commands.deny = ["preview_pending_folder"]

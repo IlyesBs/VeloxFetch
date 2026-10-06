@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-download-folder"
+description = "Enables the reset_download_folder command without any pre-configured scope."
+commands.allow = ["reset_download_folder"]
+
+[[permission]]
+identifier = "deny-reset-download-folder"
+description = "Denies the reset_download_folder command without any pre-configured scope."
+commands.deny = ["reset_download_folder"]

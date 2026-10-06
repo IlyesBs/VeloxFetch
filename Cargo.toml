@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/http-client", "crates/downloader-core", "crates/persistence", "crates/download-manager", "crates/scheduler", "crates/system-integration", "crates/browser-bridge", "crates/media-engine", "crates/path-safety", "crates/secrets", "crates/failpoint", "crates/diagnostics", "apps/cli", "apps/native-host", "apps/desktop/src-tauri", "tests/integration"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net", "signal"] }
+tokio-util = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "cookies", "stream", "http2", "socks"] }
+futures-util = "0.3"
+bytes = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+url = "2"
+tracing = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

@@ -1,0 +1,12 @@
+[package]
+name = "diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Local logs and diagnostics that never contain secrets"
+
+[dependencies]
+tracing.workspace = true
+# Already used by `tracing` itself (no new crate): `span::Current`, so `Span::current()` works with this subscriber.
+tracing-core = "0.1.36"

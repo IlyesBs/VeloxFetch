@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-download"
+description = "Enables the create_download command without any pre-configured scope."
+commands.allow = ["create_download"]
+
+[[permission]]
+identifier = "deny-create-download"
+description = "Denies the create_download command without any pre-configured scope."
+commands.deny = ["create_download"]

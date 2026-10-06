@@ -1,0 +1,21 @@
+/target
+*.part
+node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/gen/
+*.db
+*.db-shm
+*.db-wal
+apps/browser-extension/dist/
+
+*.cdx.json
+
+# build outputs (scripts/build-release.sh writes them here)
+/release/
+/dist-out/
+# local logs, sockets and editor files
+*.log
+*.sock
+.DS_Store
+.idea/
+.vscode/

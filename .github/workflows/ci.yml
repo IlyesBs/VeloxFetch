@@ -1,0 +1,180 @@
+# VeloxFetch CI / release pipeline (Phase 12.4).
+#
+#   commit -> format -> lint -> unit + integration tests -> security checks -> dependency audit
+#          -> build (Windows, Linux, macOS Apple silicon + Intel, with scripts/build-release.sh) -> artifact hash
+#          -> release (a version tag `v*`: signed and published, or a private draft while no signing keys exist)
+#
+# Every third-party action is pinned to a full commit hash (a tag can be moved by whoever owns the
+# repository; a hash cannot). The token is read-only unless a job asks for more. Untrusted pull
+# requests never run with secrets: no privileged pull-request trigger is used, and signing happens only in
+# the `release` job on a tag, behind the protected `release` environment.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  # "Run workflow" button: build the installers of the current branch on demand.
+  workflow_dispatch:
+  schedule:
+    # Advisories appear even when the code does not change: audit every Monday.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  test:
+    name: format, lint, tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Linux system libraries for Tauri
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Install JavaScript dependencies (exactly what the lockfiles say)
+        run: |
+          npm ci --prefix apps/desktop
+          npm ci --prefix apps/browser-extension
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Lint (warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Rust unit and integration tests
+        run: cargo test --workspace --locked
+      - name: UI and extension tests
+        run: |
+          npm test --prefix apps/desktop
+          npm test --prefix apps/browser-extension
+      - name: Security policy tests
+        run: node --test tests/security/policy.test.mjs
+
+  security:
+    name: dependency audit, licences, SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Install the audit tools (locked)
+        run: cargo install --locked cargo-audit cargo-deny cargo-cyclonedx
+      - name: Rust advisories (RUSTSEC)
+        run: cargo audit --deny warnings
+      - name: Licences, banned crates, sources (deny.toml)
+        run: cargo deny check
+      - name: npm advisories
+        run: |
+          npm ci --prefix apps/desktop
+          npm audit --prefix apps/desktop --audit-level=low
+          npm audit --prefix apps/browser-extension --audit-level=low
+      - name: Full security gate
+        run: node scripts/security-gate.mjs --ci
+      - name: SBOM (CycloneDX)
+        run: node scripts/security-gate.mjs --sbom-only
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: release/sbom/
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: [test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest }
+          # The oldest supported Ubuntu: the Linux packages then also run on older distributions.
+          - { name: linux-x64, os: ubuntu-22.04 }
+          - { name: macos-arm64, os: macos-latest }
+          - { name: macos-x64, os: macos-15-intel }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
+        with:
+          key: release-${{ matrix.name }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # The same script as a local build: it installs what is missing (Linux libraries with apt), builds the
+      # extension, the helper, the app and its installers, and collects them with SHA256SUMS.txt in release/.
+      # The security gate runs once, in the `security` job.
+      - name: Build the release
+        shell: bash
+        run: bash scripts/build-release.sh --skip-gate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: VeloxFetch-${{ matrix.name }}
+          path: |
+            release/*
+            !release/sbom
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, security]
+    runs-on: ubuntu-latest
+    # Protected environment: required reviewers, and the only place the signing secrets exist.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+      - name: Collect the files and hash them
+        run: |
+          mkdir -p out
+          # Every system builds the same extension zips: keep one copy of each name.
+          for f in artifacts/*/*; do
+            name="$(basename "$f")"
+            case "$name" in SHA256SUMS.txt|MANUAL-TEST.md|security-gate-report.json) continue ;; esac
+            [ -e "out/$name" ] || cp "$f" "out/$name"
+          done
+          (cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - name: Publish (a private draft while the installers cannot be signed)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [ -n "$WINDOWS_CERT_PFX_BASE64" ] && [ -n "$APPLE_CERTIFICATE" ] && [ -n "$RELEASE_GPG_KEY" ]; then
+            # Signing steps (Authenticode with a timestamp, Apple notarisation, a detached GPG signature over
+            # SHA256SUMS) go here once the certificates exist; see docs/release-process.md.
+            echo "signing is not wired yet: publishing as a draft" >&2
+          fi
+          # Unsigned installers are never published: the release stays a draft only the owners see, to be
+          # checked (docs/manual-test.md) and signed before it is made public by hand.
+          gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --draft --title "VeloxFetch $TAG" \
+            --notes "Built by CI from $GITHUB_SHA. Unsigned: check and sign before publishing. SHA-256 sums in SHA256SUMS.txt."

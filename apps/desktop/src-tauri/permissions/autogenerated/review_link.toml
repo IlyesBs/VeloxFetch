@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-review-link"
+description = "Enables the review_link command without any pre-configured scope."
+commands.allow = ["review_link"]
+
+[[permission]]
+identifier = "deny-review-link"
+description = "Denies the review_link command without any pre-configured scope."
+commands.deny = ["review_link"]

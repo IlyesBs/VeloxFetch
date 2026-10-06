@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-detailed-logging"
+description = "Enables the set_detailed_logging command without any pre-configured scope."
+commands.allow = ["set_detailed_logging"]
+
+[[permission]]
+identifier = "deny-set-detailed-logging"
+description = "Denies the set_detailed_logging command without any pre-configured scope."
+commands.deny = ["set_detailed_logging"]

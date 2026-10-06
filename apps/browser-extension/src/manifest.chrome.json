@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "VeloxFetch",
+  "version": "0.1.0",
+  "description": "Send downloads and videos to the VeloxFetch download manager.",
+  "minimum_chrome_version": "110",
+  "icons": {
+    "32": "icons/32.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "VeloxFetch",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "downloads",
+    "storage",
+    "activeTab",
+    "scripting",
+    "cookies",
+    "notifications",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}

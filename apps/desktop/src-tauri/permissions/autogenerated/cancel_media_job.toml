@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-media-job"
+description = "Enables the cancel_media_job command without any pre-configured scope."
+commands.allow = ["cancel_media_job"]
+
+[[permission]]
+identifier = "deny-cancel-media-job"
+description = "Denies the cancel_media_job command without any pre-configured scope."
+commands.deny = ["cancel_media_job"]

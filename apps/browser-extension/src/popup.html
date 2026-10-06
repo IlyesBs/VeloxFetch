@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VeloxFetch</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icons/32.png" alt="" width="20" height="20" />
+      <h1>VeloxFetch</h1>
+    </header>
+
+    <p id="status" role="status">Checking…</p>
+
+    <section id="videos">
+      <label class="row"><input type="checkbox" id="detect" /> Detect videos and show a <b>Download video</b> bar</label>
+      <p id="detect-note" class="note" hidden></p>
+      <ul id="media" hidden></ul>
+    </section>
+
+    <section>
+      <button id="scan" type="button">Find downloads on this page</button>
+      <p id="scan-note" class="note" hidden></p>
+      <div id="found" hidden>
+        <label class="row"><input type="checkbox" id="show-all" /> Show all links, not only files</label>
+        <ul id="links"></ul>
+        <div class="row">
+          <button id="select-all" type="button" class="secondary">Select all</button>
+          <button id="send" type="button">Download selected</button>
+        </div>
+      </div>
+      <p id="result" class="note" role="status" hidden></p>
+    </section>
+
+    <section class="settings">
+      <label class="row"><input type="checkbox" id="intercept" /> Take over the browser's downloads</label>
+      <label class="row"><input type="checkbox" id="cookies" /> Send cookies (for sites that need you to be signed in)</label>
+      <p class="note">Right-click any link and choose <b>Download with VeloxFetch</b>.</p>
+    </section>
+
+    <script src="lib/validate.js"></script>
+    <script src="lib/media.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

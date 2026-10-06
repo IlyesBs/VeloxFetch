@@ -1,0 +1,1409 @@
+@import "tailwindcss";
+
+/*
+ * VeloxFetch design system (Phase 15 redesign: "Cyber Obsidian" / "Nordic Alabaster")
+ * -----------------------------------------------------------------------------------
+ *  - Glass surfaces float over an ambient aurora (or over Mica on Windows 11).
+ *  - Two accents per theme: the main one (cyan / royal blue) and a deep companion (violet / marine)
+ *    used only in gradients and glows. Status colours only where they carry meaning.
+ *  - The whole accent pair morphs to warm amber while the Smart throttle is on (html[data-throttle]).
+ *  - The window frame is told to the page by Rust (html[data-platform] / html[data-surface]):
+ *      mica  - Windows 11: the page is see-through and Mica tints it.
+ *      glass - macOS: native traffic lights; frosted cards over the aurora.
+ *      solid - Windows 10 / Linux: an opaque, sharp slate theme (no blur: cheaper, crisper on WebKitGTK).
+ *  - Every layout uses logical sides (ms/me/ps/pe/start/end), so <html dir="rtl"> mirrors the app.
+ *  - Tabular numerals for every changing number; motion is short and off under prefers-reduced-motion.
+ * Components never hard-code a colour: everything is a token below.
+ */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-solid: var(--solid);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-dim: var(--dim);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-mid: var(--accent-mid);
+  --color-violet: var(--violet);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-fg: var(--accent-fg);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --font-sans: var(--font-ui);
+  --font-mono: "Cascadia Code", "SF Mono", ui-monospace, Consolas, monospace;
+  --radius-card: 1.125rem;
+}
+
+/* ---------------------------------------------------------------- theme tokens */
+
+/* Nordic Alabaster (light) */
+:root {
+  color-scheme: light;
+  --canvas: #f4f6f9;
+  --surface: rgb(255 255 255 / 0.5);
+  --raised: rgb(255 255 255 / 0.62);
+  --solid: #ffffff;
+  --line: rgb(0 0 0 / 0.05);
+  --line-strong: rgb(10 37 64 / 0.14);
+  --fg: #0a2540;
+  --dim: #56677d;
+  --accent: #3a86ff;
+  --accent-2: #0a2540;
+  --accent-mid: #5b6cff;
+  --violet: #7b2cbf;
+  --accent-soft: rgb(58 134 255 / 0.12);
+  --accent-fg: #ffffff;
+  --ok: #0f8a4f;
+  --warn: #b45309;
+  --warn-soft: rgb(180 83 9 / 0.12);
+  --bad: #d92d20;
+  --glow: rgb(58 134 255 / 0.22);
+  --glow-2: rgb(10 37 64 / 0.1);
+  --tint: rgb(244 246 249 / 0.62);
+  --shadow: 0 1px 2px rgb(10 37 64 / 0.04), 0 8px 24px -12px rgb(10 37 64 / 0.16);
+  --shadow-lift: 0 2px 4px rgb(10 37 64 / 0.05), 0 18px 40px -16px rgb(10 37 64 / 0.24);
+  --highlight: rgb(255 255 255 / 0.7);
+  --blur: 16px;
+}
+
+/* Cyber Obsidian (dark): forced, or following the system */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #050a19;
+  --surface: rgb(9 17 36 / 0.62);
+  --raised: rgb(255 255 255 / 0.04);
+  --solid: #0a1226;
+  --line: rgb(140 160 230 / 0.13);
+  --line-strong: rgb(150 175 255 / 0.26);
+  --fg: #eef2ff;
+  --dim: #8e9ab8;
+  --accent: #00e1f5;
+  --accent-2: #9b1cf5;
+    --accent-mid: #1857eb;
+    --violet: #9b1cf5;
+  --accent-soft: rgb(0 225 245 / 0.12);
+  --accent-fg: #021a22;
+  --ok: #22e07a;
+  --warn: #fbbf24;
+  --warn-soft: rgb(251 191 36 / 0.14);
+  --bad: #f87171;
+  --glow: rgb(0 200 245 / 0.16);
+  --glow-2: rgb(155 28 245 / 0.22);
+  --tint: rgb(5 10 25 / 0.86);
+  --shadow: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 12px 32px -16px rgb(0 0 0 / 0.7);
+  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 22px 48px -18px rgb(0 0 0 / 0.85);
+  --highlight: rgb(255 255 255 / 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --canvas: #050a19;
+    --surface: rgb(9 17 36 / 0.62);
+    --raised: rgb(255 255 255 / 0.04);
+    --solid: #0a1226;
+    --line: rgb(140 160 230 / 0.13);
+    --line-strong: rgb(150 175 255 / 0.26);
+    --fg: #eef2ff;
+    --dim: #8e9ab8;
+    --accent: #00e1f5;
+    --accent-2: #9b1cf5;
+    --accent-mid: #1857eb;
+    --violet: #9b1cf5;
+    --accent-soft: rgb(0 225 245 / 0.12);
+    --accent-fg: #021a22;
+    --ok: #22e07a;
+    --warn: #fbbf24;
+    --warn-soft: rgb(251 191 36 / 0.14);
+    --bad: #f87171;
+    --glow: rgb(0 200 245 / 0.16);
+    --glow-2: rgb(155 28 245 / 0.22);
+    --tint: rgb(5 10 25 / 0.86);
+    --shadow: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 12px 32px -16px rgb(0 0 0 / 0.7);
+    --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 22px 48px -18px rgb(0 0 0 / 0.85);
+    --highlight: rgb(255 255 255 / 0.06);
+  }
+}
+
+/* Smart throttle on: the accent pair turns to a stealthy warm amber, everywhere. */
+:root[data-throttle] {
+  --accent: #d97706;
+  --accent-2: #9a3412;
+  --accent-mid: #ea580c;
+  --violet: #9a3412;
+  --accent-soft: rgb(217 119 6 / 0.13);
+  --accent-fg: #ffffff;
+  --glow: rgb(217 119 6 / 0.2);
+  --glow-2: rgb(154 52 18 / 0.12);
+}
+:root[data-theme="dark"][data-throttle] {
+  --accent: #ffb347;
+  --accent-2: #ff5f1f;
+    --accent-mid: #ff8a3d;
+    --violet: #ff5f1f;
+  --accent-soft: rgb(255 179 71 / 0.13);
+  --accent-fg: #241302;
+  --glow: rgb(255 179 71 / 0.16);
+  --glow-2: rgb(255 95 31 / 0.2);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-throttle] {
+    --accent: #ffb347;
+    --accent-2: #ff5f1f;
+    --accent-mid: #ff8a3d;
+    --violet: #ff5f1f;
+    --accent-soft: rgb(255 179 71 / 0.13);
+    --accent-fg: #241302;
+    --glow: rgb(255 179 71 / 0.16);
+    --glow-2: rgb(255 95 31 / 0.2);
+  }
+}
+
+/* Solid slate (Windows 10, Linux): opaque, sharper, no blur. */
+:root[data-surface="solid"] {
+  --surface: #ffffff;
+  --raised: #f6f8fb;
+  --line: rgb(10 37 64 / 0.09);
+  --blur: 0px;
+}
+:root[data-surface="solid"][data-theme="dark"] {
+  --canvas: #070d1d;
+  --surface: #0d1529;
+  --raised: #131d36;
+  --line: rgb(255 255 255 / 0.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-surface="solid"]:not([data-theme="light"]) {
+    --canvas: #070d1d;
+    --surface: #0d1529;
+    --raised: #131d36;
+    --line: rgb(255 255 255 / 0.07);
+  }
+}
+
+/* ---------------------------------------------------------------- typography (LTR / RTL) */
+
+:root {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, Cantarell, "Noto Sans", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Display", Inter, system-ui, sans-serif;
+}
+/* Arabic: Cairo (bundled, loaded only for Arabic glyphs), roomier lines, and never letter-spaced
+   (tracking breaks the joins between Arabic letters). */
+:root[lang="ar"] {
+  --font-ui: "Cairo Variable", "Segoe UI", "Geeza Pro", "Noto Sans Arabic", system-ui, sans-serif;
+  --font-display: "Cairo Variable", "Segoe UI", "Geeza Pro", "Noto Sans Arabic", system-ui, sans-serif;
+}
+:root[lang="ar"] body {
+  line-height: 1.6;
+}
+:root[lang="ar"] body * {
+  letter-spacing: normal !important;
+}
+:root[lang="ar"] .label {
+  text-transform: none;
+  font-size: 12px;
+}
+/* Pointing glyphs (back, chevrons) mirror with the text direction. */
+[dir="rtl"] .flip-rtl {
+  transform: scaleX(-1);
+}
+
+/* ---------------------------------------------------------------- page */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-canvas text-fg font-sans text-sm antialiased;
+  overflow: hidden;
+  /* an app, not a document: UI text is not selectable/draggable; fields and error text still are */
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+  transition: background-color 300ms ease;
+}
+/* Windows 11: let Mica through, with the theme's tint on top so text keeps its contrast. */
+:root[data-surface="mica"] body {
+  background-color: var(--tint);
+}
+
+/* The ambient aurora behind everything: two soft blobs in the accent pair. */
+.aurora {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38rem 26rem at 12% 8%, var(--glow), transparent 70%),
+    radial-gradient(34rem 28rem at 88% 22%, var(--glow-2), transparent 72%),
+    radial-gradient(40rem 30rem at 50% 110%, var(--glow-2), transparent 70%);
+  /* Static on purpose: anything moving behind the frosted cards makes each of them blur again on every frame,
+     which held the window at 20-30 fps on big and high-refresh screens. Its own cached layer, so the big
+     gradients are painted once, not again under every update above them. */
+  transform: translateZ(0);
+  will-change: transform;
+  contain: strict;
+  transition: opacity 400ms ease;
+}
+:root[data-surface="mica"] .aurora {
+  opacity: 0.55;
+}
+:root[data-surface="solid"] .aurora {
+  opacity: 0.45;
+}
+
+input,
+textarea,
+select,
+[role="alert"],
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+img,
+a {
+  -webkit-user-drag: none;
+}
+
+/* every changing number is tabular so columns and cards never jitter */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+.display {
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+}
+/* accent-pair gradient text (big numbers) */
+.text-gradient {
+  background: linear-gradient(110deg, var(--fg) 10%, var(--accent) 60%, color-mix(in srgb, var(--accent-2) 70%, var(--accent)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------------------------------------------------------------- components */
+
+@layer components {
+  /* The glass card: translucent, frosted, a hairline border and a soft floating shadow. */
+  .card {
+    @apply rounded-[var(--radius-card)] border border-line bg-surface;
+    -webkit-backdrop-filter: blur(var(--blur)) saturate(150%);
+    backdrop-filter: blur(var(--blur)) saturate(150%);
+    box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+  }
+  /* For long lists: the same look without the blur (cheap to scroll through hundreds). */
+  .card-lite {
+    @apply rounded-[var(--radius-card)] border border-line;
+    background: color-mix(in srgb, var(--solid) 62%, transparent);
+    box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+  }
+  :root[data-surface="solid"] .card-lite {
+    background: var(--surface);
+  }
+  .card-hover {
+    @apply transition-[border-color,box-shadow,transform] duration-200 hover:border-line-strong;
+  }
+  .card-hover:hover {
+    box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-lift);
+  }
+  .label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-dim;
+  }
+  .btn {
+    @apply inline-flex h-8 select-none items-center justify-center gap-1.5 rounded-[10px] border border-line bg-raised px-3 text-[13px] font-medium text-fg transition-[background-color,border-color,box-shadow,filter] duration-150 hover:border-line-strong hover:bg-accent-soft active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply border-transparent text-accent-fg hover:brightness-110;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    box-shadow: 0 6px 20px -8px var(--accent), inset 0 1px 0 rgb(255 255 255 / 0.25);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+  }
+  .btn-ghost {
+    @apply border-transparent bg-transparent hover:bg-accent-soft;
+  }
+  .btn-icon {
+    @apply h-8 w-8 px-0;
+  }
+  .input {
+    @apply h-9 w-full rounded-[10px] border border-line bg-raised px-3 text-[13px] text-fg placeholder:text-dim/70 transition-[border-color,box-shadow] duration-150 hover:border-line-strong;
+  }
+  /* The list a <select> opens is drawn by the system: give its rows the theme's colours (not a grey or black
+     system list), and the field itself an opaque base so it matches in every theme. */
+  select.input {
+    background-color: var(--solid);
+  }
+  select.input option,
+  select.input optgroup {
+    background-color: var(--solid);
+    color: var(--fg);
+  }
+  select.input option:checked {
+    background-color: color-mix(in srgb, var(--accent) 22%, var(--solid));
+  }
+  .input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold;
+  }
+  /* filter pills (Downloads / History) */
+  .pill {
+    @apply inline-flex h-7 items-center gap-1.5 rounded-full border border-line bg-raised px-3 text-xs font-medium text-dim transition-colors duration-150 hover:border-line-strong hover:text-fg;
+  }
+  .pill[aria-pressed="true"] {
+    @apply border-transparent bg-accent-soft text-accent;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded-md border border-line-strong bg-raised px-1 font-mono text-[10px] text-dim;
+  }
+  .nav-link {
+    @apply flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-start text-[13px] font-medium text-dim transition-colors duration-150 hover:bg-accent-soft hover:text-fg;
+  }
+  .nav-link[aria-current="true"] {
+    @apply bg-accent-soft text-accent;
+  }
+}
+
+/* one hue per kind of file (icons in lists); used at low opacity so they stay calm in both themes */
+.kind-video { --k: #a855f7; }
+.kind-audio { --k: #ec4899; }
+.kind-image { --k: #10b981; }
+.kind-document { --k: #3b82f6; }
+.kind-archive { --k: #f59e0b; }
+.kind-program { --k: #06b6d4; }
+.kind-other { --k: var(--dim); }
+.kind-tile {
+  color: var(--k);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--k) 24%, transparent), color-mix(in srgb, var(--k) 8%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 22%, transparent);
+}
+
+/* ---------------------------------------------------------------- shell: title bar */
+
+/* macOS: the native traffic lights are always on the physical left. Left-to-right they sit over the
+   sidebar (see .side-brand); right-to-left the sidebar is on the right, so the title bar makes room. */
+:root[data-platform="macos"][dir="rtl"] .titlebar {
+  padding-left: 78px;
+}
+/* Window buttons: Windows 11 style (wide, flat, red close) */
+.winbtn {
+  @apply grid h-full w-[46px] place-items-center text-fg/80 transition-colors duration-100;
+}
+.winbtn:hover {
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  color: var(--fg);
+}
+.winbtn-close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+/* ...and GNOME / KDE style on Linux: small round buttons */
+:root[data-platform="linux"] .winbtns {
+  @apply gap-2 pe-3;
+}
+:root[data-platform="linux"] .winbtn {
+  @apply h-6 w-6 rounded-full;
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+:root[data-platform="linux"] .winbtn:hover {
+  background: color-mix(in srgb, var(--fg) 16%, transparent);
+  color: var(--fg);
+}
+
+/* ---------------------------------------------------------------- shell: icon rail */
+
+.rail-btn {
+  @apply relative grid h-11 w-11 place-items-center rounded-[14px] text-dim transition-[color,background-color,box-shadow] duration-200;
+}
+.rail-btn:hover {
+  @apply text-fg;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
+}
+.rail-btn[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 0 22px -6px var(--accent);
+}
+/* the glowing bar on the rail's outer edge */
+.rail-btn::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: -12px;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transform: translateY(-50%);
+  transition: height 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+[dir="rtl"] .rail-btn::before {
+  border-radius: 3px 0 0 3px;
+}
+.rail-btn[aria-current="page"]::before {
+  height: 22px;
+}
+/* the icon follows the pointer a little (set by JS), and springs back */
+.rail-icon {
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+/* tooltip, on the inline-end side of the rail */
+.rail-tip {
+  @apply pointer-events-none absolute top-1/2 z-50 whitespace-nowrap rounded-lg border border-line-strong bg-solid px-2.5 py-1 text-xs font-medium text-fg opacity-0;
+  inset-inline-start: calc(100% + 12px);
+  transform: translateY(-50%) translateX(-4px);
+  transition: opacity 120ms ease, transform 160ms ease;
+  box-shadow: var(--shadow-lift);
+}
+[dir="rtl"] .rail-tip {
+  transform: translateY(-50%) translateX(4px);
+}
+.rail-btn:hover .rail-tip,
+.rail-btn:focus-visible .rail-tip {
+  opacity: 1;
+  transform: translateY(-50%);
+}
+.rail-badge {
+  font-variant-numeric: tabular-nums;
+  @apply absolute -top-0.5 grid h-4 min-w-4 place-items-center rounded-full px-1 text-[9.5px] font-bold leading-none text-accent-fg;
+  inset-inline-end: -2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px -2px var(--accent);
+}
+
+/* ---------------------------------------------------------------- progress & live widgets */
+
+/* progress fill: GPU-composited (transform only) and eased to match the 200 ms update cadence */
+.bar-fill {
+  transform-origin: left center;
+  transition: transform 220ms linear;
+  will-change: transform;
+}
+[dir="rtl"] .bar-fill {
+  transform-origin: right center;
+}
+/* the neon track: cyan -> royal blue -> violet along the filled part */
+.bar-accent {
+  background: linear-gradient(90deg, var(--accent), var(--accent-mid) 55%, var(--violet));
+  box-shadow: 0 0 14px -2px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+[dir="rtl"] .bar-accent {
+  background: linear-gradient(270deg, var(--accent), var(--accent-mid) 55%, var(--violet));
+}
+/* a light sweeping over a running bar */
+.bar-live {
+  position: relative;
+  overflow: hidden;
+}
+.bar-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  transform: translateX(-100%);
+  animation: sweep 1.8s ease-in-out infinite;
+}
+@keyframes sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* The 8x8 thread matrix: one cell per connection slot. Lit cells pulse at a rate set by the
+   per-thread throughput (--pulse, from JS); nth-child offsets keep them from blinking in step. */
+.matrix {
+  display: grid;
+  grid-template-columns: repeat(8, 6px);
+  grid-auto-rows: 6px;
+  gap: 2px;
+  --pulse: 1.6s;
+}
+.matrix > i {
+  border-radius: 1.5px;
+  background: color-mix(in srgb, var(--fg) 9%, transparent);
+  transition: background-color 300ms ease;
+}
+.matrix > i.on {
+  background: var(--accent);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: flicker var(--pulse) ease-in-out infinite;
+}
+.matrix > i.on:nth-child(3n) {
+  animation-duration: calc(var(--pulse) * 1.37);
+}
+.matrix > i.on:nth-child(5n + 1) {
+  animation-delay: calc(var(--pulse) * -0.42);
+}
+.matrix > i.on:nth-child(7n + 2) {
+  animation-delay: calc(var(--pulse) * -0.71);
+  animation-duration: calc(var(--pulse) * 0.83);
+}
+.matrix > i.on:nth-child(4n + 3) {
+  animation-delay: calc(var(--pulse) * -0.18);
+}
+.matrix[data-state="paused"] > i.on {
+  background: var(--warn);
+  animation: none;
+  opacity: 0.6;
+}
+.matrix[data-state="failed"] > i.on {
+  background: var(--bad);
+  animation: none;
+  opacity: 0.6;
+}
+.matrix[data-state="done"] > i {
+  background: var(--ok);
+  opacity: 0.55;
+}
+/* Opacity only: the compositor runs it without repainting the card. */
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Smart throttle HUD gauge */
+.gauge-track {
+  stroke: color-mix(in srgb, var(--fg) 9%, transparent);
+}
+.gauge-arc {
+  stroke: var(--accent);
+  filter: drop-shadow(0 0 6px var(--accent));
+  transition: stroke-dashoffset 600ms cubic-bezier(0.2, 0.8, 0.2, 1), stroke 400ms ease;
+}
+.hud-core {
+  transition: background-color 300ms ease, box-shadow 300ms ease, color 300ms ease;
+}
+.hud-core[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 32px -6px var(--accent);
+}
+.hud-live {
+  position: relative;
+}
+.hud-live::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent), 0 0 44px -4px var(--accent);
+  opacity: 0;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    opacity: 1;
+  }
+}
+/* the switch */
+.switch {
+  @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border border-line-strong transition-colors duration-200;
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 2px;
+  height: 18px;
+  width: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  transition: inset-inline-start 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.switch[aria-checked="true"] {
+  border-color: transparent;
+  background: var(--accent);
+  box-shadow: 0 0 16px -4px var(--accent);
+}
+.switch[aria-checked="true"]::after {
+  inset-inline-start: 22px;
+}
+
+/* live dot (status bar, active cards) */
+.live-dot {
+  @apply relative inline-block h-1.5 w-1.5 rounded-full;
+  background: var(--ok);
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 70%, transparent);
+  animation: ping 2s ease-out infinite;
+}
+@keyframes ping {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(5);
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- misc */
+
+/* the whole window while a link is dragged over it */
+.drop-target::after {
+  content: "";
+  position: fixed;
+  inset: 8px;
+  border: 2px dashed var(--accent);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  pointer-events: none;
+  z-index: 60;
+}
+
+/* keyboard focus is always visible; mouse focus is not noisy */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+dialog {
+  color: inherit;
+}
+dialog.card {
+  background: color-mix(in srgb, var(--solid) 88%, transparent);
+}
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(6px);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* SVG gradient stops in the theme's colours (stop-color can't take var() as an attribute) */
+.stop-accent {
+  stop-color: var(--accent);
+}
+.stop-accent-2 {
+  stop-color: color-mix(in srgb, var(--accent-2) 75%, var(--accent));
+}
+.logo-mark {
+  filter: drop-shadow(0 4px 12px color-mix(in srgb, var(--accent) 45%, transparent));
+}
+
+/* Windows 11-style layered content: the page area is one step lighter than the frame, with a rounded
+   corner where it meets the title bar and the rail. */
+.layer {
+  background: color-mix(in srgb, var(--solid) 26%, transparent);
+  border-top: 1px solid var(--line);
+  border-inline-start: 1px solid var(--line);
+  border-start-start-radius: 14px;
+}
+:root[data-surface="solid"] .layer {
+  background: color-mix(in srgb, var(--surface) 40%, var(--canvas));
+}
+.spark-line {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent) 60%, transparent));
+}
+
+/* a soft accent light in the card's top inline-end corner */
+.glow-corner::before {
+  content: "";
+  position: absolute;
+  top: -40%;
+  inset-inline-end: -25%;
+  width: 70%;
+  height: 120%;
+  pointer-events: none;
+  background: radial-gradient(closest-side, var(--glow), transparent);
+  opacity: 0.7;
+  transition: opacity 300ms ease;
+}
+.glow-corner:hover::before {
+  opacity: 1;
+}
+.glow-corner > * {
+  position: relative;
+}
+
+/* a running task card gets a thin light along its top edge */
+.task-card.is-live::before {
+  content: "";
+  position: absolute;
+  inset-inline: 12%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.85;
+}
+
+/* the link bar: one glass capsule that lights up while you type in it */
+.add-bar {
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.add-bar:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 0 0 4px var(--accent-soft), 0 12px 40px -18px var(--accent), var(--shadow-lift);
+}
+
+/* Numbers with units ("7.2 MB / 96 MB", "3.7 MB/s") keep their order inside Arabic text. */
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* ================================================================ Neon dashboard layout
+   The shell of the reference design: a full-height sidebar (brand, labelled navigation, Smart throttle),
+   the title bar and page beside it, a status bar across the whole window. Everything below folds for
+   narrow windows: the sidebar to an icon rail (< 900 px, or by the user), the dashboard's side column under
+   the list, the task cards to one column. Sizes come from container queries where a block can live in
+   different widths. */
+
+.shell-side {
+  @apply relative z-20 flex shrink-0 flex-col;
+  width: 244px;
+  background: var(--glass-side);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  border-inline-end: 1px solid var(--line);
+  transition: width 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.shell-side[data-folded="true"] {
+  width: 76px;
+}
+:root[data-surface="mica"] .shell-side {
+  background: var(--glass-side);
+}
+.side-brand {
+  @apply flex h-[76px] shrink-0 items-center px-5;
+}
+/* macOS: the traffic lights sit over the sidebar's top */
+:root[data-platform="macos"] .side-brand {
+  padding-top: 30px;
+  height: 96px;
+}
+.shell-side[data-folded="true"] .side-brand {
+  @apply justify-center px-0;
+}
+
+/* a navigation row: icon + label; the current one is lit with a glowing edge */
+.side-link {
+  @apply relative flex h-12 w-full items-center gap-3.5 rounded-[14px] px-4 text-start text-[14.5px] font-medium text-dim transition-[color,background-color,box-shadow] duration-200;
+}
+.side-link:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.side-link[aria-current="page"] {
+  color: var(--fg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 3%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+[dir="rtl"] .side-link[aria-current="page"] {
+  background: linear-gradient(270deg, color-mix(in srgb, var(--accent) 16%, transparent), color-mix(in srgb, var(--accent) 3%, transparent));
+}
+.side-link[aria-current="page"] .side-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 70%, transparent));
+}
+.side-link::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transform: translateY(-50%);
+  transition: height 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.side-link[aria-current="page"]::before {
+  height: 60%;
+}
+.side-icon {
+  @apply grid shrink-0 place-items-center;
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+.shell-side[data-folded="true"] .side-link {
+  @apply h-12 w-12 justify-center gap-0 px-0;
+}
+.shell-side[data-folded="true"] .side-label {
+  @apply sr-only;
+}
+.side-badge {
+  @apply ms-auto grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[10.5px] font-bold leading-none;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.shell-side[data-folded="true"] .side-badge {
+  @apply absolute -top-0.5 h-4 min-w-4 px-1 text-[9.5px];
+  inset-inline-end: -2px;
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+/* the folded rail's tooltip */
+.side-tip {
+  @apply pointer-events-none absolute top-1/2 z-50 hidden whitespace-nowrap rounded-lg border border-line-strong bg-solid px-2.5 py-1 text-xs font-medium text-fg opacity-0;
+  inset-inline-start: calc(100% + 12px);
+  transform: translateY(-50%);
+  transition: opacity 120ms ease;
+  box-shadow: var(--shadow-lift);
+}
+.shell-side[data-folded="true"] .side-tip {
+  display: block;
+}
+.side-link:hover .side-tip,
+.side-link:focus-visible .side-tip {
+  opacity: 1;
+}
+
+/* title bar: the brand, a version pill, the language / theme controls and the window buttons */
+.titlebar {
+  height: 60px;
+}
+.version-pill {
+  @apply rounded-md px-1.5 py-0.5 text-[11px] font-semibold;
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.brand-name {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.chip-btn {
+  @apply inline-flex h-10 items-center gap-2 rounded-full border border-line bg-raised px-3.5 text-[13px] font-semibold text-fg transition-[border-color,background-color] duration-150 hover:border-line-strong;
+}
+.round-btn {
+  @apply grid h-10 w-10 shrink-0 place-items-center rounded-full border border-line bg-raised text-fg transition-[border-color,color,background-color,box-shadow] duration-150;
+}
+.round-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  box-shadow: 0 0 18px -8px var(--accent);
+}
+.round-btn:disabled {
+  @apply pointer-events-none opacity-45;
+}
+.popover {
+  @apply absolute z-50 min-w-44 rounded-xl border border-line-strong p-1;
+  background: color-mix(in srgb, var(--solid) 94%, transparent);
+  box-shadow: var(--shadow-lift);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.popover-item {
+  @apply flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[13px] text-fg hover:bg-accent-soft;
+}
+.popover-item[aria-checked="true"] {
+  color: var(--accent);
+}
+
+/* the big neon button (Add Download) */
+.btn-neon {
+  @apply inline-flex h-12 shrink-0 select-none items-center overflow-hidden rounded-[14px] text-[15px] font-semibold text-white transition-[filter,box-shadow] duration-150;
+  background: linear-gradient(95deg, color-mix(in srgb, var(--accent) 80%, #0077ff), var(--accent-mid) 55%, var(--violet));
+  box-shadow: 0 10px 28px -12px var(--accent), 0 8px 26px -14px var(--violet), inset 0 1px 0 rgb(255 255 255 / 0.28);
+}
+.btn-neon > button {
+  @apply flex h-full items-center gap-2 transition-[background-color] duration-150;
+}
+.btn-neon > button:hover {
+  background: rgb(255 255 255 / 0.1);
+}
+.btn-neon > button:disabled {
+  @apply pointer-events-none;
+}
+.btn-neon > button:disabled > * {
+  opacity: 0.7;
+}
+.btn-neon-split {
+  @apply w-11 justify-center;
+  border-inline-start: 1px solid rgb(255 255 255 / 0.25);
+}
+
+/* stat cards (the dashboard's top row) */
+.stat {
+  @apply relative flex min-h-[112px] min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-line p-4;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.stat:hover {
+  border-color: var(--line-strong);
+}
+.stat-cyan {
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  box-shadow: inset 0 1px 0 0 var(--highlight), 0 0 26px -12px var(--accent);
+}
+.stat-violet {
+  border-color: color-mix(in srgb, var(--violet) 50%, transparent);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--violet) 14%, var(--solid)) 0%, color-mix(in srgb, var(--solid) 55%, transparent) 70%);
+  box-shadow: inset 0 1px 0 0 var(--highlight), 0 0 30px -12px var(--violet);
+}
+.stat-icon {
+  color: var(--accent);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 55%, transparent));
+}
+.stat-violet .stat-icon {
+  color: color-mix(in srgb, var(--violet) 70%, #ffffff);
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--violet) 70%, transparent));
+}
+.spark-violet .stop-accent,
+.spark-violet .stop-accent-2 {
+  stop-color: var(--violet);
+}
+.spark-violet .spark-line {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--violet) 70%, transparent));
+}
+
+/* the list's tab strip and tool buttons */
+.tabbar {
+  @apply flex min-w-0 items-center gap-1 overflow-x-auto;
+  scrollbar-width: none;
+}
+.tabbar::-webkit-scrollbar {
+  display: none;
+}
+.tab {
+  @apply inline-flex h-10 shrink-0 items-center gap-1 whitespace-nowrap rounded-xl px-3.5 text-[13.5px] font-medium text-dim transition-[color,background-color,box-shadow] duration-150 hover:text-fg;
+}
+.tab[aria-pressed="true"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 18px -10px var(--accent);
+}
+.tool-btn {
+  @apply grid h-10 w-10 shrink-0 place-items-center rounded-xl text-dim transition-colors duration-150 hover:text-fg;
+}
+.tool-btn[aria-pressed="true"],
+.tool-btn[aria-expanded="true"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+/* the task card (reference layout): thumbnail | name, bar, numbers | threads panel | round buttons */
+.task {
+  @apply relative overflow-hidden rounded-[var(--radius-card)] border border-line;
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.task:hover {
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-lift);
+}
+.task.is-live {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+}
+.task.is-live::before {
+  content: "";
+  position: absolute;
+  inset-inline: 10%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--violet), transparent);
+  opacity: 0.8;
+}
+.task-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "thumb body actions";
+  gap: 0.75rem 1.1rem;
+  align-items: center;
+}
+.task-thumb {
+  grid-area: thumb;
+}
+.task-body {
+  grid-area: body;
+  min-width: 0;
+}
+.task-threads {
+  grid-area: threads;
+  display: none;
+}
+.task-actions {
+  grid-area: actions;
+}
+@container (min-width: 700px) {
+  .task-grid {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "thumb body threads actions";
+  }
+  .task-threads {
+    display: block;
+  }
+}
+@container (max-width: 540px) {
+  .task-grid {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "thumb body" "actions actions";
+  }
+  .task-actions {
+    justify-content: flex-end;
+  }
+  .thumb {
+    width: 56px;
+    height: 56px;
+  }
+  .thumb-ext {
+    display: none;
+  }
+}
+/* the thumbnail: the kind of file, big, on its own colour */
+.thumb {
+  @apply relative grid shrink-0 place-items-center overflow-hidden rounded-[14px];
+  width: 104px;
+  height: 104px;
+  color: color-mix(in srgb, var(--k) 80%, #ffffff);
+  background:
+    radial-gradient(120% 90% at 20% 10%, color-mix(in srgb, var(--k) 45%, transparent), transparent 60%),
+    linear-gradient(150deg, color-mix(in srgb, var(--k) 30%, var(--solid)), color-mix(in srgb, var(--k) 8%, var(--solid)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 30%, transparent), 0 8px 24px -14px var(--k);
+}
+.thumb-ext {
+  @apply absolute bottom-2 max-w-[86px] truncate rounded-md px-1.5 text-[10px] font-bold uppercase tracking-wider;
+  color: #ffffff;
+  background: rgb(0 0 0 / 0.35);
+}
+.task-compact .thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+.task-compact .thumb-ext,
+.task-compact .task-threads {
+  display: none;
+}
+.task-compact .task-grid {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "thumb body actions";
+}
+.mx-panel {
+  @apply rounded-xl border border-line px-3 py-2;
+  background: color-mix(in srgb, var(--canvas) 45%, transparent);
+}
+.task .matrix {
+  grid-template-columns: repeat(8, 9px);
+  grid-auto-rows: 8px;
+  gap: 3px 4px;
+}
+.task .matrix > i {
+  border-radius: 2.5px;
+  background: color-mix(in srgb, var(--accent-mid) 16%, transparent);
+}
+.task .matrix > i.on {
+  background: var(--accent);
+}
+/* lower rows fade from cyan to blue to violet, like the reference */
+.task .matrix > i.on:nth-child(n + 25) {
+  background: color-mix(in srgb, var(--accent) 45%, var(--accent-mid));
+}
+.task .matrix > i.on:nth-child(n + 41) {
+  background: color-mix(in srgb, var(--accent-mid) 40%, var(--violet));
+}
+.task .matrix > i.on:nth-child(n + 57) {
+  background: var(--violet);
+}
+.task .matrix[data-state="done"] > i {
+  background: var(--ok);
+  opacity: 0.85;
+  box-shadow: 0 0 6px -1px color-mix(in srgb, var(--ok) 70%, transparent);
+}
+.task .matrix[data-state="paused"] > i.on {
+  background: var(--warn);
+}
+.task .matrix[data-state="failed"] > i.on {
+  background: var(--bad);
+}
+.bar-ok {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--ok) 70%, #00c2a8), var(--ok));
+  box-shadow: 0 0 14px -3px var(--ok);
+}
+
+/* the side column of the dashboard */
+.panel {
+  @apply min-w-0 rounded-[var(--radius-card)] border border-line p-4;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+}
+.chart-grid {
+  background-image: radial-gradient(color-mix(in srgb, var(--fg) 14%, transparent) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+.quick {
+  @apply flex min-w-0 flex-col items-center gap-2 text-center text-[11.5px] font-medium text-dim transition-colors duration-150 hover:text-fg;
+}
+.quick-icon {
+  @apply grid h-12 w-12 place-items-center rounded-[14px] border border-line text-fg transition-[border-color,color,box-shadow] duration-150;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.quick:hover .quick-icon {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  box-shadow: 0 0 18px -8px var(--accent);
+}
+
+/* Smart throttle in the sidebar: a big gradient gauge and three modes */
+/* the stroke is the gauge's own gradient (an attribute, its id is per instance) */
+.gauge-grad {
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent));
+  transition: stroke-dasharray 600ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mode-btn {
+  @apply flex h-[58px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl border border-line px-0.5 text-[10.5px] font-medium text-dim transition-[color,border-color,background-color,box-shadow] duration-150 hover:text-fg;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+.mode-btn[aria-checked="true"] {
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: 0 0 18px -8px var(--accent);
+}
+.mode-btn[aria-checked="true"] svg {
+  color: var(--accent);
+}
+.mode-btn:disabled {
+  @apply pointer-events-none opacity-50;
+}
+
+/* the status bar across the window */
+.statusbar {
+  @apply flex h-10 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-5 text-[12.5px] whitespace-nowrap text-dim;
+  background: var(--glass-side);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+}
+.statusbar .sep {
+  @apply h-3.5 w-px shrink-0;
+  background: var(--line-strong);
+}
+
+.stop-violet {
+  stop-color: var(--violet);
+}
+.round-btn.round-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.round-btn.round-primary {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+
+.stop-accent-mid {
+  stop-color: var(--accent-mid);
+}
+
+
+/* ================================================================ Glass
+   Frosted surfaces over a deep, softly lit backdrop (the reference look): every panel is a translucent
+   gradient with a lit top edge and a hairline border; the panels that stay few (sidebar, stat cards, side
+   panels, status bar) also blur what is behind them. Long lists (task cards, finished files) skip the blur
+   so they scroll smoothly. Solid surfaces (Windows 10, Linux without compositing) stay opaque. */
+
+:root {
+  --glass-bg: linear-gradient(155deg, rgb(255 255 255 / 0.74), rgb(255 255 255 / 0.48));
+  --glass-side: rgb(255 255 255 / 0.55);
+  --glass-edge: rgb(255 255 255 / 0.9);
+  --glass-blur: 22px;
+  --sky-1: rgb(58 134 255 / 0.18);
+  --sky-2: rgb(123 44 191 / 0.12);
+  --sky-3: rgb(0 200 245 / 0.1);
+  --star: rgb(10 37 64 / 0);
+}
+:root[data-theme="dark"] {
+  --glass-bg: linear-gradient(155deg, rgb(28 42 86 / 0.46), rgb(10 18 42 / 0.36));
+  --glass-side: rgb(8 14 34 / 0.55);
+  --glass-edge: rgb(170 200 255 / 0.13);
+  --sky-1: rgb(0 170 255 / 0.2);
+  --sky-2: rgb(155 28 245 / 0.22);
+  --sky-3: rgb(24 87 235 / 0.24);
+  --star: rgb(200 220 255 / 0.5);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --glass-bg: linear-gradient(155deg, rgb(28 42 86 / 0.46), rgb(10 18 42 / 0.36));
+    --glass-side: rgb(8 14 34 / 0.55);
+    --glass-edge: rgb(170 200 255 / 0.13);
+    --sky-1: rgb(0 170 255 / 0.2);
+    --sky-2: rgb(155 28 245 / 0.22);
+    --sky-3: rgb(24 87 235 / 0.24);
+    --star: rgb(200 220 255 / 0.5);
+  }
+}
+:root[data-surface="solid"] {
+  --glass-bg: var(--surface);
+  --glass-side: var(--surface);
+  --glass-blur: 0px;
+}
+
+/* the backdrop: a deep sky with soft cyan / blue / violet light and a little star dust */
+.aurora {
+  background:
+    radial-gradient(46rem 22rem at 30% -6%, var(--sky-3), transparent 70%),
+    radial-gradient(38rem 26rem at 12% 8%, var(--glow), transparent 70%),
+    radial-gradient(34rem 28rem at 88% 22%, var(--glow-2), transparent 72%),
+    radial-gradient(44rem 30rem at 70% 105%, var(--sky-2), transparent 70%),
+    radial-gradient(30rem 24rem at 0% 90%, var(--sky-1), transparent 72%);
+}
+.aurora::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  /* Each star is drawn in its own few-pixel box (not as a gradient over the whole window, which cost a full
+     repaint of the window per star on every update). */
+  background-image:
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%),
+    radial-gradient(circle, var(--star) 30%, transparent 70%);
+  background-repeat: no-repeat;
+  background-size: 2px 2px, 2px 2px, 3px 3px, 2px 2px, 2px 2px, 3px 3px, 2px 2px, 2px 2px, 2px 2px, 3px 3px;
+  background-position: 12% 18%, 34% 8%, 58% 14%, 76% 6%, 88% 30%, 22% 64%, 46% 82%, 66% 58%, 92% 74%, 8% 40%;
+}
+:root[data-surface="mica"] .aurora {
+  opacity: 0.9;
+}
+
+/* the link bar and the cards built on .card take the same glass */
+.card,
+.add-bar {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+}
+.popover {
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-lift);
+}
+.card-lite {
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+}
+
+/* a small glass tile (Active page's live numbers) */
+.glass-tile {
+  @apply min-w-0 rounded-[var(--radius-card)] border border-line;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+}
+
+/* a finished file (Completed page) */
+.done-row {
+  @apply flex min-w-0 items-center gap-3.5 rounded-[16px] border border-line px-3.5 py-2.5;
+  background: var(--glass-bg);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.done-row:hover {
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-lift);
+}
+.done-icon {
+  @apply grid h-11 w-11 shrink-0 place-items-center rounded-[13px];
+  color: color-mix(in srgb, var(--k) 80%, #ffffff);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--k) 34%, transparent), color-mix(in srgb, var(--k) 10%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 30%, transparent);
+}
+@media (max-width: 560px) {
+  .done-row {
+    @apply flex-wrap;
+  }
+  .done-row > :last-child {
+    @apply w-full justify-end;
+  }
+}
+
+/* destructive actions */
+.round-btn.round-danger:hover {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+  box-shadow: 0 0 18px -8px var(--bad);
+}
+.btn.btn-danger {
+  border-color: transparent;
+  color: #ffffff;
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  box-shadow: 0 6px 20px -10px #ef4444, inset 0 1px 0 rgb(255 255 255 / 0.22);
+}
+.btn.btn-danger:hover {
+  filter: brightness(1.08);
+}

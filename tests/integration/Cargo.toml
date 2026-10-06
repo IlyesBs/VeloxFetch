@@ -1,0 +1,33 @@
+[package]
+name = "velox-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "fake-ffmpeg"
+path = "src/bin/fake_ffmpeg.rs"
+
+[[bin]]
+name = "fake-ytdlp"
+path = "src/bin/fake_ytdlp.rs"
+
+[dependencies]
+tokio.workspace = true
+
+[dev-dependencies]
+downloader-core = { path = "../../crates/downloader-core" }
+persistence = { path = "../../crates/persistence" }
+download-manager = { path = "../../crates/download-manager" }
+scheduler = { path = "../../crates/scheduler" }
+system-integration = { path = "../../crates/system-integration" }
+secrets = { path = "../../crates/secrets" }
+# Only here (a dev-dependency) is the crash hook switched on: no shipped program is built with it.
+failpoint = { path = "../../crates/failpoint", features = ["enabled"] }
+http-client = { path = "../../crates/http-client" }
+diagnostics = { path = "../../crates/diagnostics" }
+tracing.workspace = true
+serde_json = "1"
+url.workspace = true
+sha2 = "0.11.0"

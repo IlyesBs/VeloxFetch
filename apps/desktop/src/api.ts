@@ -1,0 +1,151 @@
+// The only place the UI talks to Rust. Every function maps to exactly one narrowly-scoped Tauri
+// command that takes an id or a structured DTO. There is deliberately no generic "run"/"read file"
+// escape hatch: the frontend cannot touch the filesystem, network or OS directly.
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export type WindowAction = "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem";
+import type {
+  PreviewInfo,
+  SmartThrottle,
+  VideoTools,
+  ApiError,
+  BrowserIntegration,
+  ExtensionInstall,
+  BatchPreview,
+  BatchRequest,
+  BatchResult,
+  ClipboardState,
+  PendingDownload,
+  PickedFolder,
+  Storage,
+  FileTarget,
+  NetworkSettings,
+  SetNetwork,
+  SpeedLimits,
+  BrowserName,
+  Diagnostics,
+  Download,
+  DownloadDetail,
+  Logs,
+  HistoryEntry,
+  ManagerEvent,
+  MediaAnalysis,
+  MediaJob,
+  MediaRequest,
+  Metrics,
+  NewDownload,
+  PowerAction,
+  Priority,
+  QueueState,
+  Schedule,
+  SpeedTarget,
+} from "./types";
+
+export const EVENT_CHANNEL = "velox://event";
+
+async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await invoke<T>(cmd, args);
+  } catch (e) {
+    throw normalizeError(e);
+  }
+}
+
+export function normalizeError(e: unknown): ApiError {
+  if (typeof e === "object" && e !== null && "code" in e && "message" in e) return e as ApiError;
+  return { code: "internal", message: String(e) };
+}
+
+export const api = {
+  createDownload: (request: NewDownload) => call<Download>("create_download", { request }),
+  startDownload: (id: number) => call<Download>("start_download", { id }),
+  pauseDownload: (id: number) => call<Download>("pause_download", { id }),
+  resumeDownload: (id: number) => call<Download>("resume_download", { id }),
+  cancelDownload: (id: number) => call<Download>("cancel_download", { id }),
+  retryDownload: (id: number) => call<Download>("retry_download", { id }),
+  deleteDownload: (id: number, deleteFile: boolean) => call<void>("delete_download", { id, deleteFile }),
+  getDownload: (id: number) => call<Download>("get_download", { id }),
+  getDownloadDetail: (id: number) => call<DownloadDetail>("get_download_detail", { id }),
+  listDownloads: () => call<Download[]>("list_downloads", { filter: {} }),
+  listHistory: (limit = 200) => call<HistoryEntry[]>("list_history", { limit }),
+  getMetrics: () => call<Metrics>("get_metrics"),
+  setPriority: (id: number, priority: Priority) => call<Download>("set_priority", { id, priority }),
+  setSpeedLimit: (target: SpeedTarget, bytesPerSec: number | null) =>
+    call<void>("set_speed_limit", { request: { target, bytesPerSec } }),
+  getQueueState: () => call<QueueState>("get_queue_state"),
+  setQueueConfig: (config: { maxActive?: number; maxConnections?: number }) =>
+    call<QueueState>("set_queue_config", { request: config }),
+  pauseQueue: (pauseRunning: boolean) => call<QueueState>("pause_queue", { request: { pauseRunning } }),
+  resumeQueue: () => call<QueueState>("resume_queue"),
+  setSchedule: (schedule: Schedule) => call<QueueState>("set_schedule", { schedule }),
+  setPowerAction: (action: PowerAction | null) => call<QueueState>("set_power_action", { request: { action } }),
+  getBrowserIntegration: () => call<BrowserIntegration>("get_browser_integration"),
+  previewBatch: (request: BatchRequest) => call<BatchPreview>("preview_batch", { request }),
+  addBatch: (request: BatchRequest) => call<BatchResult>("add_batch", { request }),
+  reviewLink: (url: string) => call<unknown>("review_link", { url }),
+  getClipboardWatch: () => call<ClipboardState>("get_clipboard_watch"),
+  setClipboardWatch: (enabled: boolean) => call<ClipboardState>("set_clipboard_watch", { enabled }),
+  analyzeMedia: (url: string, pending?: number) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null }),
+  startMedia: (request: MediaRequest) => call<MediaJob>("start_media", { request }),
+  listMediaJobs: () => call<MediaJob[]>("list_media_jobs"),
+  cancelMediaJob: (id: number) => call<void>("cancel_media_job", { id }),
+  pauseMediaJob: (id: number) => call<void>("pause_media_job", { id }),
+  resumeMediaJob: (id: number) => call<MediaJob>("resume_media_job", { id }),
+  /** Remove a finished video download from the list; `deleteFiles` also deletes its saved files from the disk. */
+  clearMediaJob: (id: number, deleteFiles = false) => call<void>("clear_media_job", { id, deleteFiles }),
+  listPendingDownloads: () => call<PendingDownload[]>("list_pending_downloads"),
+  confirmPendingDownload: (token: number, filename?: string, start = true, folderToken?: number) =>
+    call<Download>("confirm_pending_download", { request: { token, filename, start, folderToken } }),
+  getStorage: () => call<Storage>("get_storage"),
+  setOrganize: (enabled: boolean) => call<Storage>("set_organize", { enabled }),
+  setFolderNames: (names: Record<string, string>) => call<Storage>("set_folder_names", { request: { names } }),
+  resetDownloadFolder: () => call<Storage>("reset_download_folder"),
+  /** Opens the native folder dialog. `null` = the user closed it. */
+  pickFolder: () => call<PickedFolder | null>("pick_folder"),
+  /** Opens the native folder dialog and makes the answer the default download folder. */
+  chooseDownloadFolder: () => call<Storage | null>("choose_download_folder"),
+  getNetwork: () => call<NetworkSettings>("get_network"),
+  setNetwork: (request: SetNetwork) => call<NetworkSettings>("set_network", { request }),
+  getSpeedLimits: () => call<SpeedLimits>("get_speed_limits"),
+  /** Give a download the user name / password its server asked for and start it again. */
+  signIn: (id: number, username: string, password: string) => call<Download>("set_download_credentials", { request: { id, username, password } }),
+  /** Where a waiting browser download would be saved under another name. */
+  previewPendingFolder: (token: number, filename: string) => call<string>("preview_pending_folder", { request: { token, filename } }),
+  showInFolder: (target: FileTarget) => call<void>("show_in_folder", { target }),
+  openFile: (target: FileTarget) => call<void>("open_file", { target }),
+  openDownloadFolder: () => call<void>("open_download_folder"),
+  /** Remove one history line, or all of them (`null`). Files are not touched. */
+  forgetHistory: (id: number | null) => call<number>("forget_history", { id }),
+  /** Diagnostics: everything local, secrets removed in Rust before anything reaches the UI. */
+  getDownloadDiagnostics: (id: number) => call<Diagnostics>("get_download_diagnostics", { id }),
+  getSmartThrottle: () => call<SmartThrottle>("get_smart_throttle"),
+  getVideoTools: () => call<VideoTools>("get_video_tools"),
+  fetchVideoTools: () => call<VideoTools>("fetch_video_tools"),
+  setSmartThrottle: (request: { enabled?: boolean; apps?: string[]; sharePercent?: number }) => call<SmartThrottle>("set_smart_throttle", { request }),
+  setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
+  getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),
+  getLogs: (limit = 300, problemsOnly = false) => call<Logs>("get_logs", { limit, problemsOnly }),
+  setDetailedLogging: (enabled: boolean) => call<void>("set_detailed_logging", { enabled }),
+  getDiagnosticsReport: () => call<string>("get_diagnostics_report"),
+  openLogFolder: () => call<void>("open_log_folder"),
+  dismissPendingDownload: (token: number) => call<void>("dismiss_pending_download", { token }),
+  setBrowserConfirm: (enabled: boolean) => call<void>("set_browser_confirm", { enabled }),
+  setVideoBar: (enabled: boolean) => call<void>("set_video_bar", { enabled }),
+  /** The title bar's buttons and the frame theme, on this window only. Resolves whether it is maximized. */
+  windowControl: (action: WindowAction) => call<boolean>("window_control", { action }),
+  installBrowserExtension: (browser: BrowserName | null) =>
+    call<ExtensionInstall>("install_browser_extension", { request: { browser } }),
+  setBrowserIntegration: (browser: BrowserName, enabled: boolean) =>
+    call<BrowserIntegration>("set_browser_integration", { request: { browser, enabled } }),
+};
+
+/** Download links the user copied (only when clipboard detection is on). */
+export function onClipboardLinks(handler: (links: string[]) => void): Promise<UnlistenFn> {
+  return listen<{ links: string[] }>("velox://clipboard", (ev) => handler(ev.payload.links));
+}
+
+export function onManagerEvent(handler: (e: ManagerEvent) => void): Promise<UnlistenFn> {
+  return listen<ManagerEvent>(EVENT_CHANNEL, (ev) => handler(ev.payload));
+}

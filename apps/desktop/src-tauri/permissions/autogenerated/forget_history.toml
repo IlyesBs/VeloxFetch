@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-history"
+description = "Enables the forget_history command without any pre-configured scope."
+commands.allow = ["forget_history"]
+
+[[permission]]
+identifier = "deny-forget-history"
+description = "Denies the forget_history command without any pre-configured scope."
+commands.deny = ["forget_history"]

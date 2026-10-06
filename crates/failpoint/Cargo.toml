@@ -1,0 +1,13 @@
+[package]
+name = "failpoint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Off in every shipped build: only the crash tests switch it on (see the policy test).
+enabled = ["dep:libc"]
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }

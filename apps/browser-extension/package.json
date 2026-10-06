@@ -1,0 +1,10 @@
+{
+  "name": "velox-browser-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "VeloxFetch browser extension (Chromium + Firefox, Manifest V3). No runtime dependencies.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

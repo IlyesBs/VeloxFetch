@@ -1,0 +1,33 @@
+[package]
+name = "download-manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+downloader-core = { path = "../downloader-core" }
+http-client = { path = "../http-client" }
+path-safety = { path = "../path-safety" }
+secrets = { path = "../secrets" }
+media-engine = { path = "../media-engine" }
+tokio-util.workspace = true
+persistence = { path = "../persistence" }
+scheduler = { path = "../scheduler" }
+system-integration = { path = "../system-integration" }
+tokio.workspace = true
+serde.workspace = true
+url.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+fs4 = "1.1.0"
+failpoint = { path = "../failpoint" }
+diagnostics = { path = "../diagnostics" }
+serde_json = "1"
+# Video tools fetched on first use (manager/tools.rs): checksum, and one entry out of a ZIP.
+sha2 = "0.10"
+flate2 = "1"
+futures-util.workspace = true
+# The dashboard's live network (whole computer) and disk (download folder's drive) activity: counters only.
+sysinfo = { version = "0.39", default-features = false, features = ["disk", "network"] }
+

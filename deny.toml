@@ -1,0 +1,73 @@
+# cargo-deny policy for VeloxFetch (Phase 12). Run: `cargo deny check`.
+# Everything that is allowed is allowed on purpose; a change here needs a reason in the commit.
+
+[graph]
+# Check every platform we ship for, not just the machine running the check.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Reviewed and accepted. All are transitive dependencies of Tauri's GTK3 / Linux stack that we do not
+# call in a way that could be affected; each entry says why, and must be revisited when Tauri moves on.
+ignore = [
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error: build-time macro of the GTK3 bindings (Linux); no runtime code" },
+    { id = "RUSTSEC-2024-0429", reason = "glib 0.18 VariantStrIter unsoundness: pulled by Tauri's GTK3 layer on Linux; we never iterate GVariant strings" },
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licences only. MPL-2.0 is file-level copyleft (cssparser / selectors via Tauri's HTML
+# handling, unmodified). Nothing GPL/AGPL/LGPL-only may enter.
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # TLS is rustls only. OpenSSL brings a C library that is patched separately from the app.
+    { crate = "openssl", reason = "TLS is rustls only" },
+    { crate = "openssl-sys", reason = "TLS is rustls only" },
+    { crate = "native-tls", reason = "TLS is rustls only" },
+    # Tauri plugins that would widen what the webview can do. Any of them needs a security review first.
+    { crate = "tauri-plugin-shell", reason = "webview must not be able to run programs" },
+    { crate = "tauri-plugin-fs", reason = "webview must not have file system access" },
+    { crate = "tauri-plugin-http", reason = "all network access goes through the Rust core" },
+    { crate = "tauri-plugin-opener", reason = "webview must not open arbitrary files or links" },
+    # There is no updater yet. A signed, verified one is a design of its own (see docs/threat-model.md).
+    { crate = "tauri-plugin-updater", reason = "no updater until signature verification is designed and reviewed" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

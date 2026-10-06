@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "../../../target/release/velox-native-host.exe": "velox-native-host.exe",
+      "../../browser-extension/dist/chrome": "extension/chromium",
+      "../../browser-extension/dist/firefox": "extension/firefox"
+    }
+  }
+}

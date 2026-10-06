@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dismiss-pending-download"
+description = "Enables the dismiss_pending_download command without any pre-configured scope."
+commands.allow = ["dismiss_pending_download"]
+
+[[permission]]
+identifier = "deny-dismiss-pending-download"
+description = "Denies the dismiss_pending_download command without any pre-configured scope."
+commands.deny = ["dismiss_pending_download"]

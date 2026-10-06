@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-network"
+description = "Enables the set_network command without any pre-configured scope."
+commands.allow = ["set_network"]
+
+[[permission]]
+identifier = "deny-set-network"
+description = "Denies the set_network command without any pre-configured scope."
+commands.deny = ["set_network"]
