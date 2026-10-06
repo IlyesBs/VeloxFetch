@@ -240,7 +240,9 @@ async fn an_app_restart_is_survived_because_the_token_is_re_read() {
     assert!(r.ok, "{r:?}");
 }
 
-#[cfg(unix)]
+// Snap / Flatpak browsers exist on Linux only (macOS also allows only 103 characters in a socket path, less than
+// its temporary folder needs here).
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn a_browser_in_a_sandbox_reaches_the_same_app_through_its_own_folder() {
     // The app serves its usual link and, with the same token, a second one in the browser's own folder

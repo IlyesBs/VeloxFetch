@@ -30,8 +30,40 @@ impl Endpoint {
         }
         #[cfg(not(windows))]
         {
-            Self(data_dir.join("bridge.sock").to_string_lossy().to_string())
+            Self(unix_socket_path(data_dir).to_string_lossy().to_string())
         }
+    }
+}
+
+/// Longest socket path the system accepts (`sun_path` less its final NUL): 107 on Linux, 103 on macOS / BSD.
+#[cfg(not(windows))]
+const MAX_SOCKET_PATH: usize = if cfg!(target_os = "linux") { 107 } else { 103 };
+
+/// `bridge.sock` in `dir`, or a shorter name when that would be too long for the system (a browser's folder inside
+/// a Flatpak with a long id, a long user name). The app and the helper apply the same rule, so they always agree.
+#[cfg(not(windows))]
+pub(crate) fn unix_socket_path(dir: &Path) -> std::path::PathBuf {
+    let normal = dir.join("bridge.sock");
+    if normal.as_os_str().len() <= MAX_SOCKET_PATH {
+        normal
+    } else {
+        dir.join("s")
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn a_long_folder_gets_a_short_socket_name_on_both_sides() {
+        let short = Path::new("/home/u/.local/share/app.velox.fetch");
+        assert_eq!(unix_socket_path(short), short.join("bridge.sock"));
+        let long = Path::new("/home/twenty-char-username/.var/app/io.github.ungoogled_software.ungoogled_chromium/data/app.velox.fetch");
+        assert!(long.join("bridge.sock").as_os_str().len() > 107, "the case this guards against");
+        assert_eq!(unix_socket_path(long), long.join("s"));
+        assert!(unix_socket_path(long).as_os_str().len() <= MAX_SOCKET_PATH);
+        assert_eq!(Endpoint::default_for(long), Endpoint::default_for(long), "the same answer every time");
     }
 }
 
