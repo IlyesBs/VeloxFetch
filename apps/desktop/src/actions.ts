@@ -24,6 +24,7 @@ export const actions = {
   setMaxActive: (n: number) => act(() => api.setQueueConfig({ maxActive: n })),
   setMaxConnections: (n: number) => act(() => api.setQueueConfig({ maxConnections: n })),
   setSchedule: (s: Schedule) => act(() => api.setSchedule(s), s.enabled ? t("act.schedSaved") : t("act.schedOff")),
+  setKeepAwake: (on: boolean) => act(() => api.setKeepAwake(on), on ? t("act.keepAwakeOn") : t("act.keepAwakeOff")),
   setPowerAction: (a: PowerAction | null) =>
     act(() => api.setPowerAction(a), a ? t("act.power", { action: t(`power.${a}` as Key).toLowerCase() }) : t("act.powerOff")),
   showInFolder: (target: FileTarget) => act(() => api.showInFolder(target)),

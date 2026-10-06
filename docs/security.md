@@ -414,3 +414,24 @@ Clipboard detection (`apps/desktop/src-tauri/src/clipboard.rs`, `crates/system-i
 * A notice is shown; **nothing is downloaded until the user presses Download** (one link -> the usual confirmation with details and Start / Cancel; several -> the batch dialog with its preview).
 * Cross-platform: `arboard` (Windows, macOS, X11, Wayland data-control). Where the OS refuses background clipboard reads (e.g. GNOME on Wayland) the watcher reports "unavailable" and the UI says so instead of failing silently.
 * Tests read "the clipboard" from a file (`VELOX_CLIPBOARD_FILE`, debug builds only), so the real clipboard of whoever runs them is never touched.
+
+## Phase 15: one door to the operating system
+
+`system_integration::system::SystemIntegration` is the only way the download manager reaches the OS: power
+actions, show / open a file, keeping the computer awake, notifications, the `veloxfetch://` link protocol.
+
+* **Real only in the app.** `ManagerConfig::new` gives the dry run (`DryRunSystem`, which records and touches
+  nothing); only the desktop app passes `SystemHandle::native()`, and debug builds switch back to the dry run for the
+  end-to-end tests. A test that forgets to set it can no longer open windows or shut the machine down.
+* **No shell, no text in commands.** Notification text is a separate argument (Linux: after `--`; macOS:
+  AppleScript `argv`, never inside the script) or XML-escaped (Windows toast); control characters are removed and
+  the length bounded first.
+* **Keeping awake never traps the computer.** It only holds off the *automatic* sleep after inactivity (Linux
+  `systemd-inhibit --what=idle`, macOS `caffeinate -i`, Windows `ES_SYSTEM_REQUIRED`); a sleep the user asks for, and
+  the app's own power action, still happen. It is a handle released when nothing downloads, when the user turns it
+  off, and at exit; the Linux / macOS helper also ends with the app if the app crashes (closed pipe, watched pid).
+* **Link protocol.** Per user only (Windows `HKCU\Software\Classes`, Linux `~/.local/share/applications` +
+  `xdg-mime`; macOS declares it in the app bundle). The scheme is checked (never `http`, `file`, `javascript`...),
+  the program path must be absolute, and the desktop entry quotes it as its specification requires. Registering it
+  and handling the links is wired in Phases 16 to 18.
+* Policy test: `Phase 15: the operating system is reached through SystemIntegration only...`.

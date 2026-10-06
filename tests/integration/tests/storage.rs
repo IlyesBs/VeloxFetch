@@ -452,11 +452,11 @@ async fn show_in_folder_opens_each_downloads_own_folder() {
     let base = base_dir("show-own");
     let data = random_data(150 * 1024, 602);
     let srv = serve(data).await;
-    let shell = std::sync::Arc::new(system_integration::files::DryRunShell::default());
+    let shell = std::sync::Arc::new(system_integration::DryRunSystem::new());
     let mut c = config(&base, false);
-    c.shell = download_manager::ShellHandle(shell.clone());
+    c.system = download_manager::SystemHandle(shell.clone());
     let m = DownloadManager::new(c).await.unwrap();
-    let last = || shell.calls.lock().unwrap().last().unwrap().1.clone();
+    let last = || shell.file_calls().last().unwrap().1.clone();
     let show = |id| m.show_in_folder(download_manager::FileTarget::Download { id });
 
     // Usual folder.

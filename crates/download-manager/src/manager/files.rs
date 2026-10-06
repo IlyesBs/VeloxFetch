@@ -50,8 +50,8 @@ impl DownloadManager {
         } else {
             return Err(ManagerError::invalid("the folder of this download does not exist yet"));
         };
-        let shell = self.inner.cfg.shell.clone();
-        tokio::task::spawn_blocking(move || shell.0.reveal(&shown))
+        let system = self.inner.cfg.system.clone();
+        tokio::task::spawn_blocking(move || system.0.reveal(&shown))
             .await
             .map_err(|e| ManagerError::Internal(e.to_string()))?
             .map_err(|e| ManagerError::Internal(format!("cannot open the file manager: {e}")))
@@ -71,8 +71,8 @@ impl DownloadManager {
         if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Err(ManagerError::invalid("the file is gone (moved or deleted)"));
         }
-        let shell = self.inner.cfg.shell.clone();
-        tokio::task::spawn_blocking(move || shell.0.open(&path))
+        let system = self.inner.cfg.system.clone();
+        tokio::task::spawn_blocking(move || system.0.open(&path))
             .await
             .map_err(|e| ManagerError::Internal(e.to_string()))?
             .map_err(|e| ManagerError::Internal(format!("cannot open the file: {e}")))
@@ -82,8 +82,8 @@ impl DownloadManager {
     pub async fn open_download_folder(&self) -> Result<(), ManagerError> {
         let root = self.download_root();
         tokio::fs::create_dir_all(&root).await.map_err(|e| ManagerError::Internal(format!("cannot create the folder: {e}")))?;
-        let shell = self.inner.cfg.shell.clone();
-        tokio::task::spawn_blocking(move || shell.0.reveal(&root))
+        let system = self.inner.cfg.system.clone();
+        tokio::task::spawn_blocking(move || system.0.reveal(&root))
             .await
             .map_err(|e| ManagerError::Internal(e.to_string()))?
             .map_err(|e| ManagerError::Internal(format!("cannot open the file manager: {e}")))

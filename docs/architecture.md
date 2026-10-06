@@ -55,7 +55,7 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
 | `persistence` | SQLite store (WAL, versioned migrations), crash recovery. Implements the engine's `DownloadStore` trait. |
 | `download-manager` | Application controller the UI talks to. Owns create / start / pause / resume / cancel / retry / delete, the queue gate, the schedule and the power trigger, validates every input, emits events. |
 | `scheduler` | `Schedule` (start/stop/days, overnight windows): pure functions of a local timestamp. No clock, no I/O. |
-| `system-integration` | Clipboard text (`arboard`, all three OSes), default-browser detection and browser launching for the extension installer, power actions (shutdown / sleep / hibernate) behind a `PowerExecutor` trait, plus a dry-run executor (fixed commands, no shell); registration of the native messaging host with browsers (registry on Windows, manifest files elsewhere). |
+| `system-integration` | Clipboard text (`arboard`, all three OSes), default-browser detection and browser launching for the extension installer, `SystemIntegration` (Phase 15): the one door to the OS for power actions (shutdown / sleep / hibernate), show / open a file, keeping the computer awake while downloading, notifications and the `veloxfetch://` link protocol, with `NativeSystem` per OS and `DryRunSystem` for tests (fixed commands, no shell); snap / Flatpak browsers; registration of the native messaging host with browsers (registry on Windows, manifest files elsewhere). |
 | `media-engine` | Video streams (HLS `.m3u8`, DASH `.mpd`): manifest parsers, segment download with hard limits, optional ffmpeg remux. **A separate subsystem**: it shares only the HTTP client with the normal engine and nothing else (own job list, own events, own limits, no database rows). |
 | `path-safety` | File-name sanitising and validation, "is this path really inside the download folder" (links resolved), and opening a file without following a planted link. Used by the engine, the media engine and the manager's validation so the rules exist once. |
 | `secrets` | Sealing of small secrets (ChaCha20-Poly1305) with a key kept only in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), an in-memory store for tests, and the log-redaction helpers. `persistence` seals the browser's cookies / credentials with it; there is no plaintext fallback. |
@@ -117,7 +117,7 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
              ├─► gate (open/closed) ─► SlotScheduler ─► max active downloads, priority order
  schedule ───┘                                          (each download: adaptive connections ≤ max connections)
 
- all downloads finished ─► [armed?] ─► visible countdown ─► PowerExecutor ─► disarmed (one-shot)
+ all downloads finished ─► [armed?] ─► visible countdown ─► SystemIntegration::power ─► disarmed (one-shot)
 ```
 
 * **Max active downloads** is the scheduler's slot count and **max connections per download** is the
@@ -299,7 +299,7 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 * **Network settings** (`manager/network.rs`): proxy mode / address / sealed password and the user agent. A change builds a
   new `HttpClient` and swaps it into the engine (`Downloader::set_client`) and the stream downloader; running transfers keep
   the client they started with. Settings keys `network.*`.
-* **Finished files** (`manager/files.rs`): show in folder / open (through `ShellHandle`, a dry run in tests), history
+* **Finished files** (`manager/files.rs`): show in folder / open (through `SystemHandle`, a dry run in tests), history
   removal (`SqliteStore::forget_history`, which keeps the lifetime total in `stats.forgotten_bytes`), sign in and retry,
   speed limits by kind (a download without its own category is throttled under its kind's key, e.g. `video`).
 * **Names**: the engine reserves the final name when a download starts (`Downloader::claim_name`): the first of `name`,

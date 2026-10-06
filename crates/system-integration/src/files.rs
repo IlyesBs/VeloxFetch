@@ -263,55 +263,6 @@ pub fn file_uri(path: &Path) -> String {
     out
 }
 
-/// Shows / opens files. Replaceable so tests never open windows on the machine they run on.
-pub trait FileShell: Send + Sync {
-    fn reveal(&self, path: &Path) -> std::io::Result<()>;
-    fn open(&self, path: &Path) -> std::io::Result<()>;
-}
-
-/// The real file manager and applications.
-pub struct SystemShell;
-
-impl FileShell for SystemShell {
-    fn reveal(&self, path: &Path) -> std::io::Result<()> {
-        reveal(Platform::current(), path)
-    }
-    fn open(&self, path: &Path) -> std::io::Result<()> {
-        open(Platform::current(), path)
-    }
-}
-
-/// Records what would have been shown or opened, applying the same checks as the real one.
-#[derive(Default)]
-pub struct DryRunShell {
-    pub calls: std::sync::Mutex<Vec<(&'static str, PathBuf)>>,
-}
-
-impl FileShell for DryRunShell {
-    fn reveal(&self, path: &Path) -> std::io::Result<()> {
-        if !path.is_absolute() {
-            return Err(not_absolute());
-        }
-        eprintln!("[dry-run] would show {} in its folder", path.display());
-        self.calls.lock().unwrap_or_else(|p| p.into_inner()).push(("reveal", path.to_path_buf()));
-        Ok(())
-    }
-    fn open(&self, path: &Path) -> std::io::Result<()> {
-        if !path.is_absolute() {
-            return Err(not_absolute());
-        }
-        if is_risky_to_open(path) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "programs, scripts and web pages are not opened from VeloxFetch",
-            ));
-        }
-        eprintln!("[dry-run] would open {}", path.display());
-        self.calls.lock().unwrap_or_else(|p| p.into_inner()).push(("open", path.to_path_buf()));
-        Ok(())
-    }
-}
-
 fn spawn(cmd: &mut Command) -> std::io::Result<()> {
     cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map(|_| ())
 }

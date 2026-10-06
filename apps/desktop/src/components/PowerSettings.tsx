@@ -20,6 +20,7 @@ const LABEL: Record<PowerAction, Key> = {
 export function PowerSettings() {
   const t = useT();
   const power = useStore((s) => s.queue?.power);
+  const downloading = useStore((s) => (s.metrics?.active ?? 0) > 0);
   const [choice, setChoice] = useState<PowerAction>("shutdown");
 
   if (!power) {
@@ -29,9 +30,22 @@ export function PowerSettings() {
       </Panel>
     );
   }
+  // Keep the computer awake while downloading: independent of the one-shot action below.
+  const keepAwake = (
+    <div className="mb-4 border-b border-line pb-4">
+      <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+        <input type="checkbox" data-testid="keep-awake-toggle" checked={power.keepAwake} onChange={(e) => void actions.setKeepAwake(e.target.checked)} />
+        {t("power.keepAwake")}
+      </label>
+      <p className="mt-1 text-xs text-dim" data-testid="keep-awake-status" role="status">
+        {!power.keepAwakeAvailable && power.keepAwake ? t("power.keepAwakeUnavailable") : power.keepAwake && downloading ? t("power.keptAwake") : t("power.keepAwakeHint")}
+      </p>
+    </div>
+  );
   if (power.supported.length === 0) {
     return (
       <Panel title={t("power.title")} hint={t("power.hint")}>
+        {keepAwake}
         <p className="text-xs text-dim">{t("power.unsupported")}</p>
       </Panel>
     );
@@ -42,6 +56,7 @@ export function PowerSettings() {
 
   return (
     <Panel title={t("power.title")} hint={t("power.hint")}>
+      {keepAwake}
       {armed ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-[13px]" data-testid="power-status" role="status">

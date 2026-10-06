@@ -2,7 +2,7 @@
 //!
 //! ```text
 //!  user pause / schedule window ──► gate ──► SlotScheduler (max active, priority order)
-//!  everything finished ──► [armed?] ──► visible countdown ──► PowerExecutor (once, then disarmed)
+//!  everything finished ──► [armed?] ──► visible countdown ──► SystemIntegration::power (once, then disarmed)
 //! ```
 //! Design rules that keep this from regressing the rest of the manager:
 //! * The gate is *open* by default and a disabled schedule never closes it, so behaviour is
@@ -25,6 +25,7 @@ const MAX_CONNECTIONS_KEY: &str = "queue.max_connections";
 const PAUSED_KEY: &str = "queue.paused";
 const HELD_KEY: &str = "queue.held";
 const SCHEDULE_KEY: &str = "queue.schedule";
+const KEEP_AWAKE_KEY: &str = "power.keep_awake";
 
 const MIN_LIMIT: u32 = 1;
 /// Downloads running at once.
@@ -181,7 +182,7 @@ impl DownloadManager {
     /// action that runs after every download has finished.
     pub async fn set_power_action(&self, req: SetPowerAction) -> Result<QueueStateDto, ManagerError> {
         if let Some(a) = req.action {
-            if !self.inner.cfg.power.0.supported().contains(&a) {
+            if !self.inner.cfg.system.0.power_actions().contains(&a) {
                 return Err(ManagerError::invalid(format!("{a:?} is not supported on this system")));
             }
         }
@@ -207,6 +208,7 @@ impl DownloadManager {
                 let Some(inner) = weak.upgrade() else { return };
                 let mgr = DownloadManager { inner };
                 mgr.reconcile().await;
+                mgr.update_keep_awake();
                 mgr.check_power().await;
             }
         });
@@ -330,6 +332,43 @@ impl DownloadManager {
         }
     }
 
+    // ------------------------------------------------------------------ keep awake
+
+    /// Keep the computer from sleeping on its own while downloads run (on by default).
+    pub fn keep_awake_enabled(&self) -> bool {
+        self.inner.store.get_setting(KEEP_AWAKE_KEY).ok().flatten().is_none_or(|v| v != "false")
+    }
+
+    pub async fn set_keep_awake(&self, on: bool) -> Result<QueueStateDto, ManagerError> {
+        self.save_text(KEEP_AWAKE_KEY, Some(if on { "true" } else { "false" }.into())).await?;
+        self.inner.awake_unavailable.store(false, Ordering::Relaxed); // changed: try again
+        self.update_keep_awake();
+        self.emit_queue();
+        Ok(self.queue_dto())
+    }
+
+    /// Hold the computer awake exactly while something downloads (and the user wants it). Released before a
+    /// power action can run: by then nothing downloads.
+    pub(super) fn update_keep_awake(&self) {
+        let busy =
+            !self.inner.shutting_down.load(Ordering::Relaxed) && (!self.inner.active.lock().unwrap().is_empty() || self.media_busy());
+        let want = busy && self.keep_awake_enabled() && !self.inner.awake_unavailable.load(Ordering::Relaxed);
+        // No event: ordinary downloads never produce queue events (the UI shows "kept awake" from the live
+        // download count it already receives).
+        let mut slot = self.inner.awake.lock().unwrap();
+        match (want, slot.is_some()) {
+            (true, false) => match self.inner.cfg.system.0.keep_awake("Downloading files") {
+                Ok(guard) => *slot = Some(guard),
+                Err(e) => {
+                    tracing::warn!(error = %e, "cannot keep the computer awake while downloading");
+                    self.inner.awake_unavailable.store(true, Ordering::Relaxed);
+                }
+            },
+            (false, true) => *slot = None,
+            _ => {}
+        }
+    }
+
     // ------------------------------------------------------------------ power
 
     pub(super) async fn check_power(&self) {
@@ -371,8 +410,8 @@ impl DownloadManager {
             Next::StartCountdown | Next::Abort => self.emit_queue(),
             Next::Fire(action) => {
                 tracing::warn!(?action, "all downloads finished; running the power action that was armed");
-                let exec = self.inner.cfg.power.0.clone();
-                let res = tokio::task::spawn_blocking(move || exec.execute(action)).await;
+                let system = self.inner.cfg.system.0.clone();
+                let res = tokio::task::spawn_blocking(move || system.power(action)).await;
                 let err = match res {
                     Ok(Ok(())) => None,
                     Ok(Err(e)) => Some(e.to_string()),
@@ -414,8 +453,11 @@ impl DownloadManager {
                 phase,
                 countdown_ends_at_ms: q.power.deadline_ms,
                 grace_secs: self.inner.cfg.power_grace.as_secs(),
-                supported: self.inner.cfg.power.0.supported(),
+                supported: self.inner.cfg.system.0.power_actions(),
                 last_error: q.power.last_error.clone(),
+                keep_awake: self.keep_awake_enabled(),
+                kept_awake: self.inner.awake.lock().unwrap().is_some(),
+                keep_awake_available: !self.inner.awake_unavailable.load(Ordering::Relaxed),
             },
         }
     }

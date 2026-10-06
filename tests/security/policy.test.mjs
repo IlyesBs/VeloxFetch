@@ -501,6 +501,28 @@ test("the Phase 14 suites exist and the diagnostics commands take ids only", () 
   }
 });
 
+test("Phase 15: the operating system is reached through SystemIntegration only, real only in the app, never blocking a sleep the user asks for", () => {
+  // The download manager holds a SystemHandle; it never runs a program itself.
+  const bad = [];
+  for (const f of shippedRust()) {
+    const rel = path.relative(ROOT, f).split(path.sep).join("/");
+    if (rel.startsWith("crates/download-manager/") && /SystemPower|SystemShell|std::process::Command::new|tokio::process::Command::new/.test(withoutTestModules(fs.readFileSync(f, "utf8")))) bad.push(rel);
+  }
+  assert.deepEqual(bad, []);
+  const api = read("crates", "download-manager", "src", "api.rs");
+  assert.match(api, /system: SystemHandle\(Arc::new\(DryRunSystem::new\(\)\)\)/, "anything but the app gets the dry run by default");
+  const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  assert.match(lib, /cfg\.system = download_manager::SystemHandle::native\(\);/);
+  assert.ok(lib.includes("command!(set_keep_awake, SetKeepAwake, (enabled: bool)"), "the keep-awake command takes a yes / no only");
+  const sys = withoutTestModules(read("crates", "system-integration", "src", "system.rs"));
+  assert.ok(!/Command::new\("(sh|bash|cmd|cmd\.exe|powershell|powershell\.exe)"\)/.test(sys), "no shell");
+  assert.match(sys, /"--what=idle"/, "Linux: only the automatic sleep after inactivity is held off");
+  assert.match(sys, /"-i"\.into\(\), "-w"\.into\(\), pid\.to_string\(\)/, "macOS: idle sleep only, and it ends with the app");
+  assert.match(sys, /"on run argv"/, "macOS notification text travels as argv, never inside the script");
+  assert.match(sys, /"--"\.into\(\), n\.title\.clone\(\), n\.body\.clone\(\)/, "Linux notification text comes after --");
+  assert.match(sys, /xml_escape\(&n\.title\)/, "Windows toast text is escaped");
+});
+
 test("video tools are fetched only from fixed https sources, checked against the published checksum before use, one fixed entry out of an archive", () => {
   const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
   // The only sources are the official ones, compiled in (the UI can never name one).

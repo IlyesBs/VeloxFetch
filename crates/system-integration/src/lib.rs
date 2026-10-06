@@ -1,4 +1,5 @@
-//! Operating-system integration. Today: power actions (shutdown / sleep / hibernate).
+//! Operating-system integration: power actions (shutdown / sleep / hibernate), files, browsers, clipboard, and
+//! [`system::SystemIntegration`], the one door the download manager goes through.
 //!
 //! Safety rules, enforced here and by the caller (`download-manager`):
 //! * Nothing in this crate decides *when* to act. It only knows *how*. The manager runs an action
@@ -13,8 +14,9 @@ pub mod files;
 pub mod native_messaging;
 pub mod sandboxed_browsers;
 pub mod store_extension;
+pub mod system;
 
-use std::process::{Command, Stdio};
+pub use system::{DryRunSystem, KeepAwake, NativeSystem, Notification, ProtocolHandler, SystemCall, SystemError, SystemIntegration};
 
 use serde::{Deserialize, Serialize};
 
@@ -105,53 +107,6 @@ pub fn command_for(platform: Platform, action: PowerAction, system_root: &str) -
 /// Which actions this machine's OS can perform.
 pub fn supported_actions(platform: Platform) -> Vec<PowerAction> {
     PowerAction::ALL.into_iter().filter(|a| command_for(platform, *a, "C:\\Windows").is_some()).collect()
-}
-
-/// Carries out a power action. A trait so tests can never touch the real machine.
-pub trait PowerExecutor: Send + Sync {
-    fn supported(&self) -> Vec<PowerAction>;
-    fn execute(&self, action: PowerAction) -> Result<(), PowerError>;
-}
-
-/// The real thing.
-pub struct SystemPower;
-
-impl PowerExecutor for SystemPower {
-    fn supported(&self) -> Vec<PowerAction> {
-        supported_actions(Platform::current())
-    }
-
-    fn execute(&self, action: PowerAction) -> Result<(), PowerError> {
-        let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let c = command_for(Platform::current(), action, &root).ok_or(PowerError::Unsupported(action))?;
-        let status = Command::new(&c.program)
-            .args(&c.args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|e| PowerError::Spawn(e.kind().to_string()))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(PowerError::Failed(status.to_string()))
-        }
-    }
-}
-
-/// Pretends to act: logs and reports success without touching the machine. Used by debug builds
-/// (end-to-end tests) so the whole arm -> countdown -> "fire" flow can run safely.
-pub struct DryRunPower;
-
-impl PowerExecutor for DryRunPower {
-    fn supported(&self) -> Vec<PowerAction> {
-        PowerAction::ALL.to_vec()
-    }
-
-    fn execute(&self, action: PowerAction) -> Result<(), PowerError> {
-        eprintln!("[dry-run] power action {action:?} would run now");
-        Ok(())
-    }
 }
 
 #[cfg(test)]

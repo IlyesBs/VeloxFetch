@@ -230,6 +230,12 @@ export interface PowerState {
   graceSecs: number;
   supported: PowerAction[];
   lastError: string | null;
+  /** Keep the computer from sleeping on its own while downloads run (on by default). */
+  keepAwake: boolean;
+  /** It is being kept awake right now. */
+  keptAwake: boolean;
+  /** This system can do it (false once it failed here). */
+  keepAwakeAvailable: boolean;
 }
 
 /** `days[0]` is Monday; a day refers to the day the window starts. */

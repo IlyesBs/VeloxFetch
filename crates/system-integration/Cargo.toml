@@ -12,7 +12,9 @@ serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+# Notifications (Windows toasts, WinRT). The same version as the desktop app.
+windows = { version = "0.61", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation"] }
 
 # Clipboard text, on Windows (Win32), macOS (NSPasteboard) and Linux (X11 and, where the compositor
 # allows it, Wayland data-control). No image support: only text is ever read.

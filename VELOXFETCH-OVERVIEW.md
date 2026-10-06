@@ -376,8 +376,8 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 13 | Testing | ✅ | Unit, integration, crash (real processes), security, e2e |
 | 14 | Observability and diagnostics | ✅ | Per-download timeline, local redacted log, reports |
 | + | Extras before Phase 15 | ✅ | Smart throttle, live preview, 64 connections, neon glass UI, separate Active / Completed pages, real network / disk counters, delete from disk |
-| **15** | Cross-platform system integration | 🔜 | A `SystemIntegration` trait (notify, prevent sleep, shutdown / sleep, register protocol) per OS, so OS code never leaks into the downloader |
-| 16 | Windows | ⏳ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
+| 15 | Cross-platform system integration | ✅ | A `SystemIntegration` trait (notify, prevent sleep, shutdown / sleep, register protocol) per OS, so OS code never leaks into the downloader |
+| **16** | Windows | 🔜 | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ⏳ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ⏳ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
 | 19 | Auto update | ⏳ | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
@@ -385,7 +385,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
 | 22 | Beta | ⏳ | Internal alpha, then private beta, public beta, RC and stable; opt-in, documented crash and performance reports |
 
-> **Phase 15 starts only when the owner says "Start phase 15".**
+> **Phase 16 starts only when the owner says "Start phase 16".**
 
 ### Open items (known gaps)
 

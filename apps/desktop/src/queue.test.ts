@@ -15,7 +15,7 @@ const queue = (over: Partial<QueueState> = {}): QueueState => ({
   schedule: { enabled: false, start: "22:00", stop: "07:00", days: Array(7).fill(true) },
   scheduleOpen: true,
   nextChange: null,
-  power: { action: null, phase: "off", countdownEndsAtMs: null, graceSecs: 60, supported: ["shutdown", "sleep"], lastError: null },
+  power: { action: null, phase: "off", countdownEndsAtMs: null, graceSecs: 60, supported: ["shutdown", "sleep"], lastError: null, keepAwake: true, keptAwake: false, keepAwakeAvailable: true },
   ...over,
 });
 
