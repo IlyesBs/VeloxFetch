@@ -212,7 +212,9 @@ async fn a_tool_that_does_not_match_its_checksum_is_never_installed() {
         Err(ManagerError::InvalidInput(m)) => m,
         other => panic!("expected a refusal, got {other:?}"),
     };
-    assert!(why.contains("could not download yt-dlp") && why.contains("checksum"), "{why}");
+    // The user is told in plain words, without tool names (the checksum mismatch itself goes to the log).
+    assert!(why.contains("could not download the required dependencies"), "{why}");
+    assert!(!why.to_ascii_lowercase().contains("yt-dlp"), "{why}");
     assert!(!tools.join(exe("yt-dlp")).exists(), "nothing was installed");
     assert!(std::fs::read_dir(&tools).map(|d| d.flatten().all(|e| !e.file_name().to_string_lossy().contains("yt-dlp"))).unwrap_or(true));
 }

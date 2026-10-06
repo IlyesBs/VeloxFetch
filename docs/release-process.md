@@ -5,23 +5,28 @@ commit -> format -> lint -> unit tests -> integration tests -> security checks -
        -> build -> artifact hash -> sign -> release
 ```
 
-Implemented by `.github/workflows/ci.yml` (all three operating systems) and, identically, on a developer machine by
+Implemented by `.github/workflows/ci.yml` (tests) and `build.yml` (installers), on all three operating systems, and, identically, on a developer machine by
 `node scripts/security-gate.mjs`.
 
 ## CI/CD (GitHub Actions)
 
-`.github/workflows/ci.yml`, on every push to `main`, every pull request, and the "Run workflow" button:
+**Tests** (`.github/workflows/ci.yml`): every commit pushed to a branch other than `main` (and pull requests from
+forks):
 
 * `test` (Windows, Linux, macOS): format, lint, Rust / UI / extension / policy tests.
-* `security`: advisories, licences, the full gate, the SBOM (also weekly).
-* `build` (after `test`): `bash scripts/build-release.sh --skip-gate` on Windows x64, Linux x64 (Ubuntu 22.04, so
-  the packages run on older distributions), macOS Apple silicon and macOS Intel. Each run's `release/` folder
-  (installers, portable zip, extension zips, SHA256SUMS.txt) is kept 30 days as the artifact `VeloxFetch-<system>`.
-* `release` (a tag `v*`, after `build` and `security`, behind the protected `release` environment): gathers every
-  system's files, hashes them, and creates the GitHub release as a **private draft**. Unsigned installers are never
-  made public: check them (`docs/manual-test.md`), sign them, then publish the draft by hand.
+* `security`: advisories, licences, the full gate, the SBOM.
 
-To release: `git tag v0.1.0 && git push origin v0.1.0`.
+**Build** (`.github/workflows/build.yml`): no tests (the branch was tested on every commit before it is merged).
+Each system runs `bash scripts/build-release.sh --skip-gate`: Windows x64, Linux x64 (Ubuntu 22.04, so the packages
+run on older distributions), macOS Apple silicon and macOS Intel. Each `release/` folder (installers, portable zip,
+extension zips, SHA256SUMS.txt) is kept 30 days as the artifact `VeloxFetch-<system>-<branch>`.
+
+* **Push to `main`**: every system is built automatically.
+* **Try a branch before merging**: GitHub > Actions > Build > **Run workflow**, choose the branch and the systems
+  (all, Windows, Linux or macOS), then download the artifacts from the run and test them by hand.
+* **Tag `v*`**: the builds, then a GitHub release as a **private draft**. Unsigned installers are never made public:
+  check them (`docs/manual-test.md`), sign them, then publish the draft by hand.
+  `git tag v0.1.0 && git push origin v0.1.0`
 
 ## Building the full release (one command, any system)
 
@@ -73,8 +78,8 @@ The report is written to `release/security-gate-report.json`.
 
 ## Scheduling
 
-Advisories change daily even when the code does not. Run the `security` job of `ci.yml` on a weekly schedule as well
-(add `schedule: - cron: "17 4 * * 1"`), and read its result.
+Advisories change daily even when the code does not. The gate runs with the tests on every branch commit; between
+commits, run `node scripts/security-gate.mjs` now and then (or `bash scripts/build-release.sh`, which ends with it).
 
 ## Signing (not done yet: needs certificates only the owner can obtain)
 
