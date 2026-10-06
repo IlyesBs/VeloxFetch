@@ -60,7 +60,13 @@ fn start_app(ep: &Endpoint, dir: &std::path::Path) -> App {
 }
 
 fn cfg(ep: &Endpoint, dir: &std::path::Path) -> HostConfig {
-    HostConfig { endpoint: ep.clone(), data_dir: dir.to_path_buf(), app_exe: None, launch_wait: Duration::from_millis(300) }
+    HostConfig {
+        endpoint: ep.clone(),
+        data_dir: dir.to_path_buf(),
+        app_exe: None,
+        start_through_desktop: false,
+        launch_wait: Duration::from_millis(300),
+    }
 }
 
 fn caller() -> Caller {
@@ -174,6 +180,30 @@ async fn without_the_app_the_answer_is_a_clear_error_and_nothing_is_launched_for
     assert_eq!(r.error.unwrap().code, "app_not_running");
     let r = b.ask(dl("https://example.com/a")).await;
     assert_eq!(r.error.unwrap().code, "app_not_running", "no app_exe configured: never starts anything");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_app_is_started_for_a_download_but_never_for_a_ping_on_unix() {
+    use std::os::unix::fs::PermissionsExt;
+    let (ep, d) = (endpoint(&unique("launchu")), dir("launchu"));
+    let marker = d.join("launched.txt");
+    let script = d.join("fake-app.sh");
+    std::fs::write(&script, format!("#!/bin/sh\necho started > '{}'\n", marker.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut c = cfg(&ep, &d);
+    c.app_exe = Some(script);
+    let mut b = spawn_host(c);
+
+    let r = b.ask(json!({"command":"ping"})).await;
+    assert_eq!(r.error.unwrap().code, "app_not_running");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!marker.exists(), "a ping must never start the app");
+
+    let r = b.ask(dl("https://example.com/a")).await;
+    assert_eq!(r.error.unwrap().code, "app_not_running", "the fake app never opens the endpoint, so this times out");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(marker.exists(), "a download request starts the app");
 }
 
 #[cfg(windows)]

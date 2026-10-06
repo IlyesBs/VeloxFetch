@@ -249,6 +249,15 @@ fn run_to_end(c: &CommandSpec) -> Result<(), SystemError> {
     }
 }
 
+/// Linux: have the desktop see a handler added or removed right away (the desktop portal, which starts the app for
+/// a sandboxed browser, otherwise may not know it yet). Best effort: the tool is not on every system.
+fn refresh_desktop_database(desktop_file: &Path) {
+    if let Some(dir) = desktop_file.parent() {
+        let c = CommandSpec { program: "update-desktop-database".into(), args: vec![dir.to_string_lossy().into_owned()] };
+        let _ = run_to_end(&c);
+    }
+}
+
 // ------------------------------------------------------------------------------------- the real system
 
 /// The operating system this program runs on.
@@ -351,6 +360,7 @@ impl SystemIntegration for NativeSystem {
                     std::fs::create_dir_all(dir)?;
                 }
                 std::fs::write(&file, desktop_entry(h))?;
+                refresh_desktop_database(&file);
                 let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
                 let mime = format!("x-scheme-handler/{}", h.scheme);
                 run_to_end(&CommandSpec { program: "xdg-mime".into(), args: vec!["default".into(), name, mime] })
@@ -369,9 +379,13 @@ impl SystemIntegration for NativeSystem {
             Platform::Windows => windows::unregister_protocol(scheme),
             Platform::Linux => {
                 let Some(home) = self.data_home.as_deref() else { return Ok(()) };
-                match std::fs::remove_file(desktop_file(home, scheme)) {
+                let file = desktop_file(home, scheme);
+                match std::fs::remove_file(&file) {
                     Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e.into()),
-                    _ => Ok(()),
+                    _ => {
+                        refresh_desktop_database(&file);
+                        Ok(())
+                    }
                 }
             }
             _ => Ok(()),

@@ -153,6 +153,12 @@ Settings keys: `queue.max_active`, `queue.max_connections`, `queue.paused`, `que
                                                                     a download needs it                    then the manager
 ```
 
+* **A download while the app is closed.** The helper starts the app for a `download` (never for a `ping`) and
+  waits for its link. It finds the app by itself, never from a message (`browser_bridge::launch`): beside the
+  helper (Windows, portable), `../../bin` (Linux packages), `../MacOS` (macOS bundle), else the path the app
+  recorded in its data folder (`app-path`; an AppImage, whose helper is a copy in the data folder). A helper inside
+  a snap / Flatpak cannot start programs: it asks the desktop portal to open `veloxfetch://start`, a link the app
+  registers (Linux, while a sandboxed browser is connected). A second copy started meanwhile just leaves.
 * **Isolation.** The downloader knows nothing about browsers: `browser-bridge` has no dependency on the
   engine, and the app turns a validated handoff into an ordinary `create_download`. The extension can only
   reach the native host, and the host can only reach the app's link.
