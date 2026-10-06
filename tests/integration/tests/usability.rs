@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 
 use download_manager::{
     explain::Needs, DownloadDto, DownloadManager, FileTarget, ManagerConfig, NewDownload, ProxyMode, SetCredentials, SetNetwork,
-    SetSpeedLimit, ShellHandle, SpeedTarget,
+    SetSpeedLimit, SpeedTarget, SystemHandle,
 };
 use downloader_core::{DownloadStatus, FileKind};
-use system_integration::files::DryRunShell;
+use system_integration::DryRunSystem;
 use velox_integration_tests::{random_data, serve, Server};
 
 struct Env {
@@ -26,7 +26,7 @@ struct Env {
     m: DownloadManager,
     srv: Server,
     data: Arc<Vec<u8>>,
-    shell: Arc<DryRunShell>,
+    shell: Arc<DryRunSystem>,
     keys: Arc<secrets::MemoryKeyStore>,
 }
 
@@ -36,11 +36,11 @@ fn base_dir(name: &str) -> PathBuf {
     base
 }
 
-fn config(base: &Path, shell: &Arc<DryRunShell>, keys: &Arc<secrets::MemoryKeyStore>) -> ManagerConfig {
+fn config(base: &Path, shell: &Arc<DryRunSystem>, keys: &Arc<secrets::MemoryKeyStore>) -> ManagerConfig {
     let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
     c.progress_interval = Duration::from_millis(40);
     c.download.min_segment_size = 64 * 1024;
-    c.shell = ShellHandle(shell.clone());
+    c.system = SystemHandle(shell.clone());
     c.key_store = keys.clone();
     c
 }
@@ -49,7 +49,7 @@ async fn env(name: &str) -> Env {
     let base = base_dir(name);
     let data = random_data(200 * 1024, 77);
     let srv = serve(data.clone()).await;
-    let shell = Arc::new(DryRunShell::default());
+    let shell = Arc::new(DryRunSystem::default());
     let keys = Arc::new(secrets::MemoryKeyStore::default());
     let m = DownloadManager::new(config(&base, &shell, &keys)).await.unwrap();
     Env { base, m, srv, data, shell, keys }
@@ -305,7 +305,7 @@ async fn show_in_folder_and_open_use_saved_paths_and_never_open_programs() {
     let refused = e.m.open_file(FileTarget::Download { id: exe.id }).await.unwrap_err().to_string();
     assert!(refused.contains("does not open programs"), "{refused}");
 
-    let calls = e.shell.calls.lock().unwrap().clone();
+    let calls = e.shell.file_calls();
     assert_eq!(
         calls,
         vec![
@@ -325,7 +325,7 @@ async fn show_in_folder_and_open_use_saved_paths_and_never_open_programs() {
     std::fs::remove_file(&pdf.destination).unwrap();
     assert!(e.m.open_file(FileTarget::Download { id: pdf.id }).await.is_err());
     e.m.show_in_folder(FileTarget::Download { id: pdf.id }).await.unwrap();
-    assert_eq!(e.shell.calls.lock().unwrap().last().unwrap().1, PathBuf::from(&pdf.destination).parent().unwrap());
+    assert_eq!(e.shell.file_calls().last().unwrap().1, PathBuf::from(&pdf.destination).parent().unwrap());
     assert!(!e.m.list_history(10).await.unwrap().iter().find(|h| h.filename == "report.pdf").unwrap().exists);
 
     // Unknown ids.
@@ -350,10 +350,10 @@ async fn a_record_pointing_outside_the_download_folders_is_never_shown_or_opened
         downloader_core::DownloadStore::save(&store, &rec).unwrap();
     }
     let m = DownloadManager::new(config(&e.base, &e.shell, &e.keys)).await.unwrap();
-    let before = e.shell.calls.lock().unwrap().len();
+    let before = e.shell.file_calls().len();
     assert!(m.open_file(FileTarget::Download { id: d.id }).await.is_err());
     assert!(m.show_in_folder(FileTarget::Download { id: d.id }).await.is_err());
-    assert_eq!(e.shell.calls.lock().unwrap().len(), before, "nothing was shown or opened");
+    assert_eq!(e.shell.file_calls().len(), before, "nothing was shown or opened");
     let _ = std::fs::remove_file(outside);
 }
 

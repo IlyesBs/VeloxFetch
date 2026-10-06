@@ -209,6 +209,7 @@ async fn set_clipboard_watch(
 }
 
 command!(set_power_action, SetPowerAction, (request: SetPowerAction) -> QueueStateDto, |m| m.set_power_action(request));
+command!(set_keep_awake, SetKeepAwake, (enabled: bool) -> QueueStateDto, |m| m.set_keep_awake(enabled));
 
 // Where downloads go. No command takes a path: a folder is chosen in a native dialog that only Rust can open
 // (`pick_folder` / `choose_download_folder`), and the UI holds a token for it.
@@ -357,12 +358,10 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
     if !cfg!(debug_assertions) {
         return;
     }
-    if std::env::var_os("VELOX_DRY_RUN_POWER").is_some() {
-        cfg.power = download_manager::PowerHandle(std::sync::Arc::new(download_manager::DryRunPower));
-    }
-    // "Show in folder" / "Open" only print what they would do (the end-to-end tests must not open windows).
-    if std::env::var_os("VELOX_DRY_RUN_SHELL").is_some() {
-        cfg.shell = download_manager::ShellHandle(std::sync::Arc::new(system_integration::files::DryRunShell::default()));
+    // Power actions, "Show in folder" / "Open", keeping awake and notifications only print what they would do:
+    // the end-to-end tests must never shut the machine down or open windows.
+    if std::env::var_os("VELOX_DRY_RUN_POWER").is_some() || std::env::var_os("VELOX_DRY_RUN_SHELL").is_some() {
+        cfg.system = download_manager::SystemHandle(std::sync::Arc::new(download_manager::DryRunSystem::new()));
     }
     // A stand-in ffmpeg for the end-to-end tests (debug builds only; release builds never read it).
     if let Some(p) = dev_only("VELOX_YTDLP") {
@@ -651,6 +650,8 @@ pub fn run() {
             let log = start_log(&db_path_dir);
             let mut cfg = ManagerConfig::new(db_path, download_root);
             cfg.log = Some(log);
+            // The real operating system (power actions, files, keeping awake): only the app itself gets it.
+            cfg.system = download_manager::SystemHandle::native();
             // New files are sorted into Video / Audio / Documents / ... folders unless the user turns it off in Settings.
             cfg.organize_default = true;
             // yt-dlp, Deno and ffmpeg are fetched from their official servers the first time a video page needs
@@ -753,6 +754,7 @@ pub fn run() {
             resume_queue,
             set_schedule,
             set_power_action,
+            set_keep_awake,
             get_browser_integration,
             set_browser_integration,
             install_browser_extension,

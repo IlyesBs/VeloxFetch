@@ -4474,6 +4474,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "windows 0.61.3",
  "windows-sys 0.61.2",
  "winreg",
 ]

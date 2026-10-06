@@ -776,5 +776,11 @@
   "br.secretsMem": "Le stockage sécurisé n’est pas disponible sur ce système, les cookies et identifiants sont donc gardés en mémoire seulement : un téléchargement qui en avait besoin ne peut pas reprendre après un redémarrage de VeloxFetch.",
   "br.footer": "L’installation enregistre un petit programme d’aide pour votre compte uniquement ; Déconnecter le retire. Ce programme n’accepte que les requêtes de l’extension VeloxFetch, et VeloxFetch revérifie chaque requête avant de télécharger quoi que ce soit.",
   "note.noDepsSite": "Les dépendances requises ne sont pas prêtes, la vidéo a donc été enregistrée telle que le site l’envoie (sans assemblage HD ni changement de type). Téléchargez-les dans Paramètres > Dépendances requises.",
-  "note.noDepsJoin": "Les dépendances requises ne sont pas prêtes, le son est donc dans un fichier séparé. Téléchargez-les dans Paramètres > Dépendances requises pour que VeloxFetch les assemble."
+  "note.noDepsJoin": "Les dépendances requises ne sont pas prêtes, le son est donc dans un fichier séparé. Téléchargez-les dans Paramètres > Dépendances requises pour que VeloxFetch les assemble.",
+  "power.keepAwake": "Garder l'ordinateur éveillé pendant les téléchargements",
+  "power.keepAwakeHint": "Tant qu'un téléchargement est en cours, l'ordinateur ne se met pas en veille de lui-même. Une mise en veille demandée par vous a toujours lieu.",
+  "power.keptAwake": "Téléchargement en cours : l'ordinateur reste éveillé jusqu'à la fin.",
+  "power.keepAwakeUnavailable": "Ce système ne permet pas à VeloxFetch de le garder éveillé.",
+  "act.keepAwakeOn": "L'ordinateur reste éveillé pendant les téléchargements",
+  "act.keepAwakeOff": "L'ordinateur peut se mettre en veille pendant les téléchargements"
 }

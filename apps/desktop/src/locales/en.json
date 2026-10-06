@@ -776,5 +776,11 @@
   "br.secretsMem": "Secure storage is not available on this system, so cookies and sign-in details are kept in memory only: a download that needed them cannot resume after VeloxFetch restarts.",
   "br.footer": "Installing registers a small helper program for your user account only; Disconnect removes it. The helper accepts requests from the VeloxFetch extension alone, and VeloxFetch checks every request again before anything is downloaded.",
   "note.noDepsSite": "The required dependencies are not ready, so the video was saved as the site sends it (no HD join, no file type change). Download them in Settings > Required dependencies.",
-  "note.noDepsJoin": "The required dependencies are not ready, so the sound is a separate file. Download them in Settings > Required dependencies to have VeloxFetch combine them."
+  "note.noDepsJoin": "The required dependencies are not ready, so the sound is a separate file. Download them in Settings > Required dependencies to have VeloxFetch combine them.",
+  "power.keepAwake": "Keep the computer awake while downloading",
+  "power.keepAwakeHint": "While something downloads, the computer does not go to sleep on its own. A sleep you ask for still happens.",
+  "power.keptAwake": "Downloading: the computer stays awake until it finishes.",
+  "power.keepAwakeUnavailable": "This system does not let VeloxFetch keep it awake.",
+  "act.keepAwakeOn": "The computer stays awake while downloading",
+  "act.keepAwakeOff": "The computer may sleep while downloading"
 }

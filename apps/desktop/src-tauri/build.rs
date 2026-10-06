@@ -22,6 +22,7 @@ const COMMANDS: &[&str] = &[
     "resume_queue",
     "set_schedule",
     "set_power_action",
+    "set_keep_awake",
     "get_browser_integration",
     "set_browser_integration",
     "install_browser_extension",

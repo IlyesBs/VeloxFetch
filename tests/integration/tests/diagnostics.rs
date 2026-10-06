@@ -16,10 +16,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use download_manager::{
-    BrowserContext, DownloadDto, DownloadManager, ManagerConfig, ManagerError, NewDownload, ProxyMode, SetNetwork, ShellHandle,
+    BrowserContext, DownloadDto, DownloadManager, ManagerConfig, ManagerError, NewDownload, ProxyMode, SetNetwork, SystemHandle,
 };
 use downloader_core::{DownloadStatus, RetryPolicy};
-use system_integration::files::DryRunShell;
+use system_integration::DryRunSystem;
 use velox_integration_tests::{random_data, serve, Server};
 
 struct Env {
@@ -27,7 +27,7 @@ struct Env {
     m: DownloadManager,
     srv: Server,
     log: diagnostics::LogHandle,
-    shell: Arc<DryRunShell>,
+    shell: Arc<DryRunSystem>,
     keys: Arc<secrets::MemoryKeyStore>,
     _guard: tracing::dispatcher::DefaultGuard,
 }
@@ -42,13 +42,13 @@ fn new_log(base: &Path) -> diagnostics::LogHandle {
     diagnostics::LogHandle::new(diagnostics::LogConfig { dir: Some(base.join("logs")), ..Default::default() })
 }
 
-fn config(base: &Path, log: &diagnostics::LogHandle, shell: &Arc<DryRunShell>, keys: &Arc<secrets::MemoryKeyStore>) -> ManagerConfig {
+fn config(base: &Path, log: &diagnostics::LogHandle, shell: &Arc<DryRunSystem>, keys: &Arc<secrets::MemoryKeyStore>) -> ManagerConfig {
     let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
     c.progress_interval = Duration::from_millis(40);
     c.download.min_segment_size = 64 * 1024;
     c.download.retry =
         RetryPolicy { max_retries: 2, base_delay: Duration::from_millis(20), max_delay: Duration::from_millis(50), ..Default::default() };
-    c.shell = ShellHandle(shell.clone());
+    c.system = SystemHandle(shell.clone());
     c.key_store = keys.clone();
     c.log = Some(log.clone());
     c
@@ -59,7 +59,7 @@ async fn env(name: &str, size: usize) -> Env {
     let srv = serve(random_data(size, 14)).await;
     let log = new_log(&base);
     let guard = tracing::dispatcher::set_default(&log.dispatch());
-    let shell = Arc::new(DryRunShell::default());
+    let shell = Arc::new(DryRunSystem::default());
     let keys = Arc::new(secrets::MemoryKeyStore::default());
     let m = DownloadManager::new(config(&base, &log, &shell, &keys)).await.unwrap();
     Env { base, m, srv, log, shell, keys, _guard: guard }
@@ -243,7 +243,7 @@ async fn detailed_logging_is_remembered_and_the_log_folder_is_shown_not_named() 
 
     // "Open log folder": the file manager shows the log file (a dry run here); the path came from Rust.
     e.m.open_log_folder().await.unwrap();
-    let calls = e.shell.calls.lock().unwrap().clone();
+    let calls = e.shell.file_calls();
     assert_eq!(calls.last().unwrap(), &("reveal", e.base.join("logs").join("velox.log")));
     assert!(e.base.join("logs").join("velox.log").is_file());
 

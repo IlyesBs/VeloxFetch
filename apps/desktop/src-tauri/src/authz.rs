@@ -32,6 +32,7 @@ pub enum Command {
     ResumeQueue,
     SetSchedule,
     SetPowerAction,
+    SetKeepAwake,
     GetBrowserIntegration,
     SetBrowserIntegration,
     InstallBrowserExtension,
@@ -83,7 +84,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 67] = [
+    pub const ALL: [Command; 68] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -104,6 +105,7 @@ impl Command {
         Command::ResumeQueue,
         Command::SetSchedule,
         Command::SetPowerAction,
+        Command::SetKeepAwake,
         Command::GetBrowserIntegration,
         Command::SetBrowserIntegration,
         Command::InstallBrowserExtension,
@@ -176,6 +178,7 @@ impl Command {
             Command::ResumeQueue => "resume_queue",
             Command::SetSchedule => "set_schedule",
             Command::SetPowerAction => "set_power_action",
+            Command::SetKeepAwake => "set_keep_awake",
             Command::GetBrowserIntegration => "get_browser_integration",
             Command::SetBrowserIntegration => "set_browser_integration",
             Command::InstallBrowserExtension => "install_browser_extension",
@@ -303,6 +306,7 @@ mod tests {
             Command::ResumeQueue,
             Command::SetSchedule,
             Command::SetPowerAction,
+            Command::SetKeepAwake,
             Command::GetBrowserIntegration,
             Command::SetBrowserIntegration,
             Command::InstallBrowserExtension,

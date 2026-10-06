@@ -26,6 +26,7 @@
     "allow-resume-queue",
     "allow-set-schedule",
     "allow-set-power-action",
+    "allow-set-keep-awake",
     "allow-get-browser-integration",
     "allow-set-browser-integration",
     "allow-install-browser-extension",

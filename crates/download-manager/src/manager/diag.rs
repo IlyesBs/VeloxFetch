@@ -384,8 +384,8 @@ impl DownloadManager {
             .as_ref()
             .and_then(|l| l.file())
             .ok_or_else(|| ManagerError::invalid("the log is not kept in a file here"))?;
-        let shell = self.inner.cfg.shell.clone();
-        tokio::task::spawn_blocking(move || shell.0.reveal(&file))
+        let system = self.inner.cfg.system.clone();
+        tokio::task::spawn_blocking(move || system.0.reveal(&file))
             .await
             .map_err(|e| ManagerError::Internal(e.to_string()))?
             .map_err(|e| ManagerError::Internal(format!("cannot open the file manager: {e}")))

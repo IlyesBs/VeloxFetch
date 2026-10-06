@@ -115,6 +115,10 @@ struct Inner {
     /// Serialises changes to the saved diagnostics of downloads (a run ending while the next one starts).
     diag_lock: tokio::sync::Mutex<()>,
     shutting_down: AtomicBool,
+    /// Held while downloads run (and the user wants it): the computer does not sleep on its own.
+    awake: Mutex<Option<system_integration::KeepAwake>>,
+    /// Keeping awake failed on this system: not tried again until the setting is changed.
+    awake_unavailable: AtomicBool,
     /// yt-dlp hung or failed with Deno and worked without it on this computer: until the app restarts,
     /// video pages are read and downloaded without a JavaScript runtime.
     js_broken: AtomicBool,
@@ -250,6 +254,8 @@ impl DownloadManager {
             queue_lock: tokio::sync::Mutex::new(()),
             diag_lock: tokio::sync::Mutex::new(()),
             shutting_down: AtomicBool::new(false),
+            awake: Mutex::new(None),
+            awake_unavailable: AtomicBool::new(false),
             js_broken: AtomicBool::new(false),
             secrets_sealed,
             storage,
@@ -439,6 +445,7 @@ impl DownloadManager {
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Updated { download: dto.clone() });
         self.note_start(id, previous).await;
+        self.update_keep_awake();
 
         let this = self.clone();
         tokio::spawn(async move {
@@ -696,6 +703,7 @@ impl DownloadManager {
     /// Pause everything and wait for it to finish saving. Call before the application exits.
     pub async fn shutdown(&self) {
         self.inner.shutting_down.store(true, Ordering::Relaxed); // no queue/power decisions while exiting
+        self.inner.awake.lock().unwrap().take(); // the computer may sleep again
         let running: Vec<_> = {
             let active = self.inner.active.lock().unwrap();
             active.values().map(|a| (a.control.clone(), a.done.clone())).collect()
@@ -734,6 +742,7 @@ impl DownloadManager {
             self.inner.session_bytes.fetch_add(a.progress.received().saturating_sub(last), Ordering::Relaxed);
         }
         self.note_end(id, ended.as_ref().map(|a| &a.progress), peak, &res).await;
+        self.update_keep_awake(); // the computer may sleep again as soon as nothing downloads
         if let Err(e) = &res {
             if !matches!(e, DownloadError::Paused | DownloadError::Cancelled) {
                 // Errors before the transfer was planned (e.g. the probe failed) leave the record

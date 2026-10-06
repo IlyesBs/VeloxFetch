@@ -81,6 +81,7 @@ export const api = {
   resumeQueue: () => call<QueueState>("resume_queue"),
   setSchedule: (schedule: Schedule) => call<QueueState>("set_schedule", { schedule }),
   setPowerAction: (action: PowerAction | null) => call<QueueState>("set_power_action", { request: { action } }),
+  setKeepAwake: (enabled: boolean) => call<QueueState>("set_keep_awake", { enabled }),
   getBrowserIntegration: () => call<BrowserIntegration>("get_browser_integration"),
   previewBatch: (request: BatchRequest) => call<BatchPreview>("preview_batch", { request }),
   addBatch: (request: BatchRequest) => call<BatchResult>("add_batch", { request }),

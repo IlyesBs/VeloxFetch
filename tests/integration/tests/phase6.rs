@@ -8,12 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use download_manager::{
-    Clock, DownloadManager, ManagerConfig, ManagerError, ManagerEvent, NewDownload, PauseQueue, PowerAction, PowerHandle, PowerPhase,
-    QueueStateDto, Schedule, SetPowerAction, SetQueueConfig,
+    Clock, DownloadManager, ManagerConfig, ManagerError, ManagerEvent, NewDownload, PauseQueue, PowerAction, PowerPhase, QueueStateDto,
+    Schedule, SetPowerAction, SetQueueConfig, SystemHandle,
 };
 use downloader_core::{AdaptiveConfig, DownloadStatus, RetryPolicy};
 use scheduler::chrono::{NaiveDate, NaiveDateTime};
-use system_integration::{PowerError, PowerExecutor};
+use system_integration::DryRunSystem;
 use velox_integration_tests::{random_data, serve, Server};
 
 const MB: usize = 1024 * 1024;
@@ -51,39 +51,15 @@ impl FakeClock {
 }
 
 /// Records what would have been run. Nothing in this test file can touch the real machine.
-struct FakePower {
-    calls: Mutex<Vec<PowerAction>>,
-    supported: Vec<PowerAction>,
-    fail: bool,
-}
-
-impl FakePower {
-    fn new() -> Arc<Self> {
-        Arc::new(Self { calls: Mutex::new(Vec::new()), supported: PowerAction::ALL.to_vec(), fail: false })
-    }
-    fn calls(&self) -> Vec<PowerAction> {
-        self.calls.lock().unwrap().clone()
-    }
-}
-
-impl PowerExecutor for FakePower {
-    fn supported(&self) -> Vec<PowerAction> {
-        self.supported.clone()
-    }
-    fn execute(&self, action: PowerAction) -> Result<(), PowerError> {
-        self.calls.lock().unwrap().push(action);
-        if self.fail {
-            Err(PowerError::Failed("simulated".into()))
-        } else {
-            Ok(())
-        }
-    }
+/// The pretend system, with control over which power actions exist and whether running one fails.
+fn fake_power() -> Arc<DryRunSystem> {
+    Arc::new(DryRunSystem::new())
 }
 
 struct Opts {
     slots: usize,
     clock: Option<FakeClock>,
-    power: Option<Arc<dyn PowerExecutor>>,
+    power: Option<Arc<DryRunSystem>>,
     grace: Duration,
     adaptive: bool,
 }
@@ -107,7 +83,7 @@ async fn manager_at(e: &Env, o: Opts) -> DownloadManager {
         c.clock = clock.clock();
     }
     if let Some(p) = o.power {
-        c.power = PowerHandle(p);
+        c.system = SystemHandle(p);
     }
     DownloadManager::new(c).await.unwrap()
 }
@@ -637,15 +613,48 @@ async fn with_a_schedule_a_restart_inside_the_window_starts_the_waiting_queue() 
 // ============================================================ power actions
 
 #[tokio::test]
+async fn the_computer_is_kept_awake_exactly_while_downloading_unless_the_user_turns_it_off() {
+    let srv = serve(random_data(2 * MB, 17)).await;
+    let e = env("keep-awake");
+    let system = fake_power();
+    let m = manager_at(&e, Opts { power: Some(system.clone()), ..Default::default() }).await;
+    let s = qs(&m).await.power;
+    assert!(s.keep_awake && !s.kept_awake && s.keep_awake_available, "on by default, nothing held while idle");
+
+    let d = m.create_download(slow(&srv, "/a.bin", MB as u64)).await.unwrap();
+    until("held while downloading", 5, || async { system.awake_holds() == 1 }).await;
+    assert!(qs(&m).await.power.kept_awake);
+    wait_status(&m, d.id, DownloadStatus::Completed).await;
+    until("released when done", 5, || async { system.awake_holds() == 0 }).await;
+    assert!(!qs(&m).await.power.kept_awake);
+
+    // Turned off: a download no longer holds the computer awake; turned off during one, it is released at once.
+    let d = m.create_download(slow(&srv, "/b.bin", MB as u64)).await.unwrap();
+    until("held", 5, || async { system.awake_holds() == 1 }).await;
+    let s = m.set_keep_awake(false).await.unwrap();
+    assert!(!s.power.keep_awake && !s.power.kept_awake);
+    assert_eq!(system.awake_holds(), 0);
+    wait_status(&m, d.id, DownloadStatus::Completed).await;
+    let d = m.create_download(slow(&srv, "/c.bin", MB as u64)).await.unwrap();
+    wait_status(&m, d.id, DownloadStatus::Downloading).await;
+    stays(&m, d.id, DownloadStatus::Downloading, 600).await;
+    assert_eq!(system.awake_holds(), 0, "off means off");
+    assert!(!qs(&m).await.power.keep_awake, "the choice is saved");
+    // Exactly one hold was taken per busy period, never one per download.
+    let takes = system.calls().iter().filter(|c| matches!(c, system_integration::SystemCall::KeepAwake(_))).count();
+    assert_eq!(takes, 2);
+}
+
+#[tokio::test]
 async fn power_action_is_off_by_default_and_never_runs_unless_armed() {
     let srv = serve(random_data(MB, 15)).await;
     let e = env("power-off");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(100), ..Default::default() }).await;
     let d = m.create_download(fast(&srv, "/a.bin")).await.unwrap();
     wait_status(&m, d.id, DownloadStatus::Completed).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(power.calls().is_empty(), "nothing may happen without explicit configuration");
+    assert!(power.power_calls().is_empty(), "nothing may happen without explicit configuration");
     assert_eq!(qs(&m).await.power.phase, PowerPhase::Off);
 }
 
@@ -653,24 +662,24 @@ async fn power_action_is_off_by_default_and_never_runs_unless_armed() {
 async fn armed_action_runs_once_after_everything_finished_with_a_visible_countdown() {
     let srv = serve(random_data(3 * MB, 16)).await;
     let e = env("power-fire");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(600), ..Default::default() }).await;
     let mut rx = m.subscribe();
 
     let s = m.set_power_action(SetPowerAction { action: Some(PowerAction::Shutdown) }).await.unwrap();
     assert_eq!((s.power.action, s.power.phase), (Some(PowerAction::Shutdown), PowerPhase::Armed));
     tokio::time::sleep(Duration::from_millis(800)).await;
-    assert!(power.calls().is_empty(), "armed with nothing downloaded must not fire");
+    assert!(power.power_calls().is_empty(), "armed with nothing downloaded must not fire");
 
     let a = m.create_download(slow(&srv, "/a.bin", 2 * MB as u64)).await.unwrap();
     let b = m.create_download(slow(&srv, "/b.bin", 3 * MB as u64)).await.unwrap();
     wait_status(&m, a.id, DownloadStatus::Completed).await;
-    assert!(power.calls().is_empty(), "b is still running");
+    assert!(power.power_calls().is_empty(), "b is still running");
     wait_status(&m, b.id, DownloadStatus::Completed).await;
 
-    until("the action runs", 5, || async { !power.calls().is_empty() }).await;
+    until("the action runs", 5, || async { !power.power_calls().is_empty() }).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(power.calls(), vec![PowerAction::Shutdown], "exactly once");
+    assert_eq!(power.power_calls(), vec![PowerAction::Shutdown], "exactly once");
     assert_eq!(qs(&m).await.power.phase, PowerPhase::Off, "one-shot: disarmed after firing");
 
     let mut phases = Vec::new();
@@ -692,7 +701,7 @@ async fn armed_action_runs_once_after_everything_finished_with_a_visible_countdo
 async fn cancelling_during_the_countdown_prevents_the_action() {
     let srv = serve(random_data(MB, 17)).await;
     let e = env("power-cancel");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(1500), ..Default::default() }).await;
     m.set_power_action(SetPowerAction { action: Some(PowerAction::Hibernate) }).await.unwrap();
     let d = m.create_download(fast(&srv, "/a.bin")).await.unwrap();
@@ -702,14 +711,14 @@ async fn cancelling_during_the_countdown_prevents_the_action() {
     let s = m.set_power_action(SetPowerAction { action: None }).await.unwrap();
     assert_eq!(s.power.phase, PowerPhase::Off);
     tokio::time::sleep(Duration::from_millis(2000)).await;
-    assert!(power.calls().is_empty(), "a cancelled countdown must never run");
+    assert!(power.power_calls().is_empty(), "a cancelled countdown must never run");
 }
 
 #[tokio::test]
 async fn a_new_download_during_the_countdown_aborts_it_and_the_action_waits_for_that_one_too() {
     let srv = serve(random_data(4 * MB, 18)).await;
     let e = env("power-abort");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(1200), ..Default::default() }).await;
     m.set_power_action(SetPowerAction { action: Some(PowerAction::Sleep) }).await.unwrap();
     let a = m.create_download(fast(&srv, "/a.bin")).await.unwrap();
@@ -718,17 +727,17 @@ async fn a_new_download_during_the_countdown_aborts_it_and_the_action_waits_for_
 
     let b = m.create_download(slow(&srv, "/b.bin", 2 * MB as u64)).await.unwrap(); // ~2 s
     until("countdown aborted", 5, || async { qs(&m).await.power.phase == PowerPhase::Armed }).await;
-    assert!(power.calls().is_empty());
+    assert!(power.power_calls().is_empty());
     wait_status(&m, b.id, DownloadStatus::Completed).await;
-    until("fires after b", 8, || async { !power.calls().is_empty() }).await;
-    assert_eq!(power.calls(), vec![PowerAction::Sleep]);
+    until("fires after b", 8, || async { !power.power_calls().is_empty() }).await;
+    assert_eq!(power.power_calls(), vec![PowerAction::Sleep]);
 }
 
 #[tokio::test]
 async fn pausing_a_download_yourself_does_not_count_as_finished() {
     let srv = serve(random_data(6 * MB, 19)).await;
     let e = env("power-userpause");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(200), ..Default::default() }).await;
     let d = m.create_download(slow(&srv, "/a.bin", 2 * MB as u64)).await.unwrap();
     until("transferring", 10, || async { m.get_download(d.id).await.unwrap().downloaded > 0 }).await;
@@ -736,36 +745,36 @@ async fn pausing_a_download_yourself_does_not_count_as_finished() {
 
     m.pause_download(d.id).await.unwrap();
     tokio::time::sleep(Duration::from_millis(900)).await;
-    assert!(power.calls().is_empty(), "an unfinished, user-paused download must not trigger shutdown");
+    assert!(power.power_calls().is_empty(), "an unfinished, user-paused download must not trigger shutdown");
     assert_eq!(qs(&m).await.power.phase, PowerPhase::Armed);
 
     m.resume_download(d.id).await.unwrap();
     wait_status(&m, d.id, DownloadStatus::Completed).await;
-    until("fires after completion", 5, || async { !power.calls().is_empty() }).await;
+    until("fires after completion", 5, || async { !power.power_calls().is_empty() }).await;
 }
 
 #[tokio::test]
 async fn downloads_held_by_the_queue_keep_the_power_action_from_firing() {
     let srv = serve(random_data(8 * MB, 20)).await;
     let e = env("power-held");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(200), ..Default::default() }).await;
     let d = m.create_download(slow(&srv, "/a.bin", 3 * MB as u64)).await.unwrap();
     until("transferring", 10, || async { m.get_download(d.id).await.unwrap().downloaded > 0 }).await;
     m.set_power_action(SetPowerAction { action: Some(PowerAction::Shutdown) }).await.unwrap();
     m.pause_queue(PauseQueue { pause_running: true }).await.unwrap();
     tokio::time::sleep(Duration::from_millis(900)).await;
-    assert!(power.calls().is_empty());
+    assert!(power.power_calls().is_empty());
     m.resume_queue().await.unwrap();
     wait_status(&m, d.id, DownloadStatus::Completed).await;
-    until("fires", 5, || async { !power.calls().is_empty() }).await;
+    until("fires", 5, || async { !power.power_calls().is_empty() }).await;
 }
 
 #[tokio::test]
 async fn unsupported_actions_are_rejected_and_executor_errors_are_reported() {
     let srv = serve(random_data(MB, 21)).await;
     let e = env("power-errors");
-    let only_sleep = Arc::new(FakePower { calls: Mutex::new(Vec::new()), supported: vec![PowerAction::Sleep], fail: true });
+    let only_sleep = Arc::new(DryRunSystem::new().with_power(vec![PowerAction::Sleep], true));
     let m = manager_at(&e, Opts { power: Some(only_sleep.clone()), grace: Duration::from_millis(100), ..Default::default() }).await;
 
     assert!(matches!(
@@ -778,26 +787,26 @@ async fn unsupported_actions_are_rejected_and_executor_errors_are_reported() {
     m.set_power_action(SetPowerAction { action: Some(PowerAction::Sleep) }).await.unwrap();
     let d = m.create_download(fast(&srv, "/a.bin")).await.unwrap();
     wait_status(&m, d.id, DownloadStatus::Completed).await;
-    until("attempted", 5, || async { !only_sleep.calls().is_empty() }).await;
+    until("attempted", 5, || async { !only_sleep.power_calls().is_empty() }).await;
     until("error reported", 5, || async { qs(&m).await.power.last_error.is_some() }).await;
     let s = qs(&m).await;
     assert_eq!(s.power.phase, PowerPhase::Off, "a failed attempt is not retried");
     tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(only_sleep.calls().len(), 1);
+    assert_eq!(only_sleep.power_calls().len(), 1);
 }
 
 #[tokio::test]
 async fn shutting_the_manager_down_disarms_everything() {
     let srv = serve(random_data(MB, 22)).await;
     let e = env("power-shutdown");
-    let power = FakePower::new();
+    let power = fake_power();
     let m = manager_at(&e, Opts { power: Some(power.clone()), grace: Duration::from_millis(100), ..Default::default() }).await;
     m.set_power_action(SetPowerAction { action: Some(PowerAction::Shutdown) }).await.unwrap();
     let d = m.create_download(slow(&srv, "/a.bin", 512 * 1024)).await.unwrap();
     until("transferring", 10, || async { m.get_download(d.id).await.unwrap().downloaded > 0 }).await;
     m.shutdown().await; // the app is exiting: everything paused
     tokio::time::sleep(Duration::from_millis(800)).await;
-    assert!(power.calls().is_empty(), "exiting the app must not trigger a power action");
+    assert!(power.power_calls().is_empty(), "exiting the app must not trigger a power action");
 
     // A restart never inherits an armed action.
     let m2 = manager_at(&e, Opts { power: Some(power.clone()), ..Default::default() }).await;

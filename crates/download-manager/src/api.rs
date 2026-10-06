@@ -10,8 +10,7 @@ use downloader_core::{DownloadError, DownloadStatus, Priority, SegmentStatus};
 use scheduler::chrono::NaiveDateTime;
 pub use scheduler::Schedule;
 use serde::{Deserialize, Serialize};
-use system_integration::PowerExecutor;
-pub use system_integration::{DryRunPower, PowerAction};
+pub use system_integration::{DryRunSystem, NativeSystem, PowerAction, SystemIntegration};
 
 /// Everything the UI is allowed to specify when creating a download.
 #[derive(Clone, Default, Deserialize)]
@@ -711,6 +710,12 @@ pub struct PowerStateDto {
     /// What this operating system can do.
     pub supported: Vec<PowerAction>,
     pub last_error: Option<String>,
+    /// The user wants the computer kept awake while downloads run (on by default).
+    pub keep_awake: bool,
+    /// It is being kept awake right now.
+    pub kept_awake: bool,
+    /// This system can do it (false once it failed here).
+    pub keep_awake_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -750,23 +755,21 @@ impl std::fmt::Debug for Clock {
     }
 }
 
-/// Performs power actions. Replaceable so tests can never shut down the machine they run on.
+/// The operating system: power actions, files, keeping awake, notifications (see
+/// `system_integration::system`). Replaceable so tests never touch the machine they run on.
 #[derive(Clone)]
-pub struct PowerHandle(pub Arc<dyn PowerExecutor>);
+pub struct SystemHandle(pub Arc<dyn SystemIntegration>);
 
-impl std::fmt::Debug for PowerHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("PowerHandle")
+impl SystemHandle {
+    /// The machine this program runs on. Only the app passes it: everything else gets the dry run.
+    pub fn native() -> Self {
+        Self(Arc::new(NativeSystem::new()))
     }
 }
 
-/// Shows files in the file manager and opens them. Replaceable so tests never open windows.
-#[derive(Clone)]
-pub struct ShellHandle(pub Arc<dyn system_integration::files::FileShell>);
-
-impl std::fmt::Debug for ShellHandle {
+impl std::fmt::Debug for SystemHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("ShellHandle")
+        f.write_str("SystemHandle")
     }
 }
 
@@ -868,9 +871,8 @@ pub struct ManagerConfig {
     /// Visible, cancellable countdown before a power action runs.
     pub power_grace: std::time::Duration,
     pub clock: Clock,
-    pub power: PowerHandle,
-    /// "Show in folder" / "Open" (the system's file manager; tests use a dry run).
-    pub shell: ShellHandle,
+    /// The operating system. A dry run unless the app passes [`SystemHandle::native`].
+    pub system: SystemHandle,
     /// Use this ffmpeg instead of looking for one (tests only; the desktop app honours it in debug
     /// builds only).
     pub ffmpeg_path: Option<PathBuf>,
@@ -913,8 +915,7 @@ impl ManagerConfig {
             queue_poll: std::time::Duration::from_secs(1),
             power_grace: std::time::Duration::from_secs(60),
             clock: Clock::system(),
-            power: PowerHandle(Arc::new(system_integration::SystemPower)),
-            shell: ShellHandle(Arc::new(system_integration::files::SystemShell)),
+            system: SystemHandle(Arc::new(DryRunSystem::new())),
             ffmpeg_path: None,
             ytdlp_path: None,
             tools: ToolSources::default(),
