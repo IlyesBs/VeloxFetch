@@ -204,7 +204,7 @@ link --analyze_media--> qualities / audio / subtitles (nothing written)
 ```
 
 * `crates/media-engine`: `hls.rs` and `dash.rs` (pure parsers, no I/O), `download.rs` (fetch, assemble, names), `ffmpeg.rs` (find + run). Everything but `ffmpeg.rs` and the HTTP client is identical on every OS; `ffmpeg.rs` differs only by `CREATE_NO_WINDOW` on Windows and an executable-bit check on Unix.
-* `scripts/security-gate.mjs` and `tests/security/policy.test.mjs` are the Phase 12 gate: they read the repository and the tools' output, so they run the same on every OS and in CI (`.github/workflows/ci.yml`). Nothing in them is Windows-specific.
+* `scripts/security-gate.mjs` and `tests/security/policy.test.mjs` are the Phase 12 gate: they read the repository and the tools' output, so they run the same on every OS and in CI (`.github/workflows/ci.yml`, `build.yml`). Nothing in them is Windows-specific.
 * `crates/secrets`: pure Rust (`keyring` picks the store per OS: Windows Credential Manager, macOS Keychain, the Secret Service over D-Bus without C libraries on Linux). Compile-checked for Linux, macOS and Windows; the real store round trip is tested on Windows with `VELOX_TEST_OS_KEYRING=1`.
 * `crates/path-safety`: pure `std` (plus `libc::O_NOFOLLOW` on Unix); the rules are the strictest of the three OSes, so a saved name is valid wherever the file is later copied. Link tests use folder junctions on Windows (no privilege needed) and symlinks on Unix.
 * `crates/download-manager/src/manager/media.rs`: the job list (in memory, at most 3 running, 100 kept), progress events (`media`, `mediaRemoved`), the shutdown hook, and the "busy" flag the power trigger honours.

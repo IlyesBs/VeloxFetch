@@ -184,20 +184,29 @@ test("cargo-deny is configured to reject unknown registries, git sources, wildca
 // 12.4 Build pipeline and release integrity
 
 test("CI runs every security step, from a locked dependency set, on all three operating systems", () => {
-  assert.ok(exists(".github", "workflows", "ci.yml"), "the CI workflow is missing");
+  assert.ok(exists(".github", "workflows", "ci.yml"), "the test workflow is missing");
+  assert.ok(exists(".github", "workflows", "build.yml"), "the build workflow is missing");
   const ci = read(".github", "workflows", "ci.yml");
-  for (const step of ["cargo fmt", "cargo clippy", "cargo test", "cargo audit", "cargo deny", "npm audit", "npm ci", "security-gate", "sbom", "sha256"]) {
-    assert.match(ci, new RegExp(step, "i"), `CI has no "${step}" step`);
+  const build = read(".github", "workflows", "build.yml");
+  for (const step of ["cargo fmt", "cargo clippy", "cargo test", "cargo audit", "cargo deny", "npm audit", "npm ci", "security-gate", "sbom"]) {
+    assert.match(ci, new RegExp(step, "i"), `the tests have no "${step}" step`);
   }
-  assert.match(ci, /windows-latest/);
-  assert.match(ci, /macos-latest/);
-  assert.match(ci, /ubuntu-latest/);
+  for (const os of ["windows-latest", "macos-latest", "ubuntu-latest"]) assert.match(ci, new RegExp(os), `tests on ${os}`);
+  for (const os of ["windows-latest", "macos-latest", "ubuntu-22.04"]) assert.match(build, new RegExp(os), `build on ${os}`);
+  assert.match(ci, /branches-ignore: \[main\]/, "every commit of a branch is tested");
+  assert.match(build, /scripts\/build-release\.sh/, "CI builds exactly like a local build (locked installs, SHA256SUMS)");
+  assert.match(build, /workflow_dispatch:/, "a branch can be built by hand before it is merged");
+  assert.match(build, /sha256sum/, "the published files are hashed");
+  assert.match(build, /--draft/, "a release is never published unsigned");
   assert.match(ci, /--locked/, "builds must not update the lockfile");
-  assert.doesNotMatch(ci, /pull_request_target/, "untrusted pull requests must never run with secrets");
-  assert.match(ci, /permissions:\s*\n\s*contents:\s*read/, "the workflow token is read-only by default");
-  // Third-party actions are pinned to a full commit hash, not a movable tag.
-  for (const m of ci.matchAll(/uses:\s*([^\s@]+)@([^\s#]+)/g)) {
-    assert.match(m[2], /^[0-9a-f]{40}$/, `${m[1]}@${m[2]} is not pinned to a commit`);
+  assert.match(read("scripts", "build-release.sh"), /cargo build --release --locked/);
+  for (const wf of [ci, build]) {
+    assert.doesNotMatch(wf, /pull_request_target/, "untrusted pull requests must never run with secrets");
+    assert.match(wf, /permissions:\s*\n\s*contents:\s*read/, "the workflow token is read-only by default");
+    // Third-party actions are pinned to a full commit hash, not a movable tag.
+    for (const m of wf.matchAll(/uses:\s*([^\s@]+)@([^\s#]+)/g)) {
+      assert.match(m[2], /^[0-9a-f]{40}$/, `${m[1]}@${m[2]} is not pinned to a commit`);
+    }
   }
 });
 
