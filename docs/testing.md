@@ -113,6 +113,15 @@ The tests were run on Windows; the same tests run in CI on Linux and macOS (the 
 * **Pause / Cancel waited for a slow server** (Phase 12 for streams, Phase 13 for ordinary downloads): while the engine waited for the answer to its first request, Pause and Cancel were not observed (up to the 30 s request timeout, per retry). Fixed in `probe_with_retry`.
 * **No free-space check**: a server (or a mistake) announcing a size larger than the disk was passed straight to the pre-allocation. It is now refused first, with the reason shown ("not enough free disk space").
 * **`Retry-After` as an HTTP date was ignored** (only the number of seconds was understood). Both forms are parsed now.
+* **A store selector that built a new array looped React** (found by `desktop-smart-queue.mjs` while building the Smart Download Queue,
+  before it shipped): `useStore((s) => s.queues?.queues ?? [])` answered a new `[]` on every read while the queues were not loaded,
+  so the window showed "Something went wrong". Fixed in the Add dialog; `src/selectors.test.ts` now rejects any selector that builds
+  a new array or object.
+* **Moving a download up did not move it on screen** (found by the same e2e test): only the moved download was announced, not the
+  one it traded places with. Both are announced now (`smart_queue.rs` checks it).
+* **The e2e window-close checks failed where a tray exists** (since the tray came in, closing the window keeps the app running in
+  it): the harness now turns "close to tray" off before a test closes the window to quit (`quitOnClose` in `harness.mjs`, and
+  `linux-webdriver.mjs`).
 
 ## Download folders and sorting
 
@@ -197,7 +206,9 @@ user's desktop. `VELOX_E2E_DISPLAY=:0` runs on the real display instead; `VELOX_
 closed like a user would (`x11-close-window.py`, WM_DELETE_WINDOW). Not ported yet: `desktop-browser.mjs` (Windows registry checks)
 and the `real-*` scripts. Known Linux gaps they show: live preview does not play (WebKitGTK cannot stream media from a custom
 protocol), and `desktop-ui.mjs` measures ~20 fps during the first seconds of a capped download (the WebKit content process is busy;
-idle and later in the download it holds 60 fps).
+idle and later in the download it holds 60 fps). On a machine without root, both tools can be unpacked from their packages into
+a user folder (`dpkg -x`) and put on `PATH`. Still failing on Linux, before and after the Smart Download Queue (checked on the previous
+commit too): `desktop-queue.mjs` waits in vain for the second dry-run power action at its very end.
 
 ## Fixes from testing on other computers
 
@@ -230,4 +241,23 @@ Debug builds of the desktop app fetch tools only with `VELOX_TOOLS=official`.
   start before the data folder exists).
 * `tests/integration/tests/smart_preview.rs` + `manager/smart_throttle.rs`: see `docs/smart-throttle-and-preview.md`.
 * By hand (`--ignored`): `system.rs` real notification + logind inhibitor, real idle time; `launch.rs` real desktop portal.
+
+## Smart Download Queue
+
+Described in `docs/smart-download-queue.md` (section 7 lists every suite):
+
+| Where | What |
+|---|---|
+| `crates/scheduler/src/queue_rules.rs` | 11 unit tests of the rules |
+| `crates/downloader-core/src/scheduler.rs` | 5 for order, held-back waiters and the express lane |
+| `crates/persistence` | 1 for places |
+| `crates/system-integration/src/network.rs` | 3 for the routing table and adapters |
+| `manager/queues.rs` | 3 unit tests |
+| `tests/integration/tests/smart_queue.rs` | 14 tests through the manager, with a fake clock and the dry-run system's idle time and connection (`DryRunSystem::set_network`) |
+| `apps/desktop/src/smartQueue.test.ts` | 12 UI logic tests |
+| `apps/desktop/src/selectors.test.ts` | 1 |
+| `tests/security/policy.test.mjs` | 1 ("Smart Download Queue") |
+| `tests/e2e/desktop-smart-queue.mjs` | 47 checks in the real app; its screenshots are `docs/screenshots/smart-queue-{light,dark}.png` |
+
+`desktop-ui.mjs` now picks *High* in a queue row (the queue page offers High / Normal / Low).
 

@@ -570,6 +570,37 @@ test("Phases 16-18: tray, start at login and notifications stay per user, opt-in
   assert.ok(!/echo "\$(WINDOWS_CERT|APPLE_CERTIFICATE|APPLE_PASSWORD)/.test(build.replace(/echo "\$APPLE_CERTIFICATE" \| base64 --decode/, "")), "no secret is echoed to the log");
 });
 
+test("Smart Download Queue: main window only, ids and plain rules only, nothing is sent to find out the connection", () => {
+  const api = read("crates", "download-manager", "src", "api.rs");
+  const rules = read("crates", "scheduler", "src", "queue_rules.rs");
+  const queues = withoutTestModules(read("crates", "download-manager", "src", "manager", "queues.rs"));
+  const net = withoutTestModules(read("crates", "system-integration", "src", "network.rs"));
+  const authz = read("apps", "desktop", "src-tauri", "src", "authz.rs");
+  // The five commands are the main window's only (the detail and settings windows cannot reach them).
+  for (const c of ["get_queues", "save_queue", "delete_queue", "queue_action", "place_download"]) {
+    assert.match(read("apps", "desktop", "src-tauri", "build.rs"), new RegExp(`"${c}"`));
+    assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), new RegExp(`"allow-${c.replaceAll("_", "-")}"`));
+    for (const other of ["download-window.json", "settings-window.json"]) {
+      assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes(`allow-${c.replaceAll("_", "-")}`), `${c} not in ${other}`);
+    }
+  }
+  assert.match(authz, /Command::PlaceDownload,/);
+  // Requests are read strictly: no path, no program, no command; only ids, names, times and limits.
+  for (const name of ["SaveQueue", "PlaceDownload"]) {
+    assert.match(api, new RegExp(`#\\[serde\\(rename_all = "camelCase", deny_unknown_fields\\)\\]\\s*pub struct ${name} \\{`));
+  }
+  assert.match(api, /#\[serde\(tag = "kind", rename_all = "camelCase", deny_unknown_fields\)\]\s*pub enum QueueAction/);
+  assert.match(rules, /#\[serde\(rename_all = "camelCase", deny_unknown_fields, default\)\]\s*pub struct QueueRules/);
+  assert.match(queues, /req\.rules\.validate\(\)/, "rules are validated before they are saved");
+  assert.match(queues, /MAX_QUEUES: usize = 16/);
+  assert.match(queues, /MAX_NAME: usize = 40/);
+  // Something unknown never holds a download back; the queues never touch the power action.
+  assert.match(rules, /if let Some\(net\) = inp\.net/);
+  assert.ok(!/power/i.test(queues.replace(/power action/gi, "")), "the queues do not reach the power action");
+  // Finding out the connection reads the routing table and the adapter only: no request is made.
+  assert.ok(!/reqwest|TcpStream|UdpSocket|http_client|\.send\(/.test(net), "no socket and no request to find out the connection");
+});
+
 test("video tools are fetched only from fixed https sources, checked against the published checksum before use, one fixed entry out of an archive", () => {
   const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
   // The only sources are the official ones, compiled in (the UI can never name one).

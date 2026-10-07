@@ -70,6 +70,27 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   - set the maximum downloads at once and the maximum connections per download;
   - priorities run from Lowest to Highest;
   - pause the queue (optionally also pausing the running downloads) and resume it.
+- **Smart Download Queue** (details in `docs/smart-download-queue.md`):
+  - **Several queues**, one tab each, with ready-made setups: night downloads, when I'm away, start at 2:00, light
+    on the connection.
+  - **Rules per queue:**
+    - when: anytime, between two times, or starting at a time until it is done;
+    - only while the computer is idle;
+    - Wi-Fi only / cable only / not on mobile data;
+    - pause while the connection is busy;
+    - big files move to it.
+  - **Per download:** High / Normal / Low; start now, later, or at a set time; move up / down; move to another queue.
+  - **Queue actions:** start (whatever the schedule, until empty), pause, edit schedule, clear completed, priority
+    for all, reorder queues.
+  - **Clear states:** Downloading, Waiting (with why), Scheduled, Paused, Completed, Failed, Retrying. Plus a "Next
+    download" line, and a 24-hour timeline when times are involved.
+  - **Smart on its own:**
+    - nothing new starts without a network;
+    - Low priority waits while Smart Throttle slows downloads;
+    - a High download never waits only behind less urgent ones (one extra slot);
+    - what the computer cannot tell never holds a download back.
+  - **No change without rules:** the main queue has no rule until the user gives it one, so nothing changes for
+    someone who never sets one.
 - **Schedule:** e.g. "start at 22:00, stop at 07:00, on weekdays".
 - **Power action:**
   - shut down, sleep or hibernate once *everything* has finished;
@@ -212,14 +233,14 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 |---|---|
 | `crates/http-client` | Hardened HTTP: probes the file, verifies range support, pooling, DNS cache, safe redirects |
 | `crates/downloader-core` | **The engine**: segments, adaptive connections, retries, limits, resume, integrity, disk writer |
-| `crates/persistence` | SQLite (WAL, migrations, schema v4): downloads, segments, settings, history, diagnostics |
+| `crates/persistence` | SQLite (WAL, migrations, schema v6): downloads, segments, queue places, settings, history, diagnostics |
 | `crates/download-manager` | What the UI talks to: every action, validation, queue / schedule / power, events, metrics, videos, previews |
 | `crates/media-engine` | HLS / DASH parsers, segment downloads, yt-dlp runner, ffmpeg (arguments as arrays, never a shell) |
 | `crates/path-safety` | Safe file names, "is it really inside the download folder", no following of planted links |
 | `crates/secrets` | Seals cookies / passwords (ChaCha20-Poly1305) with a key held in the OS credential store |
 | `crates/browser-bridge` | Browser ↔ app protocol: framing, strict validation, mutual authentication |
-| `crates/scheduler` | Time windows (pure logic) |
-| `crates/system-integration` | Power actions, clipboard, browser detection, native-host registration |
+| `crates/scheduler` | Time windows and the Smart Download Queue's rules (pure logic) |
+| `crates/system-integration` | Power actions, clipboard, browser detection, native-host registration, connection type (read only) |
 | `crates/diagnostics` | Local redacted log and reports |
 | `crates/failpoint` | Crash-test hooks (compiled out of shipped builds) |
 | `apps/desktop` | Tauri v2 app: `src/` the React UI, `src-tauri/` commands, capabilities and CSP |
@@ -301,6 +322,22 @@ More: `docs/architecture.md`.
   - yt-dlp gets `--limit-rate`, and is restarted when the limit changes by more than 25 %;
   - it continues its partial files.
 
+### 4.6 Smart Download Queue
+- **One slot scheduler for everything.** It hands slots out by priority, then the queue order, then the user's
+  place in the queue. Downloads whose queue is closed keep waiting while the next one goes.
+- **Evaluation:** every second (`queues.rs`), each queue's rules are judged (pure logic in
+  `scheduler::queue_rules`) on:
+  - the time;
+  - the idle time (from `SystemIntegration`, as for Smart Throttle);
+  - the connection (routing table and adapter, nothing sent);
+  - the other traffic.
+- **A queue that closes** pauses its running downloads and remembers them; they resume when it opens.
+- **When a start time comes**, that download starts.
+- **Big files** move to the queue made for them.
+- **New runs:** a download that starts is held back at once if its queue is closed, so it can never take a free
+  slot first.
+- **Database:** v6 adds the download's queue, place and start time to the `queue` table.
+
 ---
 
 ## 5. Security model (always true)
@@ -341,10 +378,11 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | What | Where |
 |---|---|
 | Downloads, segments, settings, history, diagnostics | SQLite file in the app data folder |
+| Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
-| UI-only preferences (folded sidebar, density, sort, language, theme) | `localStorage` |
+| UI-only preferences (folded sidebar, density, sort, open queue tab, language, theme) | `localStorage` |
 | How the browser helper starts the app | `<app data>/app-path` (written by the app at each start) |
 | Start at login (when turned on) | Windows `HKCU\...\CurrentVersion\Run`, `~/.config/autostart/app.velox.fetch.desktop`, `~/Library/LaunchAgents/app.velox.fetch.plist` |
 | Second-launch signal (Linux / macOS) | `<app data>/show.sock` (or the user's runtime folder when the path is too long) |
@@ -364,7 +402,7 @@ cd apps/desktop && npm run tauri dev      # run the app (dev)
 npm --prefix apps/desktop run build
 cargo build -p velox-desktop --features velox-desktop/custom-protocol -p velox-native-host -p velox-integration-tests
 node tests/e2e/desktop-<suite>.mjs
-#   suites: ipc, ui, redesign, views, usability, queue, folders, batch, media, video, preview, diagnostics, browser
+#   suites: ipc, ui, redesign, views, usability, queue, smart-queue, folders, batch, media, video, preview, diagnostics, browser
 
 # full release for the current OS (installer, portable zip, extension zips, SHA256SUMS, security gate):
 bash scripts/build-release.sh
@@ -411,6 +449,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
@@ -472,6 +511,9 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | **`.part`** | The file being written; renamed when complete |
 | **Tick** | The batched progress update sent to the UI ~5 times a second |
 | **Gate / slot** | The queue's open / closed switch, and the number of downloads allowed at once |
+| **Smart Download Queue** | Several queues with rules (time, idle, connection, busy line, big files) over the one slot scheduler |
+| **Express lane** | One extra slot for a High / Highest download that would only wait behind less urgent ones |
+| **Held** | Paused by a queue rule (or the global schedule): resumed on its own when it opens again |
 | **Token bucket** | A speed limiter |
 | **Smart bucket** | The bucket the Smart throttle tightens |
 | **Native host** | The small program a browser is allowed to start; VeloxFetch's link between the browser and the app |

@@ -41,8 +41,17 @@ CREATE TABLE diagnostics (
 );
 ";
 
+/// v6: Smart Download Queue. The `queue` table (unused until now) says which queue a download is in, its place
+/// in it, when it should start, and whether the user chose the queue (then big-file rules never move it). A
+/// download without a row is in the main queue (id 1), in the order it was added.
+const SCHEMA_V6: &str = "
+ALTER TABLE queue ADD COLUMN queue_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE queue ADD COLUMN start_at TEXT;
+ALTER TABLE queue ADD COLUMN pinned   INTEGER NOT NULL DEFAULT 0;
+";
+
 /// Applied in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5];
+const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6];
 const SCHEMA_VERSION: i32 = MIGRATIONS.len() as i32;
 
 const SCHEMA_V1: &str = "
@@ -127,6 +136,30 @@ pub struct HistoryEntry {
     pub size: Option<u64>,
     pub outcome: String,
     pub finished_at: i64,
+}
+
+/// Where a download sits in the Smart Download Queue (see `SCHEMA_V6`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placement {
+    pub download_id: i64,
+    pub queue_id: i64,
+    /// Lower runs first (after priority).
+    pub position: i64,
+    /// Local time `YYYY-MM-DDTHH:MM` at which it starts on its own.
+    pub start_at: Option<String>,
+    /// The user put it in this queue.
+    pub pinned: bool,
+}
+
+/// What the queue needs to know about a download that is not finished, without loading its segments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueRow {
+    pub id: i64,
+    pub status: DownloadStatus,
+    pub priority: Priority,
+    pub total_size: Option<u64>,
+    pub downloaded: u64,
+    pub resumable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,6 +437,82 @@ impl SqliteStore {
         let mut st = conn.prepare("SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key").map_err(db_err)?;
         let rows = st.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?))).map_err(db_err)?;
         rows.collect::<std::result::Result<_, _>>().map_err(db_err)
+    }
+
+    /// Every saved queue placement.
+    pub fn placements(&self) -> Result<Vec<Placement>> {
+        let conn = self.conn();
+        let mut st =
+            conn.prepare("SELECT download_id, queue_id, position, start_at, pinned FROM queue ORDER BY download_id").map_err(db_err)?;
+        let rows = st
+            .query_map([], |r| {
+                Ok(Placement {
+                    download_id: r.get(0)?,
+                    queue_id: r.get(1)?,
+                    position: r.get(2)?,
+                    start_at: r.get(3)?,
+                    pinned: r.get::<_, i64>(4)? != 0,
+                })
+            })
+            .map_err(db_err)?;
+        rows.collect::<std::result::Result<_, _>>().map_err(db_err)
+    }
+
+    /// Save where a download sits. A download that no longer exists is ignored.
+    pub fn set_placement(&self, p: &Placement) -> Result<()> {
+        failpoint::hit_io("store.write").map_err(|e| DownloadError::Store(e.to_string()))?;
+        self.conn()
+            .execute(
+                "INSERT INTO queue (download_id, position, priority, queue_id, start_at, pinned)
+                 SELECT ?1, ?2, 0, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM downloads WHERE id = ?1)
+                 ON CONFLICT(download_id) DO UPDATE SET position = excluded.position, queue_id = excluded.queue_id,
+                     start_at = excluded.start_at, pinned = excluded.pinned",
+                params![p.download_id, p.position, p.queue_id, p.start_at, p.pinned as i64],
+            )
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Move every download of queue `from` to queue `to` (a queue was deleted). Returns how many moved.
+    pub fn move_queue(&self, from: i64, to: i64) -> Result<usize> {
+        self.conn().execute("UPDATE queue SET queue_id = ?2, pinned = 0 WHERE queue_id = ?1", params![from, to]).map_err(db_err)
+    }
+
+    /// The downloads that are not finished (queued, running, paused or failed), oldest first.
+    pub fn queue_rows(&self) -> Result<Vec<QueueRow>> {
+        let conn = self.conn();
+        let mut st = conn
+            .prepare(
+                "SELECT id, status, priority, total_size, downloaded_size, resumable FROM downloads
+                 WHERE status IN ('queued', 'downloading', 'verifying', 'paused', 'failed') ORDER BY id",
+            )
+            .map_err(db_err)?;
+        let rows = st
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                ))
+            })
+            .map_err(db_err)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, status, prio, total, done, resumable) = row.map_err(db_err)?;
+            let Some(status) = DownloadStatus::parse(&status) else { continue };
+            out.push(QueueRow {
+                id,
+                status,
+                priority: Priority::from_i64(prio),
+                total_size: total.map(|t| t.max(0) as u64),
+                downloaded: done.max(0) as u64,
+                resumable: resumable != 0,
+            });
+        }
+        Ok(out)
     }
 
     /// Structural check of the database file (`integrity_check` + `foreign_key_check`). A killed
@@ -836,6 +945,37 @@ mod tests {
     }
 
     #[test]
+    fn queue_placements_are_saved_moved_and_go_with_the_download() {
+        let d = tmp("placement");
+        let s = SqliteStore::open(d.join("q.db")).unwrap();
+        let a = s.save(&rec(d.join("a.bin"))).unwrap();
+        let b = s.save(&rec(d.join("b.bin"))).unwrap();
+        assert!(s.placements().unwrap().is_empty(), "no row: main queue, order added");
+        let pa = Placement { download_id: a, queue_id: 2, position: -5, start_at: Some("2026-03-03T02:00".into()), pinned: true };
+        s.set_placement(&pa).unwrap();
+        s.set_placement(&Placement { download_id: b, queue_id: 2, position: 7, start_at: None, pinned: false }).unwrap();
+        s.set_placement(&Placement { download_id: 9999, queue_id: 2, position: 1, start_at: None, pinned: false }).unwrap();
+        assert_eq!(s.placements().unwrap().len(), 2, "a download that does not exist is ignored");
+        assert_eq!(s.placements().unwrap()[0], pa);
+        // Updated in place.
+        s.set_placement(&Placement { position: 3, ..pa.clone() }).unwrap();
+        assert_eq!(s.placements().unwrap()[0].position, 3);
+        // A deleted queue hands its downloads to another one, no longer pinned.
+        assert_eq!(s.move_queue(2, 1).unwrap(), 2);
+        assert!(s.placements().unwrap().iter().all(|p| p.queue_id == 1 && !p.pinned));
+        s.delete(a).unwrap();
+        assert_eq!(s.placements().unwrap().len(), 1, "the row goes with the download");
+        let rows = s.queue_rows().unwrap();
+        assert_eq!(rows.iter().map(|r| r.id).collect::<Vec<_>>(), vec![b]);
+        assert_eq!(rows[0].priority, Priority::High);
+        let mut done = s.load(b).unwrap().unwrap();
+        done.status = DownloadStatus::Completed;
+        s.save(&done).unwrap();
+        assert!(s.queue_rows().unwrap().is_empty(), "finished downloads are not the queue's business");
+        s.integrity_check().unwrap();
+    }
+
+    #[test]
     fn upgrades_a_v1_database_in_place() {
         let d = tmp("migrate");
         let db = d.join("old.db");
@@ -856,7 +996,7 @@ mod tests {
         let old = s.load(1).unwrap().unwrap();
         assert_eq!((old.priority, old.category, old.speed_limit), (Priority::Normal, None, None));
         let v: i32 = s.conn().pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, SCHEMA_VERSION);
         // The diagnostics table exists for old downloads too.
         s.save_diagnostics(1, r#"{"attempts":1}"#).unwrap();
         assert_eq!(s.diagnostics(1).unwrap().as_deref(), Some(r#"{"attempts":1}"#));

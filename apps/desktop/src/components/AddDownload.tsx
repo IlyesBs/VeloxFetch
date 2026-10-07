@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import { opensVideoDialog, parseRate } from "../format";
-import { act, store } from "../hooks";
+import { act, store, useStore } from "../hooks";
 import { PRIORITIES, type Download, type NewDownload, type PickedFolder, type Priority } from "../types";
 import { t as tr, useT, type Key } from "../i18n";
 import { Icon } from "../ui/icons";
 import { StatusChip } from "../ui/primitives";
+import { localStamp, MAIN_QUEUE, queueName } from "../smartQueue";
 
 /** Put `url` in the link bar and focus it (paste / drop anywhere, Ctrl+L). An empty string only focuses. */
 export const FILL_LINK = "velox:fill-link";
@@ -75,7 +76,14 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
   const [url, setUrl] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   const bar = useRef<HTMLInputElement>(null);
-  const [opts, setOpts] = useState({ subdir: "", filename: "", priority: "normal" as Priority, limit: "", checksum: "", start: true });
+  const [opts, setOpts] = useState({ subdir: "", filename: "", priority: "normal" as Priority, limit: "", checksum: "" });
+  // Smart Download Queue: which queue, and now / later / at a set time.
+  // (select the stored object itself: a selector that builds a new array would re-render forever)
+  const queueState = useStore((s) => s.queues);
+  const queues = queueState?.queues ?? [];
+  const [queueId, setQueueId] = useState(MAIN_QUEUE);
+  const [when, setWhen] = useState<"now" | "later" | "at">("now");
+  const [startAt, setStartAt] = useState("");
   const [adv, setAdv] = useState(EMPTY_ADVANCED);
   const [formError, setFormError] = useState<string | null>(null);
   // A folder chosen for this download in the native dialog (a token; the path is only shown).
@@ -189,11 +197,14 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
     const limit = opts.limit.trim() ? parseRate(opts.limit) : null;
     if (opts.limit.trim() && limit === null) return setFormError(tr("addd.badLimit"));
     if (adv.password && !adv.username.trim()) return setFormError(tr("addd.passNeedsUser"));
+    if (when === "at" && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startAt)) return setFormError(tr("addd.badStartAt"));
     const filled = (v: string) => v.trim() || undefined;
     const req: NewDownload = {
       url: url.trim(),
       priority: opts.priority,
-      start: opts.start,
+      start: when === "now",
+      ...(when === "at" && { startAt }),
+      ...(queueId !== MAIN_QUEUE && queues.some((q) => q.id === queueId) && { queueId }),
       ...(folder ? { folderToken: folder.token } : opts.subdir.trim() && { subdir: opts.subdir.trim() }),
       ...(opts.filename.trim() && { filename: opts.filename.trim() }),
       ...(limit && { speedLimit: limit }),
@@ -370,10 +381,43 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
             </div>
           </details>
 
-          <label className="flex items-center gap-2 text-[13px]">
-            <input type="checkbox" checked={opts.start} onChange={(e) => setOpts({ ...opts, start: e.target.checked })} />
-            {t("addd.startNow")}
-          </label>
+          <div className="grid grid-cols-2 gap-3">
+            {queues.length > 1 && (
+              <label className="space-y-1.5">
+                <span className="label">{t("addd.queue")}</span>
+                <select className="input" data-testid="add-queue" value={queueId} onChange={(e) => setQueueId(Number(e.target.value))}>
+                  {queues.map((q) => (
+                    <option key={q.id} value={q.id}>
+                      {queueName(q)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="space-y-1.5">
+              <span className="label">{t("addd.when")}</span>
+              <select
+                className="input"
+                data-testid="add-when"
+                value={when}
+                onChange={(e) => {
+                  const v = e.target.value as typeof when;
+                  setWhen(v);
+                  if (v === "at" && !startAt) setStartAt(localStamp(new Date(Date.now() + 3600_000)));
+                }}
+              >
+                <option value="now">{t("addd.startNow")}</option>
+                <option value="later">{t("addd.whenLater")}</option>
+                <option value="at">{t("addd.whenAt")}</option>
+              </select>
+            </label>
+            {when === "at" && (
+              <label className="space-y-1.5">
+                <span className="label">{t("sq.atLabel")}</span>
+                <input type="datetime-local" className="input" data-testid="add-start-at" value={startAt} onChange={(e) => setStartAt(e.target.value.slice(0, 16))} />
+              </label>
+            )}
+          </div>
           {formError && (
             <p role="alert" className="text-xs text-bad">
               {formError}

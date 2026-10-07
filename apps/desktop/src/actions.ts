@@ -1,7 +1,7 @@
 import { api } from "./api";
 import { act, store } from "./hooks";
 import { t, type Key } from "./i18n";
-import type { Download, FileTarget, PowerAction, Priority, Schedule } from "./types";
+import type { Download, FileTarget, PlaceDownload, PowerAction, Priority, QueueAction, SaveQueue, Schedule } from "./types";
 
 /** UI-level actions. Failures surface as toasts (see `act`). */
 export const actions = {
@@ -25,6 +25,25 @@ export const actions = {
   setMaxConnections: (n: number) => act(() => api.setQueueConfig({ maxConnections: n })),
   setSchedule: (s: Schedule) => act(() => api.setSchedule(s), s.enabled ? t("act.schedSaved") : t("act.schedOff")),
   setKeepAwake: (on: boolean) => act(() => api.setKeepAwake(on), on ? t("act.keepAwakeOn") : t("act.keepAwakeOff")),
+  /** Smart Download Queue: the answer also arrives as an event; it is applied at once for a snappy page. */
+  saveQueue: async (req: SaveQueue, done: string) => {
+    const q = await act(() => api.saveQueue(req), done);
+    if (q) store.dispatch({ type: "queues", queues: q });
+    return q;
+  },
+  deleteQueue: async (id: number) => {
+    const q = await act(() => api.deleteQueue(id), t("act.sqDeleted"));
+    if (q) store.dispatch({ type: "queues", queues: q });
+    return q;
+  },
+  queueAction: async (id: number, action: QueueAction, done?: string) => {
+    const said = done ?? (action.kind === "start" ? t("act.sqStarted") : action.kind === "pause" ? t("act.sqPaused") : undefined);
+    const q = await act(() => api.queueAction(id, action), said);
+    if (q) store.dispatch({ type: "queues", queues: q });
+    return q;
+  },
+  /** Move a download to a queue, change when it starts, or move it up / down. */
+  place: (req: PlaceDownload, done?: string) => act(() => api.placeDownload(req), done),
   setPowerAction: (a: PowerAction | null) =>
     act(() => api.setPowerAction(a), a ? t("act.power", { action: t(`power.${a}` as Key).toLowerCase() }) : t("act.powerOff")),
   showInFolder: (target: FileTarget) => act(() => api.showInFolder(target)),

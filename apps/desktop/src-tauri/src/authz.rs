@@ -82,11 +82,16 @@ pub enum Command {
     FetchVideoTools,
     SetVideoBar,
     WindowControl,
+    GetQueues,
+    SaveQueue,
+    DeleteQueue,
+    QueueAction,
+    PlaceDownload,
 }
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 70] = [
+    pub const ALL: [Command; 75] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -157,6 +162,11 @@ impl Command {
         Command::FetchVideoTools,
         Command::SetVideoBar,
         Command::WindowControl,
+        Command::GetQueues,
+        Command::SaveQueue,
+        Command::DeleteQueue,
+        Command::QueueAction,
+        Command::PlaceDownload,
     ];
 
     /// The Rust/JS command name, e.g. `create_download`.
@@ -232,6 +242,11 @@ impl Command {
             Command::FetchVideoTools => "fetch_video_tools",
             Command::SetVideoBar => "set_video_bar",
             Command::WindowControl => "window_control",
+            Command::GetQueues => "get_queues",
+            Command::SaveQueue => "save_queue",
+            Command::DeleteQueue => "delete_queue",
+            Command::QueueAction => "queue_action",
+            Command::PlaceDownload => "place_download",
         }
     }
 
@@ -313,6 +328,11 @@ mod tests {
             Command::SetSchedule,
             Command::SetPowerAction,
             Command::SetKeepAwake,
+            Command::GetQueues,
+            Command::SaveQueue,
+            Command::DeleteQueue,
+            Command::QueueAction,
+            Command::PlaceDownload,
             Command::GetDesktopOptions,
             Command::SetDesktopOptions,
             Command::GetBrowserIntegration,

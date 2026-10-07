@@ -18,6 +18,15 @@ export const exe = (p) => (process.platform === "win32" ? `${p}.exe` : p);
 
 export const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
 
+/**
+ * Tests that close the window mean "quit". Where a tray is available the app keeps running in it when its
+ * window is closed (on by default since the tray came in), so that is turned off first, like a user who chose
+ * "quit when the window is closed".
+ */
+export async function quitOnClose(h) {
+  await h.invoke("set_desktop_options", { request: { closeToTray: false } }).catch(() => {});
+}
+
 /** Local file server with ranges, a per-chunk delay (throttle) and a request counter. */
 export async function startFileServer(sizeBytes) {
   const FILE = crypto.randomBytes(sizeBytes);
@@ -204,6 +213,7 @@ export function createHarness({ port, appPath, env = {}, captureStderr = false }
   h.exited = () => new Promise((r) => h.app.once("exit", (code) => r(code)));
   /** Close the main window the way a user would (the app must pause, save and exit cleanly). */
   h.closeWindow = async () => {
+    await quitOnClose(h);
     execFileSync("powershell", ["-NoProfile", "-Command", `(Get-Process -Id ${h.app.pid}).CloseMainWindow() | Out-Null`]);
   };
   h.screenshot = async (file, size = {}) => {

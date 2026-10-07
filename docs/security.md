@@ -482,3 +482,33 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * Steady: smoothed readings, separate on / off thresholds, two readings to confirm before slowing, a calm period before
   speeding up (doubled when the network keeps changing), then steps of 1.5x.
 
+## Smart Download Queue
+
+* **Five commands**, main window only: `get_queues`, `save_queue`, `delete_queue`, `queue_action`, `place_download`.
+  * They are registered in `build.rs`, the main-window capability and `authz.rs`; the detail and settings windows
+    cannot reach them.
+  * Requests are read strictly (`deny_unknown_fields` on `SaveQueue`, `PlaceDownload`, `QueueRules` and the tagged
+    `QueueAction` / `StartWhen`).
+  * They carry ids, a name, times and limits only: no path, no program, no command.
+* **Checked in Rust before anything is saved:**
+  * times are `HH:MM`, and start / stop must differ;
+  * at least one day is chosen;
+  * names have at most 40 characters, with control characters removed; there are at most 16 queues;
+  * the busy limit is at least 64 KB/s and the big-file size at least 1 MB;
+  * a download's start time is `YYYY-MM-DDTHH:MM`, at most a year ahead;
+  * the main queue cannot be deleted.
+
+  Saved rules that do not pass these checks are ignored at the next start.
+* **The connection is read, never probed:**
+  * Linux reads the routing table and `/sys/class/net`;
+  * Windows uses `GetBestInterface` and `GetIfEntry2`;
+  * macOS uses `SCNetworkReachability`.
+
+  No socket is opened and nothing is sent; the policy test forbids sockets and requests in `network.rs`. Only
+  "online" and "Wi-Fi / cable / mobile / other" are kept, in memory. Idle time is the same reading Smart Throttle
+  uses: a duration, never any input.
+* **The queues never reach the power action**, the global pause or the global schedule (policy test).
+* **What the computer cannot tell never holds a download back.** That covers unknown idle time, an unknown or VPN
+  connection, and unmeasured traffic. A rule can therefore not be turned into a way to stop downloads by hiding
+  information.
+

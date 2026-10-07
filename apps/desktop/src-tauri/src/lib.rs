@@ -23,9 +23,9 @@ use authz::Command;
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, NetworkDto,
-    NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PreviewDto, QueueStateDto, Schedule, SetCredentials,
-    SetFolderNames, SetNetwork, SetPowerAction, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto,
-    StorageDto, VideoToolsDto,
+    NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PreviewDto, QueueAction, QueueStateDto,
+    QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetNetwork, SetPowerAction, SetQueueConfig, SetSmartThrottle,
+    SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
 };
 use std::sync::Arc;
 use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
@@ -235,6 +235,11 @@ async fn set_desktop_options(
 }
 
 command!(set_power_action, SetPowerAction, (request: SetPowerAction) -> QueueStateDto, |m| m.set_power_action(request));
+command!(get_queues, GetQueues, () -> QueuesDto, |m| m.get_queues());
+command!(save_queue, SaveQueue, (request: SaveQueue) -> QueuesDto, |m| m.save_queue(request));
+command!(delete_queue, DeleteQueue, (id: i64) -> QueuesDto, |m| m.delete_queue(id));
+command!(queue_action, QueueAction, (id: i64, action: QueueAction) -> QueuesDto, |m| m.queue_action(id, action));
+command!(place_download, PlaceDownload, (request: PlaceDownload) -> DownloadDto, |m| m.place_download(request));
 command!(set_keep_awake, SetKeepAwake, (enabled: bool) -> QueueStateDto, |m| m.set_keep_awake(enabled));
 
 // Where downloads go. No command takes a path: a folder is chosen in a native dialog that only Rust can open
@@ -804,6 +809,11 @@ pub fn run() {
             resume_queue,
             set_schedule,
             set_power_action,
+            get_queues,
+            save_queue,
+            delete_queue,
+            queue_action,
+            place_download,
             set_keep_awake,
             get_browser_integration,
             set_browser_integration,

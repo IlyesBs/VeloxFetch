@@ -4,6 +4,8 @@
 //! it is deterministic and testable. The download manager decides what to *do* at a boundary.
 
 pub use chrono;
+
+pub mod queue_rules;
 use chrono::{Datelike, Duration, NaiveDateTime, NaiveTime, Timelike};
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +105,26 @@ impl Schedule {
             }
         }
         best
+    }
+
+    /// The open stretches of time between `now` and `until`, in order (one already open starts at `now`). For the
+    /// queue timeline.
+    pub fn spans(&self, now: NaiveDateTime, until: NaiveDateTime) -> Vec<(NaiveDateTime, NaiveDateTime)> {
+        if !self.enabled || self.bounds().is_none() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut t = now;
+        let mut open = self.is_open(t);
+        while t < until && out.len() < 64 {
+            let next = self.next_change(t).unwrap_or(until).min(until);
+            if open {
+                out.push((t, next));
+            }
+            t = next;
+            open = !open;
+        }
+        out
     }
 }
 

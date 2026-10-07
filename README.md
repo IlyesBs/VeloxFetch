@@ -55,6 +55,7 @@ cargo build -p velox-desktop -p velox-cli -p velox-native-host --features velox-
 node tests/e2e/desktop-ipc.mjs   # IPC, security boundaries, shutdown/restart
 node tests/e2e/desktop-ui.mjs    # every view, live updates, 60 FPS, CSP; writes docs/screenshots
 node tests/e2e/desktop-queue.mjs # queue limits, pause/resume, scheduler, power action (dry run), restart
+node tests/e2e/desktop-smart-queue.mjs # several queues, rules, start at, order, timeline, Add dialog choices, hostile IPC
 node tests/e2e/desktop-browser.mjs # real native host process <-> real app (hostile input, auth, limits)
 node tests/e2e/desktop-folders.mjs    # download folders, sorting by type
 node tests/e2e/desktop-usability.mjs  # icons, open / show in folder, search, sign-in, network, shortcuts, paste / drop
@@ -84,6 +85,20 @@ can **preview** it while it downloads. See [`docs/smart-throttle-and-preview.md`
 On the desktop: closing the window keeps VeloxFetch in the tray, it can start at login (in the tray), and it notifies when
 a download finishes or fails while the window is hidden (Settings > Appearance > On the desktop). A download sent from the
 browser while VeloxFetch is closed starts it, also for browsers installed as snap / Flatpak packages.
+
+Smart Download Queue (the Queue page): make several queues, each with a few plain rules. It is easiest to start
+from a ready-made setup:
+- **Night downloads:** 23:00 to 07:00, and big files go there.
+- **When I'm away:** only while the computer is idle.
+- **Start at 2:00.**
+- **Light on the connection:** not on mobile data, and pause while the connection is busy.
+
+Give each download High / Normal / Low priority. Start it now, later, or at a set time, move it up or down, or move it
+to another queue. Each row says what the download is doing and why: Downloading, Waiting for a free slot, Scheduled
+for 23:00, Paused, Completed, Failed or Retrying. A "Next download" line and a 24-hour timeline show what comes when.
+
+Without rules nothing changes, and something the computer cannot tell never holds a download back. See
+[`docs/smart-download-queue.md`](docs/smart-download-queue.md).
 
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
 

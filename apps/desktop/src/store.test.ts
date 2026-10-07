@@ -23,6 +23,11 @@ const dl = (id: number, over: Partial<Download> = {}): Download => ({
   errorCode: null,
   kind: "other",
   idle: false,
+  queueId: 1,
+  position: id * 1024,
+  startAt: null,
+  retrying: false,
+  held: false,
   ...over,
 });
 
@@ -76,16 +81,16 @@ describe("reduce", () => {
   it("does not rebuild groups on progress ticks (structural sharing)", () => {
     let s = reduce(initialState(), { type: "added", download: dl(1) });
     const groups = s.groups;
-    s = reduce(s, tick([{ id: 1, downloaded: 100, totalSize: 1000, speedBps: 50, etaSecs: 18, connections: 4 }], 50));
+    s = reduce(s, tick([{ id: 1, downloaded: 100, totalSize: 1000, speedBps: 50, etaSecs: 18, connections: 4, retrying: false }], 50));
     expect(s.groups).toBe(groups);
-    expect(s.byId[1]).toMatchObject({ downloaded: 100, speedBps: 50, etaSecs: 18, connections: 4 });
+    expect(s.byId[1]).toMatchObject({ downloaded: 100, speedBps: 50, etaSecs: 18, connections: 4, retrying: false });
     expect(s.metrics.speedBps).toBe(50);
   });
 
   it("keeps a download's object identity when nothing about it changed (lets React.memo skip it)", () => {
     let s = reduce(initialState(), { type: "added", download: dl(1) });
     s = reduce(s, { type: "added", download: dl(2) });
-    const p = (id: number, downloaded: number) => ({ id, downloaded, totalSize: 1000, speedBps: 10, etaSecs: 5, connections: 2 });
+    const p = (id: number, downloaded: number) => ({ id, downloaded, totalSize: 1000, speedBps: 10, etaSecs: 5, connections: 2, retrying: false });
     s = reduce(s, tick([p(1, 100), p(2, 100)]));
     const [a, b] = [s.byId[1], s.byId[2]];
     s = reduce(s, tick([p(1, 200), p(2, 100)])); // only #1 moved
@@ -97,7 +102,7 @@ describe("reduce", () => {
 
   it("ignores ticks for unknown downloads and caps the speed history", () => {
     let s = reduce(initialState(), { type: "added", download: dl(1) });
-    s = reduce(s, tick([{ id: 42, downloaded: 1, totalSize: 2, speedBps: 3, etaSecs: 4, connections: 5 }]));
+    s = reduce(s, tick([{ id: 42, downloaded: 1, totalSize: 2, speedBps: 3, etaSecs: 4, connections: 5, retrying: false }]));
     expect(s.byId[42]).toBeUndefined();
     for (let i = 0; i < SPEED_HISTORY_LEN + 25; i++) s = reduce(s, tick([], i));
     expect(s.speedHistory).toHaveLength(SPEED_HISTORY_LEN);
@@ -114,7 +119,7 @@ describe("store", () => {
 
     store.dispatch({ type: "added", download: dl(1) });
     for (let i = 1; i <= 200; i++) {
-      store.dispatch(tick([{ id: 1, downloaded: i, totalSize: 1000, speedBps: i, etaSecs: null, connections: 1 }], i));
+      store.dispatch(tick([{ id: 1, downloaded: i, totalSize: 1000, speedBps: i, etaSecs: null, connections: 1, retrying: false }], i));
     }
     expect(frames).toHaveLength(1); // one frame scheduled, not 201
     expect(notified).toBe(0); // nothing rendered until the frame

@@ -443,6 +443,12 @@ impl DownloadManager {
         self.smart_throttle_observe_signals(running, Signals { other_bps: other, idle });
     }
 
+    /// Smart Throttle is slowing downloads right now (the queue lets Low-priority downloads wait meanwhile).
+    pub(super) fn smart_is_limiting(&self) -> bool {
+        let s = self.inner.smart.lock().unwrap();
+        s.enabled && s.limit.is_some()
+    }
+
     fn velox_download_bps(&self) -> f64 {
         // Ordinary downloads and video jobs (streams, video pages) together: both are capped.
         let files: f64 = self.inner.trackers.lock().unwrap().values().map(|t| t.speed).sum();

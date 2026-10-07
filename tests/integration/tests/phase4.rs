@@ -396,6 +396,7 @@ fn unknown_fields_and_bad_enum_values_are_rejected_at_the_boundary() {
         speed_bps: 4,
         eta_secs: None,
         connections: 5,
+        retrying: false,
     })
     .unwrap();
     assert!(dto_json.get("speedBps").is_some() && dto_json.get("totalSize").is_some(), "camelCase for the UI: {dto_json}");

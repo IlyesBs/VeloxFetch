@@ -1,9 +1,15 @@
 //! Download priorities and the slot scheduler that decides which downloads run.
 //!
 //! At most `max_slots` downloads run at once. When a slot frees up it goes to the waiting
-//! download with the highest [`Priority`]; ties are served first-come, first-served.
+//! download with the highest [`Priority`]; ties are served first-come, first-served, unless the
+//! download manager gave an order ([`SlotScheduler::set_policy`]: the user's queue order, and the
+//! downloads whose queue is closed, which keep waiting).
+//!
+//! The express lane (off unless turned on): a High or Highest download that would only wait
+//! because lower-priority downloads hold every slot gets one extra slot, so a big low-priority
+//! file never makes an urgent one wait.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -55,8 +61,12 @@ struct Waiter {
     key: u64,
     prio: Priority,
     seq: u64,
-    tx: oneshot::Sender<()>,
+    /// Told the priority the slot was granted at (it may have changed while waiting).
+    tx: oneshot::Sender<Priority>,
 }
+
+/// `seq` values below this were marked with [`SlotScheduler::prefer`].
+const ORDINARY_SEQ: u64 = 1 << 32;
 
 struct Inner {
     max: usize,
@@ -70,22 +80,60 @@ struct Inner {
     /// Keys whose next `acquire` jumps ahead of ordinary waiters of the same priority.
     preferred: HashSet<u64>,
     waiters: Vec<Waiter>,
+    /// The order the user gave (lower first, after priority); keys without one count as 0.
+    rank: HashMap<u64, i64>,
+    /// Keys that must keep waiting (their queue is closed).
+    blocked: HashSet<u64>,
+    express: bool,
+    /// Priorities of the downloads holding a slot.
+    held: Vec<Priority>,
 }
 
 impl Inner {
-    /// Hand free slots to the best waiters (highest priority, then oldest).
+    /// The best waiter that may start: highest priority, then those resumed by the queue, then the
+    /// user's order, then the oldest.
+    fn best(&self) -> Option<usize> {
+        self.waiters
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| !self.blocked.contains(&w.key))
+            .max_by(|(_, a), (_, b)| {
+                let rank = |w: &Waiter| self.rank.get(&w.key).copied().unwrap_or(0);
+                a.prio
+                    .cmp(&b.prio)
+                    .then((a.seq < ORDINARY_SEQ).cmp(&(b.seq < ORDINARY_SEQ)))
+                    .then(rank(b).cmp(&rank(a)))
+                    .then(b.seq.cmp(&a.seq))
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// One slot over the limit for an urgent download that only waits behind less urgent ones.
+    fn express_for(&self, w: &Waiter) -> bool {
+        self.express && self.running == self.max && w.prio >= Priority::High && self.held.iter().any(|p| *p < w.prio)
+    }
+
+    /// Hand free slots to the best waiters.
     fn dispatch(&mut self) {
-        while !self.paused && self.running < self.max {
-            let Some(best) =
-                self.waiters.iter().enumerate().max_by(|(_, a), (_, b)| a.prio.cmp(&b.prio).then(b.seq.cmp(&a.seq))).map(|(i, _)| i)
-            else {
+        while !self.paused {
+            let Some(best) = self.best() else { return };
+            if self.running >= self.max && !self.express_for(&self.waiters[best]) {
                 return;
-            };
+            }
             let w = self.waiters.remove(best);
-            if w.tx.send(()).is_ok() {
+            if w.tx.send(w.prio).is_ok() {
                 self.running += 1;
+                self.held.push(w.prio);
             } // else: the waiter went away; try the next one
         }
+    }
+
+    fn release(&mut self, prio: Priority) {
+        self.running -= 1;
+        if let Some(i) = self.held.iter().position(|p| *p == prio) {
+            self.held.swap_remove(i);
+        }
+        self.dispatch();
     }
 }
 
@@ -97,13 +145,12 @@ pub struct SlotScheduler {
 /// Holds one running slot; the slot is handed to the next waiter on drop.
 pub struct SlotGuard {
     sched: Arc<SlotScheduler>,
+    prio: Priority,
 }
 
 impl Drop for SlotGuard {
     fn drop(&mut self) {
-        let mut i = self.sched.inner.lock().unwrap();
-        i.running -= 1;
-        i.dispatch();
+        self.sched.inner.lock().unwrap().release(self.prio);
     }
 }
 
@@ -118,6 +165,10 @@ impl SlotScheduler {
                 front_seq: 0,
                 preferred: HashSet::new(),
                 waiters: Vec::new(),
+                rank: HashMap::new(),
+                blocked: HashSet::new(),
+                express: false,
+                held: Vec::new(),
             }),
             next_key: AtomicU64::new(1 << 32), // keeps generated keys clear of database ids
         })
@@ -177,10 +228,47 @@ impl SlotScheduler {
         match i.waiters.iter_mut().find(|w| w.key == key) {
             Some(w) => {
                 w.prio = prio;
+                i.dispatch(); // a raised priority may use the express lane
                 true
             }
             None => false,
         }
+    }
+
+    /// The user's order (`rank`, lower first, applied after priority) and the keys that must keep
+    /// waiting (`blocked`). Replaces the previous policy; takes effect immediately.
+    pub fn set_policy(&self, rank: HashMap<u64, i64>, blocked: HashSet<u64>) {
+        let mut i = self.inner.lock().unwrap();
+        if i.rank == rank && i.blocked == blocked {
+            return;
+        }
+        i.rank = rank;
+        i.blocked = blocked;
+        i.dispatch();
+    }
+
+    /// Set the order and the hold of one key (a download about to ask for a slot), keeping the rest.
+    pub fn set_one(&self, key: u64, rank: i64, blocked: bool) {
+        let mut i = self.inner.lock().unwrap();
+        i.rank.insert(key, rank);
+        if blocked {
+            i.blocked.insert(key);
+        } else if i.blocked.remove(&key) {
+            i.dispatch();
+        }
+    }
+
+    /// Is `key` waiting and held back by the policy?
+    pub fn is_blocked(&self, key: u64) -> bool {
+        let i = self.inner.lock().unwrap();
+        i.blocked.contains(&key) && i.waiters.iter().any(|w| w.key == key)
+    }
+
+    /// Turn the express lane on or off (see the module documentation).
+    pub fn set_express(&self, on: bool) {
+        let mut i = self.inner.lock().unwrap();
+        i.express = on;
+        i.dispatch();
     }
 
     /// Wait for a running slot. `Err(Cancelled)` if `cancel` fires first (no slot is leaked).
@@ -199,13 +287,12 @@ impl SlotScheduler {
             i.dispatch();
         }
         tokio::select! {
-            _ = &mut rx => Ok(SlotGuard { sched: self.clone() }),
+            granted = &mut rx => Ok(SlotGuard { sched: self.clone(), prio: granted.unwrap_or(prio) }),
             _ = cancel.cancelled() => {
                 let mut i = self.inner.lock().unwrap();
-                if rx.try_recv().is_ok() {
+                if let Ok(granted) = rx.try_recv() {
                     // Granted in the same instant we were cancelled: give the slot back.
-                    i.running -= 1;
-                    i.dispatch();
+                    i.release(granted);
                 } else {
                     i.waiters.retain(|w| w.key != key);
                 }
@@ -414,5 +501,117 @@ mod tests {
             t.await.unwrap();
         }
         assert_eq!(*order.lock().unwrap(), vec![6, 5]);
+    }
+    /// Start `keys` (in this order, each with `prio`) waiting; returns the order they got a slot in.
+    async fn queue_up(s: &Arc<SlotScheduler>, keys: &[(u64, Priority)]) -> (Vec<tokio::task::JoinHandle<()>>, Arc<Mutex<Vec<u64>>>) {
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut tasks = Vec::new();
+        for &(key, prio) in keys {
+            let (s, order) = (s.clone(), order.clone());
+            tasks.push(tokio::spawn(async move {
+                let g = s.acquire(key, prio, &CancellationToken::new()).await.unwrap();
+                order.lock().unwrap().push(key);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                drop(g);
+            }));
+            settle().await;
+        }
+        (tasks, order)
+    }
+
+    #[tokio::test]
+    async fn the_users_order_decides_between_equal_priorities() {
+        let s = SlotScheduler::new(1);
+        let first = s.acquire(1, Priority::Normal, &CancellationToken::new()).await.unwrap();
+        let (tasks, order) =
+            queue_up(&s, &[(40, Priority::Normal), (41, Priority::Normal), (42, Priority::Normal), (43, Priority::High)]).await;
+        // The user moved 42 to the top and 40 to the bottom; priority still comes first.
+        s.set_policy(HashMap::from([(42, -10), (41, 5), (40, 9)]), HashSet::new());
+        drop(first);
+        for t in tasks {
+            t.await.unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), vec![43, 42, 41, 40]);
+    }
+
+    #[tokio::test]
+    async fn blocked_waiters_keep_waiting_without_holding_up_the_others() {
+        let s = SlotScheduler::new(1);
+        s.set_policy(HashMap::new(), HashSet::from([50]));
+        let (tasks, order) = queue_up(&s, &[(50, Priority::Highest), (51, Priority::Low)]).await;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert_eq!(*order.lock().unwrap(), vec![51], "the blocked download waits, the next one runs");
+        assert!(s.is_blocked(50) && !s.is_blocked(51));
+        s.set_policy(HashMap::new(), HashSet::new()); // its queue opens
+        for t in tasks {
+            t.await.unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), vec![51, 50]);
+        assert_eq!((s.running(), s.queued()), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn the_express_lane_gives_an_urgent_download_one_extra_slot_only_behind_less_urgent_ones() {
+        let s = SlotScheduler::new(1);
+        let c = CancellationToken::new();
+        s.set_express(true);
+        let low = s.acquire(1, Priority::Low, &c).await.unwrap();
+        // An urgent download does not wait behind a low one...
+        let high = tokio::time::timeout(Duration::from_secs(1), s.acquire(2, Priority::High, &c)).await.expect("express slot").unwrap();
+        assert_eq!(s.running(), 2);
+        // ...but only one extra slot is ever given, and never to a normal download.
+        let (s2, c2) = (s.clone(), c.clone());
+        let waiting = tokio::spawn(async move { s2.acquire(3, Priority::Highest, &c2).await.map(drop) });
+        let (s3, c3) = (s.clone(), c.clone());
+        let normal = tokio::spawn(async move { s3.acquire(4, Priority::Normal, &c3).await.map(drop) });
+        settle().await;
+        assert_eq!((s.running(), s.queued()), (2, 2));
+        drop(high);
+        waiting.await.unwrap().unwrap();
+        drop(low);
+        normal.await.unwrap().unwrap();
+        assert_eq!(s.running(), 0);
+    }
+
+    #[tokio::test]
+    async fn no_express_lane_behind_downloads_as_urgent_or_when_it_is_off() {
+        let s = SlotScheduler::new(1);
+        let c = CancellationToken::new();
+        let _low = s.acquire(1, Priority::Low, &c).await.unwrap();
+        let (s2, c2) = (s.clone(), c.clone());
+        let off = tokio::spawn(async move { s2.acquire(2, Priority::Highest, &c2).await.map(drop) });
+        settle().await;
+        assert_eq!(s.queued(), 1, "off by default");
+        s.set_express(true);
+        off.await.unwrap().unwrap();
+        let s = SlotScheduler::new(1);
+        s.set_express(true);
+        let _high = s.acquire(1, Priority::High, &c).await.unwrap();
+        let (s2, c2) = (s.clone(), c.clone());
+        let _t = tokio::spawn(async move { s2.acquire(2, Priority::High, &c2).await.map(drop) });
+        settle().await;
+        assert_eq!((s.running(), s.queued()), (1, 1), "a high download waits behind another high one");
+    }
+
+    #[tokio::test]
+    async fn a_priority_raised_while_waiting_is_the_one_released() {
+        let s = SlotScheduler::new(1);
+        let c = CancellationToken::new();
+        s.set_express(true);
+        let low = s.acquire(1, Priority::Low, &c).await.unwrap();
+        let (s2, c2) = (s.clone(), c.clone());
+        let t = tokio::spawn(async move {
+            let g = s2.acquire(2, Priority::Low, &c2).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            drop(g);
+        });
+        settle().await;
+        assert!(s.set_priority(2, Priority::High), "raised: takes the express slot at once");
+        settle().await;
+        assert_eq!(s.running(), 2);
+        t.await.unwrap();
+        drop(low);
+        assert_eq!(s.running(), 0);
+        assert!(s.inner.lock().unwrap().held.is_empty(), "every slot was given back under the priority it was granted at");
     }
 }

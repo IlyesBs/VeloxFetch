@@ -134,6 +134,9 @@ pub trait SystemIntegration: Send + Sync {
     /// How long since the user last used the keyboard or mouse (`None`: the system does not say). Only a
     /// duration: no input is ever read.
     fn user_idle(&self) -> Option<std::time::Duration>;
+    /// Whether the computer is online and over which kind of connection (see [`crate::network`]). Nothing is
+    /// sent: only the routing table and the adapter are read.
+    fn network(&self) -> crate::NetworkState;
 }
 
 // ------------------------------------------------------------------------------------- commands (pure)
@@ -555,6 +558,10 @@ impl SystemIntegration for NativeSystem {
         #[allow(unreachable_code)]
         None
     }
+
+    fn network(&self) -> crate::NetworkState {
+        crate::network::current()
+    }
 }
 
 /// macOS: seconds since the last keyboard / mouse event of the session (CoreGraphics).
@@ -908,6 +915,7 @@ pub struct DryRunSystem {
     protocols: Mutex<HashSet<(String, PathBuf)>>,
     login: Mutex<Option<PathBuf>>,
     idle: Mutex<Option<std::time::Duration>>,
+    net: Mutex<crate::NetworkState>,
 }
 
 impl Default for DryRunSystem {
@@ -919,6 +927,7 @@ impl Default for DryRunSystem {
             protocols: Default::default(),
             login: Default::default(),
             idle: Default::default(),
+            net: Default::default(),
         }
     }
 }
@@ -938,6 +947,11 @@ impl DryRunSystem {
     /// What [`SystemIntegration::user_idle`] answers from now on.
     pub fn set_user_idle(&self, idle: Option<std::time::Duration>) {
         *self.idle.lock().unwrap_or_else(|p| p.into_inner()) = idle;
+    }
+
+    /// What [`SystemIntegration::network`] answers from now on (unknown by default).
+    pub fn set_network(&self, state: crate::NetworkState) {
+        *self.net.lock().unwrap_or_else(|p| p.into_inner()) = state;
     }
 
     pub fn calls(&self) -> Vec<SystemCall> {
@@ -1053,6 +1067,10 @@ impl SystemIntegration for DryRunSystem {
 
     fn user_idle(&self) -> Option<std::time::Duration> {
         *self.idle.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn network(&self) -> crate::NetworkState {
+        *self.net.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 

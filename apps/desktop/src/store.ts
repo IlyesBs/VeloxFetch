@@ -9,7 +9,7 @@
 //  * `groups` (which downloads are active / queued / ...) is rebuilt only when a download is added,
 //    removed or changes status, never on progress ticks.
 
-import type { Download, DownloadStatus, ManagerEvent, MediaJob, Metrics, PendingDownload, Progress, QueueState } from "./types";
+import type { Download, DownloadStatus, ManagerEvent, MediaJob, Metrics, PendingDownload, Progress, Queues, QueueState } from "./types";
 
 export type GroupName = "active" | "queued" | "paused" | "failed" | "completed" | "cancelled";
 export type Groups = Record<GroupName, number[]>;
@@ -33,6 +33,8 @@ export interface State {
   ioHistory: IoHistory;
   /** Queue / schedule / power state. Changes rarely and arrives as its own event. */
   queue: QueueState | null;
+  /** The Smart Download Queues (their rules, open or closed, the network). Its own event too. */
+  queues: Queues | null;
   /** Browser downloads waiting for the user (oldest first). */
   pending: PendingDownload[];
   /** Stream (HLS / DASH) downloads, oldest first. A separate list: they are not rows of the download list. */
@@ -115,6 +117,7 @@ export function initialState(): State {
     speedHistory: [],
     ioHistory: EMPTY_IO,
     queue: null,
+    queues: null,
     pending: [],
     media: [],
     toasts: [],
@@ -129,11 +132,20 @@ function mergeProgress(d: Download, p: Progress): Download {
     d.totalSize === total &&
     d.speedBps === p.speedBps &&
     d.etaSecs === p.etaSecs &&
-    d.connections === p.connections
+    d.connections === p.connections &&
+    d.retrying === (p.retrying ?? false)
   ) {
     return d;
   }
-  return { ...d, downloaded: p.downloaded, totalSize: total, speedBps: p.speedBps, etaSecs: p.etaSecs, connections: p.connections };
+  return {
+    ...d,
+    downloaded: p.downloaded,
+    totalSize: total,
+    speedBps: p.speedBps,
+    etaSecs: p.etaSecs,
+    connections: p.connections,
+    retrying: p.retrying ?? false,
+  };
 }
 
 export function reduce(state: State, ev: ManagerEvent): State {
@@ -171,6 +183,8 @@ export function reduce(state: State, ev: ManagerEvent): State {
     }
     case "queue":
       return { ...state, queue: ev.queue };
+    case "queues":
+      return { ...state, queues: ev.queues };
     case "pending": {
       const i = state.pending.findIndex((p) => p.token === ev.pending.token);
       const pending = i < 0 ? [...state.pending, ev.pending] : state.pending.map((p, j) => (j === i ? ev.pending : p));
@@ -202,7 +216,14 @@ export interface Store {
   /** Apply queued events now. */
   flush(): void;
   /** Replace everything with a fresh snapshot (initial load / resync). */
-  load(downloads: Download[], metrics: Metrics, queue?: QueueState | null, waiting?: PendingDownload[], media?: MediaJob[]): void;
+  load(
+    downloads: Download[],
+    metrics: Metrics,
+    queue?: QueueState | null,
+    waiting?: PendingDownload[],
+    media?: MediaJob[],
+    queues?: Queues | null,
+  ): void;
   setMetrics(m: Metrics): void;
   toast(kind: Toast["kind"], text: string): void;
   dismissToast(id: number): void;
@@ -246,12 +267,12 @@ export function createStore(schedule: Scheduler = rafOrTimeout): Store {
       }
     },
     flush,
-    load(downloads, metrics, queue, waiting, media) {
+    load(downloads, metrics, queue, waiting, media, queues) {
       const byId: Record<number, Download> = {};
       for (const d of downloads) byId[d.id] = d;
       const ids = downloads.map((d) => d.id);
       pending = [];
-      set({ ...state, ready: true, byId, ids, groups: buildGroups(ids, byId), metrics, queue: queue ?? state.queue, pending: waiting ?? state.pending, media: media ?? state.media });
+      set({ ...state, ready: true, byId, ids, groups: buildGroups(ids, byId), metrics, queue: queue ?? state.queue, queues: queues ?? state.queues, pending: waiting ?? state.pending, media: media ?? state.media });
     },
     setMetrics: (metrics) => set({ ...state, metrics, ioHistory: withIo(state.ioHistory, state.metrics, metrics) }),
     toast(kind, text) {
