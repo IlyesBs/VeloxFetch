@@ -76,9 +76,14 @@ when the site or the network fails part-way (Retry continues from what is alread
 (speed, active, network) and land in the History. Videos protected with DRM (Netflix, Shahid, STC tv...) cannot be
 downloaded, and VeloxFetch says so.
 
-Smart throttle (Settings > Speed) slows downloads while a game or a call runs and restores full speed when it closes;
-the details of a video or audio download can **preview** it while it downloads. See
-[`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
+Smart throttle (Settings > Speed) lets downloads give way while you browse, watch or play (automatic mode, or while a
+listed game / call runs) and gives them the whole connection when the network or the computer is idle, smoothly and never
+below the reserved minimum; a status line and a speed graph show what it does. The details of a video or audio download
+can **preview** it while it downloads. See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
+
+On the desktop: closing the window keeps VeloxFetch in the tray, it can start at login (in the tray), and it notifies when
+a download finishes or fails while the window is hidden (Settings > Appearance > On the desktop). A download sent from the
+browser while VeloxFetch is closed starts it, also for browsers installed as snap / Flatpak packages.
 
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
 

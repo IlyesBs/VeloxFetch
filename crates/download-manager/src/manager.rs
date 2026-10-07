@@ -31,7 +31,7 @@ pub use media::is_stream_link;
 use pending::PendingList;
 pub use preview::{media_type as preview_media_type, PreviewResponse};
 use queue::QueueState;
-pub use smart_throttle::DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS;
+pub use smart_throttle::{Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER};
 use storage::{Sorter, Storage};
 
 /// Time constant of the speed shown for each download.

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use download_manager::{DownloadManager, ManagerConfig, ManagerError, NewDownload, SetSmartThrottle};
+use download_manager::{DownloadManager, ManagerConfig, ManagerError, NewDownload, SetSmartThrottle, ThrottleSignals};
 use downloader_core::DownloadStatus;
 use velox_integration_tests::{random_data, serve};
 
@@ -50,9 +50,14 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
     m.smart_throttle_observe(Some(&names(&["Zoom.exe"])));
     assert!(m.smart_throttle().limit_bps.is_none());
 
-    m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), apps: Some(names(&["VeloxTestGame"])), share_percent: Some(25) })
-        .await
-        .unwrap();
+    m.set_smart_throttle(SetSmartThrottle {
+        enabled: Some(true),
+        apps: Some(names(&["VeloxTestGame"])),
+        share_percent: Some(25),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     m.smart_throttle_observe(Some(&names(&["explorer.exe", "VELOXTESTGAME.EXE"])));
     let s = m.smart_throttle();
     assert_eq!(s.active_app.as_deref(), Some("VeloxTestGame"));
@@ -96,18 +101,105 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
         SetSmartThrottle { share_percent: Some(0), ..Default::default() },
         SetSmartThrottle { share_percent: Some(95), ..Default::default() },
         SetSmartThrottle { apps: Some(names(&["C:\\Games\\x.exe"])), ..Default::default() },
+        SetSmartThrottle { min_bps: Some(1024), ..Default::default() },
+        SetSmartThrottle { min_bps: Some(2 * 1024 * 1024 * 1024), ..Default::default() },
     ] {
         assert!(matches!(m.set_smart_throttle(bad).await, Err(ManagerError::InvalidInput(_))));
     }
+}
+
+fn browsing() -> ThrottleSignals {
+    ThrottleSignals { other_bps: Some(400.0 * 1024.0), idle: Some(Duration::ZERO) }
+}
+
+fn quiet(idle_secs: u64) -> ThrottleSignals {
+    ThrottleSignals { other_bps: Some(0.0), idle: Some(Duration::from_secs(idle_secs)) }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn automatic_mode_gives_way_to_browsing_and_takes_the_line_back_when_it_is_free() {
+    let b = base("auto");
+    let m = manager(&b).await;
+    let s = m.smart_throttle();
+    assert!(s.auto, "automatic mode is on by default (once Smart throttle itself is on)");
+    assert_eq!(s.min_bps, 256 * 1024);
+    assert_eq!(s.reason, "off");
+
+    // Off: browsing changes nothing.
+    for _ in 0..3 {
+        m.smart_throttle_observe_signals(Some(&[]), browsing());
+    }
+    assert!(m.smart_throttle().limit_bps.is_none());
+
+    m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), apps: Some(vec![]), ..Default::default() }).await.unwrap();
+    m.smart_throttle_observe_signals(Some(&[]), quiet(0));
+    assert_eq!(m.smart_throttle().reason, "fullFree", "downloads alone: full speed");
+    m.smart_throttle_observe_signals(Some(&[]), quiet(600));
+    assert_eq!(m.smart_throttle().reason, "fullIdle");
+
+    // Browsing: after the confirmation, downloads slow down (here to the default 1 MB/s: no speed learned yet).
+    let data = random_data(8 * MB, 9);
+    let srv = serve(data.clone()).await;
+    for _ in 0..2 {
+        m.smart_throttle_observe_signals(Some(&[]), browsing());
+    }
+    let s = m.smart_throttle();
+    assert_eq!((s.reason.as_str(), s.limit_bps), ("browsing", Some(1024 * 1024)), "{s:?}");
+    let d = m.create_download(NewDownload { url: srv.url("/auto.bin"), ..Default::default() }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+    let mid = m.get_download(d.id).await.unwrap().downloaded;
+    assert!(mid > 0 && mid < 5 * MB as u64, "slowed but moving: {mid} bytes after 2 s");
+
+    // The network calms down: held for a while (easing), then back to full speed, and the download finishes.
+    let mut reasons = Vec::new();
+    for _ in 0..40 {
+        m.smart_throttle_observe_signals(Some(&[]), quiet(0));
+        let r = m.smart_throttle().reason;
+        if reasons.last() != Some(&r) {
+            reasons.push(r.clone());
+        }
+        if r == "fullFree" {
+            break;
+        }
+    }
+    assert_eq!(reasons.last().map(String::as_str), Some("fullFree"), "{reasons:?}");
+    assert!(reasons.iter().any(|r| r == "easing"), "it eased back up: {reasons:?}");
+    assert!(m.smart_throttle().limit_bps.is_none());
+    wait_status(&m, d.id, DownloadStatus::Completed, 15).await;
+    assert_eq!(std::fs::read(m.get_download(d.id).await.unwrap().destination).unwrap(), *data);
+
+    // Automatic mode off: browsing is ignored again (listed programs still count).
+    m.set_smart_throttle(SetSmartThrottle { auto: Some(false), ..Default::default() }).await.unwrap();
+    for _ in 0..3 {
+        m.smart_throttle_observe_signals(Some(&[]), browsing());
+    }
+    assert!(m.smart_throttle().limit_bps.is_none());
+
+    // A higher reserved minimum is kept, and survives a restart.
+    m.set_smart_throttle(SetSmartThrottle { auto: Some(true), min_bps: Some(3 * 1024 * 1024), ..Default::default() }).await.unwrap();
+    for _ in 0..3 {
+        m.smart_throttle_observe_signals(Some(&[]), browsing());
+    }
+    assert_eq!(m.smart_throttle().limit_bps, Some(3 * 1024 * 1024));
+    m.shutdown().await;
+    let m = manager(&b).await;
+    let s = m.smart_throttle();
+    assert!(s.enabled && s.auto && s.min_bps == 3 * 1024 * 1024 && s.limit_bps.is_none(), "{s:?}");
+    m.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_cap_follows_the_speed_this_connection_can_reach() {
     let b = base("learn");
     let m = manager(&b).await;
-    m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), apps: Some(names(&["VeloxTestCall"])), share_percent: Some(50) })
-        .await
-        .unwrap();
+    m.set_smart_throttle(SetSmartThrottle {
+        enabled: Some(true),
+        apps: Some(names(&["VeloxTestCall"])),
+        share_percent: Some(50),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
     let srv = serve(random_data(40 * MB, 3)).await;
     *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(2);
     let d = m.create_download(NewDownload { url: srv.url("/learn.bin"), ..Default::default() }).await.unwrap();

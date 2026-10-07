@@ -1,5 +1,14 @@
-//! Smart throttle: while a game or a video call is running, downloads slow down so they do not spoil it;
-//! when it closes, full speed (every connection) comes back at once.
+//! Smart throttle: downloads give way to what the user is doing, and take the whole connection when nothing
+//! else needs it.
+//!
+//! * A listed program (a game, a video call) runs: downloads keep the chosen share of the connection; when it
+//!   closes, full speed comes back at once.
+//! * Automatic mode (on by default): the computer's own traffic is measured. When something else uses the
+//!   connection while the user is at the computer (browsing, a video), downloads slow down so it stays
+//!   responsive; heavy traffic while the user is away slows them less; when the network is free or the
+//!   computer is idle, they speed back up, step by step. Smoothing, two thresholds (on / off), a short
+//!   confirmation before slowing and a longer calm before speeding up keep the speed from jumping around.
+//!   Downloads never go below the reserved minimum: they never stop.
 //!
 //! This module only holds the settings and the decision. Finding out which programs are running is the
 //! desktop app's job (`src-tauri/src/smart_throttle.rs`), which calls [`DownloadManager::smart_throttle_observe`]
@@ -19,6 +28,8 @@ const APPS_KEY: &str = "smart_throttle.apps";
 const SHARE_KEY: &str = "smart_throttle.share";
 /// The best speed seen, kept across restarts so the cap is right from the first minute.
 const PEAK_KEY: &str = "smart_throttle.peak";
+const AUTO_KEY: &str = "smart_throttle.auto";
+const MIN_KEY: &str = "smart_throttle.min_bps";
 /// Below this total nothing is really downloading: the learned speed is left alone.
 const LEARN_MIN_BPS: f64 = 64.0 * 1024.0;
 /// While downloading below the best speed seen, it is forgotten slowly (half in about 35 minutes of
@@ -51,8 +62,11 @@ pub const DEFAULT_APPS: &[&str] = &[
 const DEFAULT_SHARE: u8 = 25;
 const MAX_APPS: usize = 64;
 const MAX_APP_NAME: usize = 64;
-/// Never slower than this, so downloads keep moving (and resume quickly when the cap lifts).
+/// Never slower than this, so downloads keep moving (and resume quickly when the cap lifts). The user can
+/// reserve more (or a little less, down to [`MIN_FLOOR_BPS`]).
 const FLOOR_BPS: u64 = 256 * 1024;
+const MIN_FLOOR_BPS: u64 = 32 * 1024;
+const MAX_FLOOR_BPS: u64 = 1024 * 1024 * 1024;
 /// Used until VeloxFetch has seen how fast this connection is.
 const UNKNOWN_PEAK_LIMIT_BPS: u64 = 1024 * 1024;
 
@@ -69,6 +83,15 @@ pub(super) struct SmartState {
     limit: Option<u64>,
     /// The last scan worked (`false` = the desktop app could not list programs: full speed).
     scan_ok: bool,
+    /// Automatic mode: follow the computer's other traffic and the user's presence.
+    auto: bool,
+    /// The least downloads keep, whatever happens (bytes/s).
+    floor: u64,
+    ctl: Controller,
+    reason: Reason,
+    /// Other traffic (smoothed) and whether the user is away, as last seen (for the status line).
+    other_bps: Option<u64>,
+    user_idle: Option<bool>,
 }
 
 impl SmartState {
@@ -86,6 +109,11 @@ impl SmartState {
             peak_bps: peak,
             saved_peak: peak,
             scan_ok: true,
+            auto: get(AUTO_KEY).as_deref() != Some("false"),
+            floor: get(MIN_KEY)
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|v| (MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(v))
+                .unwrap_or(FLOOR_BPS),
             ..Default::default()
         }
     }
@@ -143,11 +171,178 @@ fn clean_apps(apps: &[String]) -> Result<Vec<String>, ManagerError> {
 }
 
 /// The cap while a listed program runs: the chosen share of the best speed seen, never below the floor.
+#[cfg(test)]
 pub fn cap_for(peak_bps: f64, share: u8) -> u64 {
+    cap_with_floor(peak_bps, share, FLOOR_BPS)
+}
+
+fn cap_with_floor(peak_bps: f64, share: u8, floor: u64) -> u64 {
     if peak_bps < 1.0 {
-        return UNKNOWN_PEAK_LIMIT_BPS;
+        return UNKNOWN_PEAK_LIMIT_BPS.max(floor);
     }
-    ((peak_bps * f64::from(share) / 100.0) as u64).max(FLOOR_BPS)
+    ((peak_bps * f64::from(share) / 100.0) as u64).max(floor)
+}
+
+// ------------------------------------------------------------------------------------------ automatic mode
+
+/// What Smart throttle is doing, for the status line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Reason {
+    #[default]
+    Off,
+    /// Full speed: the computer is idle.
+    FullIdle,
+    /// Full speed: downloads are the only real traffic.
+    FullFree,
+    /// Slowed: the user is using the internet.
+    Browsing,
+    /// Slowed (less): heavy traffic while the user is away.
+    Busy,
+    /// Slowed: a listed program runs.
+    App,
+    /// Speeding back up, step by step.
+    Easing,
+    /// Not enough information (no traffic counters): full speed.
+    Unknown,
+}
+
+impl Reason {
+    pub fn code(self) -> &'static str {
+        match self {
+            Reason::Off => "off",
+            Reason::FullIdle => "fullIdle",
+            Reason::FullFree => "fullFree",
+            Reason::Browsing => "browsing",
+            Reason::Busy => "busy",
+            Reason::App => "app",
+            Reason::Easing => "easing",
+            Reason::Unknown => "unknown",
+        }
+    }
+}
+
+/// One observation (every few seconds).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Signals {
+    /// The computer's download traffic that is not VeloxFetch's (bytes/s); `None` when unknown.
+    pub other_bps: Option<f64>,
+    /// How long since the user last touched the keyboard or mouse; `None` when the system does not say.
+    pub idle: Option<Duration>,
+}
+
+/// The user counts as away after this long without input.
+pub const IDLE_AFTER: Duration = Duration::from_secs(120);
+/// Other traffic above this while the user is at the computer: they are using the internet.
+const ACTIVE_ON_BPS: f64 = 48.0 * 1024.0;
+/// Heavy traffic (whether or not the user is there): at least this, or this share of the connection.
+const BUSY_ON_BPS: f64 = 512.0 * 1024.0;
+const BUSY_ON_SHARE: f64 = 0.15;
+/// Thresholds to leave a state are lower than to enter it (no flapping around one value).
+const OFF_RATIO: f64 = 0.5;
+/// Smoothing of the measured traffic (share of the newest reading).
+const SMOOTHING: f64 = 0.5;
+/// Readings in a row before slowing down (a single burst changes nothing).
+const CONFIRM: u8 = 2;
+/// Calm readings until the first step up (the cap is held for the ones before); doubled while the network keeps
+/// changing.
+const CALM: u32 = 4;
+/// Speeding up: this much more per reading, until full speed.
+const STEP_UP: f64 = 1.5;
+
+/// The share of the connection downloads keep while the user uses the internet, from the chosen mode
+/// (Aggressive 10 % -> 35 %, Balanced 25 % -> 50 %, Conservative 50 % -> 75 %).
+pub fn keep_while_active(share: u8) -> f64 {
+    (f64::from(share) / 100.0 + 0.25).clamp(0.25, 0.9)
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Controller {
+    other: Option<f64>,
+    active: bool,
+    busy: bool,
+    pending: u8,
+    calm: u32,
+    /// Readings since the network last calmed down (`None`: it never was busy); a quick return means an
+    /// unsteady network.
+    since_calm: Option<u32>,
+    unsteady: bool,
+    cap: Option<f64>,
+}
+
+impl Controller {
+    /// One step: the new cap (`None` = full speed) and why. `peak`: the best speed seen; `floor`: the least
+    /// downloads keep; `share`: the chosen mode.
+    pub fn step(&mut self, sig: Signals, peak: f64, share: u8, floor: u64) -> (Option<u64>, Reason) {
+        let floor = floor as f64;
+        let Some(raw) = sig.other_bps else {
+            // No counters: nothing to go on, so never hold downloads back.
+            *self = Controller::default();
+            return (None, Reason::Unknown);
+        };
+        let other = match self.other {
+            Some(o) => o + SMOOTHING * (raw.max(0.0) - o),
+            None => raw.max(0.0),
+        };
+        self.other = Some(other);
+        let away = sig.idle.is_some_and(|i| i >= IDLE_AFTER);
+        let busy_on = BUSY_ON_BPS.max(peak * BUSY_ON_SHARE);
+        let was_slowing = self.active || self.busy;
+        self.active = !away && other > if self.active { ACTIVE_ON_BPS * OFF_RATIO } else { ACTIVE_ON_BPS };
+        self.busy = other > if self.busy { busy_on * OFF_RATIO } else { busy_on };
+        let wants_slow = self.active || self.busy;
+        if wants_slow && !was_slowing {
+            self.unsteady = self.since_calm.is_some_and(|n| n < 10 * CALM);
+        }
+        self.since_calm = self.since_calm.map(|n| n.saturating_add(1));
+
+        if wants_slow {
+            self.calm = 0;
+            self.pending = self.pending.saturating_add(1);
+            let keep = keep_while_active(share);
+            // The user is away and something else downloads heavily (updates, a stream on another app): slow less.
+            let keep = if self.active { keep } else { keep + (1.0 - keep) / 2.0 };
+            let known = if peak < 1.0 { UNKNOWN_PEAK_LIMIT_BPS as f64 / keep } else { peak };
+            let target = (known * keep).max(floor);
+            if self.pending >= CONFIRM && self.cap.is_none_or(|c| target < c) {
+                self.cap = Some(target);
+            }
+            let reason = if self.active { Reason::Browsing } else { Reason::Busy };
+            return (self.cap.map(|c| c as u64), if self.cap.is_some() { reason } else { idle_or_free(away) });
+        }
+
+        self.pending = 0;
+        if self.calm == 0 && was_slowing {
+            self.since_calm = Some(0);
+        }
+        self.calm = self.calm.saturating_add(1);
+        let Some(cap) = self.cap else { return (None, idle_or_free(away)) };
+        let needed = if self.unsteady { CALM * 2 } else { CALM };
+        if self.calm < needed {
+            return (Some(cap as u64), Reason::Easing);
+        }
+        let next = cap * STEP_UP;
+        if peak < 1.0 || next >= peak * 0.95 {
+            self.cap = None;
+            self.unsteady = false;
+            (None, idle_or_free(away))
+        } else {
+            self.cap = Some(next);
+            (Some(next as u64), Reason::Easing)
+        }
+    }
+
+    /// The automatic cap is dropped (mode turned off, a listed program took over...).
+    pub fn reset(&mut self) {
+        *self = Controller::default();
+    }
+}
+
+fn idle_or_free(away: bool) -> Reason {
+    if away {
+        Reason::FullIdle
+    } else {
+        Reason::FullFree
+    }
 }
 
 impl DownloadManager {
@@ -164,6 +359,12 @@ impl DownloadManager {
             active_app: s.active_app.clone(),
             limit_bps: s.limit,
             scan_ok: s.scan_ok,
+            auto: s.auto,
+            min_bps: s.floor,
+            reason: if s.enabled { s.reason.code() } else { "off" }.to_string(),
+            other_bps: s.other_bps,
+            user_idle: s.user_idle,
+            peak_bps: (s.peak_bps >= 1.0).then_some(s.peak_bps as u64),
         }
     }
 
@@ -173,6 +374,15 @@ impl DownloadManager {
             if !(5..=90).contains(&p) {
                 return Err(ManagerError::invalid("the share must be between 5 and 90 percent"));
             }
+        }
+        if let Some(m) = req.min_bps {
+            if !(MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(&m) {
+                return Err(ManagerError::invalid("the reserved minimum must be between 32 KB/s and 1 GB/s"));
+            }
+            self.inner.store.set_setting(MIN_KEY, &m.to_string())?;
+        }
+        if let Some(on) = req.auto {
+            self.inner.store.set_setting(AUTO_KEY, if on { "true" } else { "false" })?;
         }
         if let Some(a) = &apps {
             self.inner.store.set_setting(APPS_KEY, &serde_json::to_string(a).unwrap_or_default())?;
@@ -194,29 +404,77 @@ impl DownloadManager {
             if let Some(on) = req.enabled {
                 s.enabled = on;
             }
-            !s.enabled
+            if let Some(m) = req.min_bps {
+                s.floor = m;
+            }
+            if let Some(on) = req.auto {
+                s.auto = on;
+            }
+            if !s.enabled || !s.auto {
+                s.ctl.reset();
+            }
+            !s.enabled || req.auto == Some(false) || req.min_bps.is_some() || req.share_percent.is_some()
         };
         if release {
-            // Off: full speed now, not at the next scan.
-            self.smart_throttle_observe(Some(&[]));
+            // Off (or a new mode / minimum): applied now, not at the next scan. Off means full speed at once.
+            let enabled = self.inner.smart.lock().unwrap().enabled;
+            if !enabled {
+                self.smart_throttle_observe(Some(&[]));
+            } else {
+                self.reapply_smart_cap();
+            }
         }
         tracing::info!(enabled = ?req.enabled, "smart throttle settings changed");
         Ok(self.smart_throttle())
     }
 
     /// What the desktop app found running (`None` = it could not tell: full speed). Applies or lifts the cap.
+    /// Without activity information: the automatic mode keeps full speed (see [`Self::smart_throttle_observe_activity`]).
     pub fn smart_throttle_observe(&self, running: Option<&[String]>) {
+        self.smart_throttle_observe_signals(running, Signals::default());
+    }
+
+    /// The desktop app's observation with the user's idle time; the computer's other traffic is measured here.
+    pub fn smart_throttle_observe_activity(&self, running: Option<&[String]>, idle: Option<Duration>) {
+        let root = self.inner.storage.lock().unwrap_or_else(|p| p.into_inner()).root.clone();
+        self.inner.sysio.refresh(root); // also while the window is hidden (nobody else asks then)
+        let mine = self.velox_download_bps();
+        let other = self.inner.sysio.rates().net_down.map(|net| (net as f64 - mine).max(0.0));
+        self.smart_throttle_observe_signals(running, Signals { other_bps: other, idle });
+    }
+
+    fn velox_download_bps(&self) -> f64 {
         // Ordinary downloads and video jobs (streams, video pages) together: both are capped.
         let files: f64 = self.inner.trackers.lock().unwrap().values().map(|t| t.speed).sum();
-        let total = files + self.media_live().0 as f64;
-        let (changed, limit, app, save_peak) = {
+        files + self.media_live().0 as f64
+    }
+
+    /// The decision, from what was observed (tests give the signals directly).
+    pub fn smart_throttle_observe_signals(&self, running: Option<&[String]>, sig: Signals) {
+        let total = self.velox_download_bps();
+        let (changed, limit, reason, save_peak) = {
             let mut s = self.inner.smart.lock().unwrap();
             s.scan_ok = running.is_some();
             let found = match running {
                 Some(r) if s.enabled => find_running(&s.apps, r).map(str::to_string),
                 _ => None,
             };
-            if found.is_none() {
+            s.other_bps = sig.other_bps.map(|o| o as u64);
+            s.user_idle = sig.idle.map(|i| i >= IDLE_AFTER);
+            let (share, floor, peak) = (s.share, s.floor, s.peak_bps);
+            let (limit, reason) = if !s.enabled {
+                s.ctl.reset();
+                (None, Reason::Off)
+            } else if found.is_some() {
+                // A listed program wins; the automatic cap starts over when it closes.
+                s.ctl.reset();
+                (Some(cap_with_floor(peak, share, floor)), Reason::App)
+            } else if s.auto {
+                s.ctl.step(sig, peak, share, floor)
+            } else {
+                (None, if sig.idle.is_some_and(|i| i >= IDLE_AFTER) { Reason::FullIdle } else { Reason::FullFree })
+            };
+            if limit.is_none() {
                 // Learn how fast this connection can go (only while nothing holds it back).
                 s.peak_bps = learn_peak(s.peak_bps, total);
             }
@@ -225,11 +483,11 @@ impl DownloadManager {
             if let Some(p) = save_peak {
                 s.saved_peak = p;
             }
-            let limit = found.as_ref().map(|_| cap_for(s.peak_bps, s.share));
             let changed = s.active_app != found || s.limit != limit;
-            s.active_app = found.clone();
+            s.active_app = found;
             s.limit = limit;
-            (changed, limit, found, save_peak)
+            s.reason = reason;
+            (changed, limit, reason, save_peak)
         };
         if let Some(p) = save_peak {
             if let Err(e) = self.inner.store.set_setting(PEAK_KEY, &format!("{p:.0}")) {
@@ -239,11 +497,32 @@ impl DownloadManager {
         }
         if changed {
             self.inner.limits.set_smart(limit);
-            match &app {
-                Some(a) => tracing::info!(program = %a, limit_bps = limit.unwrap_or(0), "smart throttle on: a listed program is running"),
-                None => tracing::info!("smart throttle off: full speed"),
+            match limit {
+                Some(l) => tracing::info!(reason = reason.code(), limit_bps = l, "smart throttle: downloads slowed"),
+                None => tracing::info!(reason = reason.code(), "smart throttle: full speed"),
             }
         }
+    }
+
+    /// A new mode or minimum: an active cap follows at once (a listed program's cap, or the automatic one).
+    fn reapply_smart_cap(&self) {
+        let limit = {
+            let mut s = self.inner.smart.lock().unwrap();
+            let limit = match s.reason {
+                Reason::App => Some(cap_with_floor(s.peak_bps, s.share, s.floor)),
+                _ if s.limit.is_some() && s.auto => {
+                    // Start the automatic cap over from the new settings at the next reading (it slows again only
+                    // if the network is still in use).
+                    s.ctl.reset();
+                    s.reason = Reason::Easing;
+                    s.limit.map(|l| l.max(s.floor))
+                }
+                _ => None,
+            };
+            s.limit = limit;
+            limit
+        };
+        self.inner.limits.set_smart(limit);
     }
 }
 
@@ -295,6 +574,139 @@ mod tests {
         assert_eq!(cap_for(0.0, 25), UNKNOWN_PEAK_LIMIT_BPS);
         assert_eq!(cap_for(100_000_000.0, 25), 25_000_000);
         assert_eq!(cap_for(500_000.0, 10), FLOOR_BPS);
+    }
+
+    const PEAK: f64 = 100_000_000.0; // 100 MB/s
+    const KB: f64 = 1024.0;
+
+    fn sig(other: f64, idle_secs: u64) -> Signals {
+        Signals { other_bps: Some(other), idle: Some(Duration::from_secs(idle_secs)) }
+    }
+
+    #[test]
+    fn browsing_slows_downloads_after_a_confirmation_and_never_below_the_floor() {
+        let mut c = Controller::default();
+        assert_eq!(c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS), (None, Reason::FullFree), "downloads alone: full speed");
+        // One burst of browsing traffic: confirmed first, nothing changes yet.
+        assert_eq!(c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS).0, None);
+        let (cap, why) = c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
+        assert_eq!(why, Reason::Browsing);
+        assert_eq!(cap, Some((PEAK * 0.5) as u64), "Balanced keeps half the connection while browsing");
+        // The reserved minimum always wins over the share.
+        let mut slow = Controller::default();
+        for _ in 0..3 {
+            slow.step(sig(400.0 * KB, 0), 400_000.0, 10, 5_000_000);
+        }
+        assert_eq!(slow.step(sig(400.0 * KB, 0), 400_000.0, 10, 5_000_000).0, Some(5_000_000));
+    }
+
+    #[test]
+    fn the_modes_keep_more_or_less_of_the_connection() {
+        assert!((keep_while_active(10) - 0.35).abs() < 1e-9, "Aggressive");
+        assert!((keep_while_active(25) - 0.5).abs() < 1e-9, "Balanced");
+        assert!((keep_while_active(50) - 0.75).abs() < 1e-9, "Conservative");
+        assert!(keep_while_active(90) <= 0.9);
+    }
+
+    #[test]
+    fn the_speed_comes_back_step_by_step_after_a_calm_and_does_not_jump_around() {
+        let mut c = Controller::default();
+        for _ in 0..3 {
+            c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
+        }
+        let low = c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS).0.unwrap();
+        // Traffic wobbling around the threshold (between the on and off levels) changes nothing.
+        for other in [30.0, 60.0, 30.0, 45.0] {
+            let (cap, why) = c.step(sig(other * KB, 0), PEAK, 25, FLOOR_BPS);
+            assert_eq!((cap, why), (Some(low), Reason::Browsing), "{other} KB/s");
+        }
+        // Calm: the smoothed traffic fades for a few readings (still slowed), then the cap is held for a while
+        // (easing), then it grows by steps, then full speed.
+        let mut caps = Vec::new();
+        for _ in 0..40 {
+            let (cap, why) = c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS);
+            match why {
+                Reason::Browsing => assert_eq!(cap, Some(low), "never lower while it calms down"),
+                Reason::Easing => caps.push(cap.unwrap()),
+                Reason::FullFree => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(caps.len() >= CALM as usize - 1, "held during the calm: {caps:?}");
+        assert!(caps.windows(2).all(|w| w[1] >= w[0]), "only up while calm: {caps:?}");
+        assert!(caps.windows(2).all(|w| (w[1] as f64) <= w[0] as f64 * STEP_UP + 1.0), "no jump: {caps:?}");
+        assert_eq!(c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS), (None, Reason::FullFree));
+    }
+
+    /// Readings the cap is held (easing) after the network calms down, before it first goes up.
+    fn held_before_rising(c: &mut Controller) -> usize {
+        let mut held = 0;
+        let mut first = None;
+        for _ in 0..60 {
+            let (cap, why) = c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS);
+            if why != Reason::Easing {
+                continue; // still fading
+            }
+            match first {
+                None => first = cap,
+                Some(f) if cap != Some(f) => return held,
+                _ => {}
+            }
+            held += 1;
+        }
+        held
+    }
+
+    #[test]
+    fn an_unsteady_network_waits_longer_before_speeding_up() {
+        let busy = |c: &mut Controller| {
+            for _ in 0..3 {
+                c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
+            }
+        };
+        let mut steady = Controller::default();
+        busy(&mut steady);
+        let normal = held_before_rising(&mut steady);
+        assert_eq!(normal, CALM as usize - 1, "held, then up on the last calm reading");
+
+        let mut c = Controller::default();
+        busy(&mut c);
+        // Calms down briefly, then busy again: the network is unsteady.
+        while c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS).1 == Reason::Browsing {}
+        busy(&mut c);
+        assert_eq!(held_before_rising(&mut c), (CALM * 2) as usize - 1, "twice the calm");
+    }
+
+    #[test]
+    fn an_idle_computer_gets_full_speed_and_heavy_background_traffic_is_slowed_less() {
+        let mut c = Controller::default();
+        // Light traffic while the user is away (a sync client): not browsing, full speed, computer idle.
+        for _ in 0..4 {
+            assert_eq!(c.step(sig(200.0 * KB, 600), PEAK, 25, FLOOR_BPS), (None, Reason::FullIdle));
+        }
+        // Heavy traffic while away: slowed, but less than while browsing.
+        let mut cap = None;
+        for _ in 0..4 {
+            cap = c.step(sig(30_000_000.0, 600), PEAK, 25, FLOOR_BPS).0;
+        }
+        assert_eq!(c.step(sig(30_000_000.0, 600), PEAK, 25, FLOOR_BPS).1, Reason::Busy);
+        assert_eq!(cap, Some((PEAK * 0.75) as u64));
+    }
+
+    #[test]
+    fn no_counters_means_full_speed() {
+        let mut c = Controller::default();
+        for _ in 0..3 {
+            c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
+        }
+        assert!(c.cap.is_some());
+        assert_eq!(c.step(Signals { other_bps: None, idle: None }, PEAK, 25, FLOOR_BPS), (None, Reason::Unknown));
+        // Unknown idle time: the user counts as present (browsing still detected).
+        let mut c = Controller::default();
+        for _ in 0..2 {
+            c.step(Signals { other_bps: Some(400.0 * KB), idle: None }, PEAK, 25, FLOOR_BPS);
+        }
+        assert_eq!(c.step(Signals { other_bps: Some(400.0 * KB), idle: None }, PEAK, 25, FLOOR_BPS).1, Reason::Browsing);
     }
 
     #[test]

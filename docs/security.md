@@ -471,3 +471,14 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * **macOS:** hardened runtime with no entitlements; no App Sandbox (the app writes to folders the user picks and starts the checked video
   tools); `veloxfetch://` declared in the bundle's Info.plist.
 
+## Smart throttle, automatic mode
+
+* Signals: the computer's **total** download traffic (the same counters as the dashboard, minus VeloxFetch's own downloads) and
+  the time since the last keyboard / mouse input (Windows `GetLastInputInfo`, macOS CoreGraphics, Linux GNOME idle monitor /
+  screen saver service / logind's idle flag). Never which program or site uses the network, never any input itself; nothing
+  is stored or sent.
+* Safe: no counters means full speed; the cap never goes below the reserved minimum (32 KB/s at the least, 256 KB/s by
+  default), so downloads never stop; it uses its own rate bucket, so the user's limits and the engine are untouched.
+* Steady: smoothed readings, separate on / off thresholds, two readings to confirm before slowing, a calm period before
+  speeding up (doubled when the network keeps changing), then steps of 1.5x.
+

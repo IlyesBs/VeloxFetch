@@ -639,4 +639,12 @@ test("smart throttle: process names only, nothing stored or sent, full speed on 
   assert.match(st, /_ => manager\.smart_throttle_observe\(None\)/, "a failed, slow or panicking scan means full speed");
   const core = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
   assert.match(core, /enabled: get\(ENABLED_KEY\)\.as_deref\(\) == Some\("true"\)/, "off unless the user turned it on");
+  // Automatic mode: of the keyboard and mouse only the idle time is known; traffic is a total, never per program
+  // or per site; no counters means full speed; downloads never go below the reserved minimum.
+  const sys = withoutTestModules(read("crates", "system-integration", "src", "system.rs"));
+  assert.match(sys, /fn user_idle\(&self\) -> Option<std::time::Duration>;/);
+  assert.ok(!/SetWindowsHookEx|GetAsyncKeyState|CGEventTapCreate|XRecord|\/dev\/input/.test(sys), "no input is ever read, only the idle time");
+  assert.match(core, /let Some\(raw\) = sig\.other_bps else \{[\s\S]{0,160}return \(None, Reason::Unknown\);/, "no counters: full speed");
+  assert.match(core, /let target = \(known \* keep\)\.max\(floor\);/, "the automatic cap respects the reserved minimum");
+  assert.match(core, /MIN_FLOOR_BPS: u64 = 32 \* 1024;/, "the reserved minimum can never be zero: downloads never stop");
 });

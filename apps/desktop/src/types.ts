@@ -116,6 +116,28 @@ export interface SmartThrottle {
   limitBps: number | null;
   /** false: running programs could not be listed, so nothing is slowed down. */
   scanOk: boolean;
+  /** Automatic mode: give way while the user uses the internet, full speed when it is free. */
+  auto: boolean;
+  /** The least downloads keep (bytes/s): they never stop. */
+  minBps: number;
+  /** What it does now. */
+  reason: ThrottleReason;
+  /** The computer's other download traffic, when known. */
+  otherBps: number | null;
+  /** The user is away from the computer, when the system says. */
+  userIdle: boolean | null;
+  /** The best download speed seen on this connection. */
+  peakBps: number | null;
+}
+
+export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
+
+export interface SetSmartThrottle {
+  enabled?: boolean;
+  apps?: string[];
+  sharePercent?: number;
+  auto?: boolean;
+  minBps?: number;
 }
 
 /** What the live preview can play so far. */

@@ -553,12 +553,27 @@ pub struct SmartThrottleDto {
     pub limit_bps: Option<u64>,
     /// `false`: the running programs could not be listed, so nothing is slowed down.
     pub scan_ok: bool,
+    /// Automatic mode: downloads give way while the user uses the internet, and speed up when it is free.
+    pub auto: bool,
+    /// The least downloads keep, whatever happens (bytes/s): they never stop.
+    pub min_bps: u64,
+    /// What it is doing now: `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`.
+    pub reason: String,
+    /// The computer's other download traffic (smoothed by nothing: the last reading), when known.
+    pub other_bps: Option<u64>,
+    /// The user is away from the computer (no input for a while), when the system says.
+    pub user_idle: Option<bool>,
+    /// The best download speed seen on this connection.
+    pub peak_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetSmartThrottle {
     pub enabled: Option<bool>,
+    pub auto: Option<bool>,
+    /// The reserved minimum (bytes/s), 32 KB/s to 1 GB/s.
+    pub min_bps: Option<u64>,
     pub apps: Option<Vec<String>>,
     pub share_percent: Option<u8>,
 }

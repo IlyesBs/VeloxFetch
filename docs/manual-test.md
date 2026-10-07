@@ -175,6 +175,11 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    it is running and the speed drops to the chosen share; close it: full speed again within ~3 s.
 2. Download a video (MP4 / WebM) from a fast site, open its details, press **Watch while downloading**: it plays after the
    first megabytes; seeking ahead waits for the data and continues. Download a web page or a program: no Preview card.
+3. Automatic mode (on by default with Smart throttle): start a large download, then watch a video or download something in
+   the browser: within ~6 s the status says "Reducing speed — active browsing detected" and the graph's dashed limit line
+   appears; stop: a few seconds later "Bandwidth optimized — speeding back up", then "Full speed — network idle". Leave the
+   computer alone for 2+ minutes: "Full speed — computer idle". The speed never drops below "Downloads always keep at least".
+   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the connection while browsing.
 
 ## N. Fresh computer (once per release, on a PC without developer tools)
 1. Install on a Windows PC that never had Visual Studio or the "Visual C++ Redistributable". Connect Brave / Chrome in Settings >

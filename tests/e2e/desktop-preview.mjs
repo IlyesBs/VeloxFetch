@@ -127,7 +127,7 @@ try {
     el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await click("[data-testid=smart-save]");
   await waitFor(async () => JSON.stringify((await invoke("get_smart_throttle")).ok.apps) === '["velox-desktop","League of Legends","Zoom"]', "the list to be saved from the UI");
-  await page(`(() => { const el = document.querySelector('[data-testid=smart-share]');
+  await page(`(() => { const el = document.querySelector('[data-testid=smart-mode]');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, "10");
     el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await waitFor(async () => (await invoke("get_smart_throttle")).ok.sharePercent === 10, "the share to be saved");

@@ -217,3 +217,17 @@ fallback source, 8 parallel parts). Opt-in, against the real servers:
 `VELOX_TEST_REAL_TOOLS=1 cargo test -p velox-integration-tests --test tools real -- --nocapture` and
 `VELOX_TEST_REAL_YOUTUBE=<watch link> cargo test -p velox-integration-tests --test tools youtube -- --nocapture`.
 Debug builds of the desktop app fetch tools only with `VELOX_TOOLS=official`.
+
+## Desktop behaviour and Smart throttle automatic mode
+
+* `tests/integration/tests/desktop.rs` (3 tests): desktop defaults (close to tray, notifications on, start at login off),
+  start at login set up / removed / kept pointing at the app (moved AppImage), choices persist, bad language codes refused;
+  all through the dry-run system.
+* `apps/desktop/src-tauri/src/desktop.rs` unit tests: every language has the tray / notification texts, only a download
+  that was running and just ended is announced, the second-launch socket (and its short-path fallback).
+* `crates/browser-bridge`: `launch.rs` (the app found for every install layout and from the recorded path; started on its
+  own), `tests/host.rs` (a download starts the app, a ping never does), `tests/link.rs` (the link opens on the very first
+  start before the data folder exists).
+* `tests/integration/tests/smart_preview.rs` + `manager/smart_throttle.rs`: see `docs/smart-throttle-and-preview.md`.
+* By hand (`--ignored`): `system.rs` real notification + logind inhibitor, real idle time; `launch.rs` real desktop portal.
+

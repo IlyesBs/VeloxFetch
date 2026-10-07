@@ -18,7 +18,7 @@ tokio.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation"] }
 # Notifications (Windows toasts, WinRT). The same version as the desktop app.
 windows = { version = "0.61", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation"] }
 
