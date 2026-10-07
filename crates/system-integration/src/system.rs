@@ -131,6 +131,9 @@ pub trait SystemIntegration: Send + Sync {
     fn set_start_at_login(&self, exe: Option<&Path>) -> Result<(), SystemError>;
     /// Set up exactly as [`set_start_at_login`](Self::set_start_at_login) would do it for `exe`.
     fn starts_at_login(&self, exe: &Path) -> bool;
+    /// How long since the user last used the keyboard or mouse (`None`: the system does not say). Only a
+    /// duration: no input is ever read.
+    fn user_idle(&self) -> Option<std::time::Duration>;
 }
 
 // ------------------------------------------------------------------------------------- commands (pure)
@@ -541,6 +544,34 @@ impl SystemIntegration for NativeSystem {
             Platform::Other => false,
         }
     }
+
+    fn user_idle(&self) -> Option<std::time::Duration> {
+        #[cfg(windows)]
+        return windows::user_idle();
+        #[cfg(target_os = "macos")]
+        return mac_idle::user_idle();
+        #[cfg(target_os = "linux")]
+        return linux_dbus::user_idle();
+        #[allow(unreachable_code)]
+        None
+    }
+}
+
+/// macOS: seconds since the last keyboard / mouse event of the session (CoreGraphics).
+#[cfg(target_os = "macos")]
+mod mac_idle {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventSourceSecondsSinceLastEventType(source: i32, event_type: u32) -> f64;
+    }
+    const COMBINED_SESSION_STATE: i32 = 0;
+    const ANY_INPUT_EVENT: u32 = u32::MAX;
+
+    pub fn user_idle() -> Option<std::time::Duration> {
+        // SAFETY: a plain CoreGraphics query with constant arguments; it returns a number of seconds.
+        let secs = unsafe { CGEventSourceSecondsSinceLastEventType(COMBINED_SESSION_STATE, ANY_INPUT_EVENT) };
+        (secs.is_finite() && secs >= 0.0).then(|| std::time::Duration::from_secs_f64(secs))
+    }
 }
 
 /// Linux D-Bus: the desktop's notification service (session bus) and logind's sleep inhibitor (system bus). Each
@@ -591,6 +622,101 @@ mod linux_dbus {
                 Ok(())
             })
         })
+    }
+
+    /// Which way of asking worked last (0: not known yet), so later readings ask once.
+    static IDLE_WAY: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+    /// The user's idle time, from the desktop: GNOME's idle monitor (exact), the screen saver service (X11
+    /// desktops: KDE, Xfce...), else the session's idle flag from logind (set by the desktop after its idle delay;
+    /// the only one on KDE Wayland). `None` when none answers.
+    pub fn user_idle() -> Option<std::time::Duration> {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        let known = IDLE_WAY.load(Ordering::Relaxed);
+        for way in 1..=3u8 {
+            if known != 0 && known != way {
+                continue;
+            }
+            let got = match way {
+                1 => call_u64(
+                    "org.gnome.Mutter.IdleMonitor",
+                    "/org/gnome/Mutter/IdleMonitor/Core",
+                    "org.gnome.Mutter.IdleMonitor",
+                    "GetIdletime",
+                )
+                .map(Duration::from_millis),
+                2 => call_u32(
+                    "org.freedesktop.ScreenSaver",
+                    "/org/freedesktop/ScreenSaver",
+                    "org.freedesktop.ScreenSaver",
+                    "GetSessionIdleTime",
+                )
+                .map(|s| Duration::from_secs(u64::from(s))),
+                _ => logind_idle(),
+            };
+            if let Some(d) = got {
+                IDLE_WAY.store(way, Ordering::Relaxed);
+                return Some(d);
+            }
+        }
+        IDLE_WAY.store(0, Ordering::Relaxed);
+        None
+    }
+
+    fn call_u64(dest: &'static str, path: &'static str, iface: &'static str, method: &'static str) -> Option<u64> {
+        on_own_runtime(move || {
+            Box::pin(async move {
+                let conn = zbus::Connection::session().await?;
+                let reply = conn.call_method(Some(dest), path, Some(iface), method, &()).await?;
+                reply.body().deserialize::<u64>()
+            })
+        })
+        .ok()
+    }
+
+    fn call_u32(dest: &'static str, path: &'static str, iface: &'static str, method: &'static str) -> Option<u32> {
+        on_own_runtime(move || {
+            Box::pin(async move {
+                let conn = zbus::Connection::session().await?;
+                let reply = conn.call_method(Some(dest), path, Some(iface), method, &()).await?;
+                reply.body().deserialize::<u32>()
+            })
+        })
+        .ok()
+    }
+
+    /// logind: idle (since when) or not. Not idle reads as "just used".
+    fn logind_idle() -> Option<std::time::Duration> {
+        let (idle, since_us) = on_own_runtime(|| {
+            Box::pin(async {
+                let conn = zbus::Connection::system().await?;
+                let get = |name: &'static str| {
+                    let conn = conn.clone();
+                    async move {
+                        let reply = conn
+                            .call_method(
+                                Some("org.freedesktop.login1"),
+                                "/org/freedesktop/login1/session/auto",
+                                Some("org.freedesktop.DBus.Properties"),
+                                "Get",
+                                &("org.freedesktop.login1.Session", name),
+                            )
+                            .await?;
+                        reply.body().deserialize::<zbus::zvariant::OwnedValue>()
+                    }
+                };
+                let idle = bool::try_from(get("IdleHint").await?).map_err(zbus::Error::Variant)?;
+                let since = u64::try_from(get("IdleSinceHint").await?).map_err(zbus::Error::Variant)?;
+                Ok((idle, since))
+            })
+        })
+        .ok()?;
+        if !idle {
+            return Some(std::time::Duration::ZERO);
+        }
+        let now_us = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_micros() as u64;
+        Some(std::time::Duration::from_micros(now_us.saturating_sub(since_us)))
     }
 
     /// Hold logind's "idle" inhibitor: released when the returned file handle is closed (dropping the guard, or the
@@ -678,6 +804,16 @@ mod windows {
         }
     }
 
+    /// Time since the last keyboard / mouse input of this session.
+    pub fn user_idle() -> Option<std::time::Duration> {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+        let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };
+        // SAFETY: GetLastInputInfo fills the struct whose size is given; GetTickCount takes nothing.
+        let (ok, now) = unsafe { (GetLastInputInfo(&mut info) != 0, GetTickCount()) };
+        ok.then(|| std::time::Duration::from_millis(u64::from(now.wrapping_sub(info.dwTime))))
+    }
+
     const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
     pub fn set_start_at_login(exe: Option<&std::path::Path>) -> Result<(), SystemError> {
@@ -738,6 +874,10 @@ mod windows {
     pub fn starts_at_login(_: &std::path::Path) -> bool {
         false
     }
+    #[allow(dead_code)]
+    pub fn user_idle() -> Option<std::time::Duration> {
+        None
+    }
 }
 
 // ------------------------------------------------------------------------------------- the pretend system
@@ -767,6 +907,7 @@ pub struct DryRunSystem {
     power_fails: bool,
     protocols: Mutex<HashSet<(String, PathBuf)>>,
     login: Mutex<Option<PathBuf>>,
+    idle: Mutex<Option<std::time::Duration>>,
 }
 
 impl Default for DryRunSystem {
@@ -777,6 +918,7 @@ impl Default for DryRunSystem {
             power_fails: false,
             protocols: Default::default(),
             login: Default::default(),
+            idle: Default::default(),
         }
     }
 }
@@ -791,6 +933,11 @@ impl DryRunSystem {
         self.power_supported = supported;
         self.power_fails = fails;
         self
+    }
+
+    /// What [`SystemIntegration::user_idle`] answers from now on.
+    pub fn set_user_idle(&self, idle: Option<std::time::Duration>) {
+        *self.idle.lock().unwrap_or_else(|p| p.into_inner()) = idle;
     }
 
     pub fn calls(&self) -> Vec<SystemCall> {
@@ -902,6 +1049,10 @@ impl SystemIntegration for DryRunSystem {
 
     fn starts_at_login(&self, exe: &Path) -> bool {
         self.login.lock().unwrap_or_else(|p| p.into_inner()).as_deref() == Some(exe)
+    }
+
+    fn user_idle(&self) -> Option<std::time::Duration> {
+        *self.idle.lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -1055,6 +1206,26 @@ mod tests {
     #[test]
     fn linux_notification_bodies_are_never_markup() {
         assert_eq!(linux_dbus::body_text("<b>a & b</b>"), "&lt;b&gt;a &amp; b&lt;/b&gt;");
+    }
+
+    #[test]
+    fn the_dry_run_answers_the_idle_time_it_is_given() {
+        let dry = DryRunSystem::new();
+        assert_eq!(dry.user_idle(), None);
+        dry.set_user_idle(Some(std::time::Duration::from_secs(300)));
+        assert_eq!(dry.user_idle(), Some(std::time::Duration::from_secs(300)));
+    }
+
+    #[test]
+    #[ignore = "reads this machine's idle time; run by hand: cargo test -- --ignored idle_really"]
+    fn the_desktop_idle_really_reads() {
+        let sys = NativeSystem::new();
+        let a = sys.user_idle();
+        eprintln!("idle: {a:?}");
+        let t = std::time::Instant::now();
+        let b = sys.user_idle();
+        eprintln!("again: {b:?} in {:?}", t.elapsed());
+        assert!(a.is_some(), "this desktop reports an idle time");
     }
 
     #[cfg(target_os = "linux")]

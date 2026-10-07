@@ -1,22 +1,129 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { actions } from "../actions";
 import { api, normalizeError } from "../api";
-import { act, store } from "../hooks";
+import { act, store, useStore } from "../hooks";
 import { formatSpeed } from "../format";
 import { useT } from "../i18n";
-import { throttleStore } from "../throttle";
-import type { SmartThrottle } from "../types";
+import {
+  keepWhileActive,
+  THROTTLE_MODES,
+  throttleStatus,
+  throttleStore,
+  useThrottleHistory,
+  type ThrottlePoint,
+} from "../throttle";
+import type { SetSmartThrottle, SmartThrottle } from "../types";
 import { Panel } from "../ui/primitives";
 
-const SHARES = [10, 25, 50, 75];
+const KB = 1024;
+const MB = 1024 * 1024;
+/** The reserved minimum: a few clear steps (a value set elsewhere is shown as it is). */
+const MINIMUMS = [
+  64 * KB,
+  128 * KB,
+  256 * KB,
+  512 * KB,
+  1 * MB,
+  2 * MB,
+  5 * MB,
+  10 * MB,
+];
+/** The maximum download speed (the global speed limit). */
+const MAXIMUMS = [1 * MB, 2 * MB, 5 * MB, 10 * MB, 20 * MB, 50 * MB, 100 * MB];
+
+/** Download speed over the last minutes (filled), with the Smart throttle limit as a dashed line where it applied. */
+function BandwidthGraph({
+  points,
+  label,
+  capLabel,
+}: {
+  points: ThrottlePoint[];
+  label: string;
+  capLabel: string;
+}) {
+  const id = useId().replace(/:/g, "");
+  const W = 100;
+  const H = 30;
+  const n = points.length;
+  const max = Math.max(1, ...points.map((p) => Math.max(p.speed, p.cap ?? 0)));
+  const x = (i: number) => (n <= 1 ? W : (i / (n - 1)) * W);
+  const y = (v: number) => H - 1 - (v / max) * (H - 4);
+  const line = points
+    .map(
+      (p, i) => `${i ? "L" : "M"}${x(i).toFixed(2)} ${y(p.speed).toFixed(2)}`,
+    )
+    .join(" ");
+  // The cap as separate runs: a break where nothing limited downloads.
+  let cap = "";
+  points.forEach((p, i) => {
+    if (p.cap === null) return;
+    cap += `${i === 0 || points[i - 1]?.cap == null ? "M" : "L"}${x(i).toFixed(2)} ${y(p.cap).toFixed(2)} `;
+  });
+  return (
+    <figure className="mt-3" data-testid="smart-graph">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={label}
+        className="block h-24 w-full rounded-lg border border-line bg-raised"
+      >
+        <defs>
+          <linearGradient id={`bg${id}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" className="stop-accent" stopOpacity={0.32} />
+            <stop offset="1" className="stop-accent" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        {n > 1 && (
+          <>
+            <path d={`${line} L${W} ${H} L0 ${H} Z`} fill={`url(#bg${id})`} />
+            <path
+              d={line}
+              fill="none"
+              className="spark-line stroke-accent"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+              strokeLinejoin="round"
+            />
+          </>
+        )}
+        {cap && (
+          <path
+            d={cap}
+            fill="none"
+            className="stroke-warn"
+            strokeWidth={1.4}
+            strokeDasharray="3 3"
+            vectorEffect="non-scaling-stroke"
+            data-testid="smart-graph-cap"
+          />
+        )}
+      </svg>
+      <figcaption className="mt-1 flex items-center justify-between text-[11px] text-dim">
+        <span>{label}</span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block w-4 border-t border-dashed border-warn"
+            aria-hidden="true"
+          />
+          {capLabel}
+        </span>
+      </figcaption>
+    </figure>
+  );
+}
 
 /**
- * Settings > Speed > Smart throttle: slow downloads down while a game or a video call is running, full speed
- * again as soon as it closes. Which programs run is checked on this computer only; nothing is sent anywhere.
+ * Settings > Speed > Smart throttle: downloads give way while the user browses, watches or plays (automatic
+ * mode), or while a listed program runs, and take the whole connection back when it is free. Everything is
+ * measured on this computer only; nothing is recorded or sent.
  */
 export function SmartThrottleSettings() {
   const t = useT();
   const [s, setS] = useState<SmartThrottle | null>(null);
   const [apps, setApps] = useState("");
+  const history = useThrottleHistory();
+  const globalLimit = useStore((st) => st.metrics.globalLimit);
 
   const refresh = useCallback(async (resetApps = false) => {
     try {
@@ -31,12 +138,15 @@ export function SmartThrottleSettings() {
 
   useEffect(() => {
     void refresh(true);
-    // The status line follows the programs that start and stop.
-    const timer = setInterval(() => document.visibilityState === "visible" && void refresh(), 3000);
+    // The status line follows what happens on the network.
+    const timer = setInterval(
+      () => document.visibilityState === "visible" && void refresh(),
+      3000,
+    );
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const save = async (patch: { enabled?: boolean; apps?: string[]; sharePercent?: number }, done?: string) => {
+  const save = async (patch: SetSmartThrottle, done?: string) => {
     const next = await act(() => api.setSmartThrottle(patch), done);
     if (next) {
       setS(next);
@@ -49,52 +159,167 @@ export function SmartThrottleSettings() {
     .map((a) => a.trim())
     .filter(Boolean);
   const edited = !!s && list.join("\n") !== s.apps.join("\n");
+  const on = !!s?.enabled;
+  const slowed = on && s?.limitBps != null;
+  const share = s?.sharePercent ?? 25;
+  const named = THROTTLE_MODES.some((m) => m.share === share);
+  const minimums =
+    s && !MINIMUMS.includes(s.minBps)
+      ? [...MINIMUMS, s.minBps].sort((a, b) => a - b)
+      : MINIMUMS;
+  const maximums =
+    globalLimit && !MAXIMUMS.includes(globalLimit)
+      ? [...MAXIMUMS, globalLimit].sort((a, b) => a - b)
+      : MAXIMUMS;
 
   return (
     <Panel title={t("smart.title")} hint={t("smart.hint")}>
       <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-        <input type="checkbox" data-testid="smart-enabled" checked={s?.enabled ?? false} disabled={!s} onChange={(e) => void save({ enabled: e.target.checked }, e.target.checked ? t("smart.on") : t("smart.off"))} />
+        <input
+          type="checkbox"
+          data-testid="smart-enabled"
+          checked={on}
+          disabled={!s}
+          onChange={(e) =>
+            void save(
+              { enabled: e.target.checked },
+              e.target.checked ? t("smart.on") : t("smart.off"),
+            )
+          }
+        />
         {t("smart.enable")}
       </label>
 
       {s && (
-        <p className="mt-2 text-xs" data-testid="smart-status">
-          {!s.enabled ? (
-            <span className="text-dim">{t("smart.stOff")}</span>
-          ) : s.activeApp ? (
-            <span className="text-warn">{t("smart.stLimiting", { app: s.activeApp, speed: formatSpeed(s.limitBps ?? 0) })}</span>
-          ) : s.scanOk ? (
-            <span className="text-ok">{t("smart.stFree")}</span>
-          ) : (
-            <span className="text-dim">{t("smart.stUnknown")}</span>
-          )}
+        <p
+          className={`mt-2 text-xs ${slowed ? "font-medium text-warn" : on ? "text-ok" : "text-dim"}`}
+          role="status"
+          data-testid="smart-status"
+        >
+          {throttleStatus(t, s)}
         </p>
       )}
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
-        <label className="space-y-1">
-          <span className="label">{t("smart.apps")}</span>
-          <textarea data-testid="smart-apps" className="input h-32 py-2 font-mono text-xs" value={apps} onChange={(e) => setApps(e.target.value)}
-            onBlur={() => edited && void save({ apps: list }, t("smart.saved"))}
-            spellCheck={false}
+      <BandwidthGraph
+        points={history}
+        label={t("smart.graph")}
+        capLabel={t("smart.graphCap")}
+      />
+
+      <div className="mt-4 space-y-1">
+        <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            data-testid="smart-auto"
+            checked={s?.auto ?? true}
+            disabled={!s}
+            onChange={(e) =>
+              void save({ auto: e.target.checked }, t("smart.updated"))
+            }
           />
+          {t("smart.auto")}
+        </label>
+        <p className="ms-6 text-xs text-dim">{t("smart.autoHint")}</p>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <label className="space-y-1">
+          <span className="label">{t("smart.mode")}</span>
+          <select
+            data-testid="smart-mode"
+            className="input h-9"
+            value={share}
+            disabled={!s}
+            onChange={(e) =>
+              void save(
+                { sharePercent: Number(e.target.value) },
+                t("smart.updated"),
+              )
+            }
+          >
+            {THROTTLE_MODES.map((m) => (
+              <option
+                key={m.share}
+                value={m.share}
+                title={t("hud.modeTip", {
+                  name: t(m.name),
+                  k: keepWhileActive(m.share),
+                  p: m.share,
+                })}
+              >
+                {t(m.name)}
+              </option>
+            ))}
+            {!named && (
+              <option value={share}>
+                {t("smart.modeCustom", { p: share })}
+              </option>
+            )}
+          </select>
         </label>
         <label className="space-y-1">
-          <span className="label">{t("smart.share")}</span>
-          <select data-testid="smart-share" className="input h-9" value={s?.sharePercent ?? 25} disabled={!s} onChange={(e) => void save({ sharePercent: Number(e.target.value) })}>
-            {SHARES.map((p) => (
-              <option key={p} value={p}>
-                {t("smart.shareOpt", { p })}
+          <span className="label">{t("smart.min")}</span>
+          <select
+            data-testid="smart-min"
+            className="input h-9"
+            value={s?.minBps ?? 256 * KB}
+            disabled={!s}
+            onChange={(e) =>
+              void save({ minBps: Number(e.target.value) }, t("smart.updated"))
+            }
+          >
+            {minimums.map((v) => (
+              <option key={v} value={v}>
+                {formatSpeed(v)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className="label">{t("smart.max")}</span>
+          <select
+            data-testid="smart-max"
+            className="input h-9"
+            value={globalLimit ?? 0}
+            title={t("smart.maxHint")}
+            onChange={(e) =>
+              void actions.setGlobalLimit(Number(e.target.value) || null)
+            }
+          >
+            <option value={0}>{t("smart.maxNone")}</option>
+            {maximums.map((v) => (
+              <option key={v} value={v}>
+                {formatSpeed(v)}
               </option>
             ))}
           </select>
         </label>
       </div>
-      <div className="mt-2 flex items-center gap-2">
-        <button className="btn" data-testid="smart-save" disabled={!edited} onClick={() => void save({ apps: list }, t("smart.saved"))}>
-          {t("smart.save")}
-        </button>
-        <p className="text-xs text-dim">{t("smart.discord")}</p>
+
+      <div className="mt-4 border-t border-line pt-3">
+        <label className="space-y-1">
+          <span className="label">{t("smart.appsTitle")}</span>
+          <span className="block text-xs text-dim">{t("smart.apps")}</span>
+          <textarea
+            data-testid="smart-apps"
+            className="input h-28 py-2 font-mono text-xs"
+            value={apps}
+            onChange={(e) => setApps(e.target.value)}
+            onBlur={() => edited && void save({ apps: list }, t("smart.saved"))}
+            spellCheck={false}
+          />
+        </label>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            className="btn"
+            data-testid="smart-save"
+            disabled={!edited}
+            onClick={() => void save({ apps: list }, t("smart.saved"))}
+          >
+            {t("smart.save")}
+          </button>
+          <p className="text-xs text-dim">{t("smart.discord")}</p>
+        </div>
       </div>
     </Panel>
   );

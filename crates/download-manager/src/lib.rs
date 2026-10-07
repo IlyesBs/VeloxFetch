@@ -17,4 +17,7 @@ pub mod validate;
 pub use api::*;
 pub use batch::{BatchItem, BatchPreview, BatchRequest, BatchResult, ItemState, MAX_BATCH, MAX_GENERATED};
 pub use downloader_core::{DownloadStatus, Priority};
-pub use manager::{is_stream_link, preview_media_type, DownloadManager, PreviewResponse, SECRET_KEY_NAME, SMART_THROTTLE_DEFAULT_APPS};
+pub use manager::{
+    is_stream_link, preview_media_type, DownloadManager, PreviewResponse, ThrottleSignals, SECRET_KEY_NAME, SMART_THROTTLE_DEFAULT_APPS,
+    THROTTLE_IDLE_AFTER,
+};

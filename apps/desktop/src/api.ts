@@ -43,6 +43,7 @@ import type {
   SpeedTarget,
   DesktopPrefs,
   SetDesktopPrefs,
+  SetSmartThrottle,
 } from "./types";
 
 export const EVENT_CHANNEL = "velox://event";
@@ -128,7 +129,7 @@ export const api = {
   getSmartThrottle: () => call<SmartThrottle>("get_smart_throttle"),
   getVideoTools: () => call<VideoTools>("get_video_tools"),
   fetchVideoTools: () => call<VideoTools>("fetch_video_tools"),
-  setSmartThrottle: (request: { enabled?: boolean; apps?: string[]; sharePercent?: number }) => call<SmartThrottle>("set_smart_throttle", { request }),
+  setSmartThrottle: (request: SetSmartThrottle) => call<SmartThrottle>("set_smart_throttle", { request }),
   setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
   getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),
   getLogs: (limit = 300, problemsOnly = false) => call<Logs>("get_logs", { limit, problemsOnly }),

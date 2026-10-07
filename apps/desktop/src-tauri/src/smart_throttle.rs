@@ -1,12 +1,14 @@
-//! Smart throttle, the desktop half: every few seconds, list the running programs and tell the manager.
-//! The decision (which programs, how slow, lifting the cap) lives in `download_manager`'s
+//! Smart throttle, the desktop half: every few seconds, list the running programs, ask the system how long the
+//! user has been away (automatic mode), and tell the manager, which also measures the computer's traffic. The
+//! decision (which programs, how slow, smoothing, lifting the cap) lives in `download_manager`'s
 //! `smart_throttle.rs`; this file only looks at the system.
 //!
 //! * Looking costs almost nothing: process *names* only (no CPU, memory or command lines), once every
 //!   3 seconds, on a blocking thread, and not at all while the feature is off.
 //! * Never in the way: if listing fails, hangs (2 s limit) or panics, the manager is told "unknown" and
 //!   downloads run at full speed.
-//! * Nothing leaves the computer and nothing is stored: the names are compared and dropped.
+//! * Nothing leaves the computer and nothing is stored: the names are compared and dropped; of the keyboard and
+//!   mouse only the time since their last use is known, never what was typed or where.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -33,10 +35,12 @@ pub fn spawn(manager: DownloadManager) {
                 continue;
             }
             let sys = system.clone();
-            let scan = tokio::task::spawn_blocking(move || running_programs(&sys));
+            let auto = manager.smart_throttle().auto;
+            let os = manager.system();
+            let scan = tokio::task::spawn_blocking(move || (running_programs(&sys), if auto { os.0.user_idle() } else { None }));
             match tokio::time::timeout(SCAN_LIMIT, scan).await {
-                Ok(Ok(Some(names))) => manager.smart_throttle_observe(Some(&names)),
-                // Failed, panicked or too slow: full speed.
+                Ok(Ok((names, idle))) => manager.smart_throttle_observe_activity(names.as_deref(), idle),
+                // Panicked or too slow: full speed.
                 _ => manager.smart_throttle_observe(None),
             }
         }
