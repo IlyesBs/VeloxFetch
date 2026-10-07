@@ -1,6 +1,6 @@
-import { t } from "./i18n";
+import { getLang, subscribe as onLangChange, t } from "./i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { normalizeError } from "./api";
+import { api, normalizeError } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
 import { ClipboardBanner } from "./components/ClipboardBanner";
@@ -61,6 +61,13 @@ export default function App() {
   const folded = !wide || sideFolded;
   const routeRef = useRef(route);
   routeRef.current = route;
+
+  // The tray menu and notifications (shown by Rust) follow the interface language.
+  useEffect(() => {
+    const sync = () => void api.setDesktopPrefs({ language: getLang() }).catch(() => undefined);
+    sync();
+    return onLangChange(sync);
+  }, []);
 
   useEffect(() => {
     // The first render is on the page: show the (hidden) window now, before the data arrives.

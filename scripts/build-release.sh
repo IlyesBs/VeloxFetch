@@ -23,6 +23,14 @@
 #   macOS               the Xcode command line tools are requested when missing
 #   gate tools          cargo-audit, cargo-deny, cargo-cyclonedx (cargo install --locked)
 #   --no-auto-setup     only report what is missing
+#
+# Signing (only when the certificates are there; otherwise the build is unsigned, as before):
+#   Windows   WINDOWS_CERTIFICATE_THUMBPRINT: a code-signing certificate in the user's certificate store. The
+#             helper and the command-line tool are signed here, the app and the setup by the bundler, all with
+#             SHA-256 and an RFC 3161 timestamp.
+#   macOS     APPLE_SIGNING_IDENTITY: a "Developer ID Application" identity in the keychain. The helper is signed
+#             here (hardened runtime, timestamp), the app by the bundler; with APPLE_ID, APPLE_PASSWORD (an
+#             app-specific password) and APPLE_TEAM_ID the app is also notarized and stapled.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -216,9 +224,29 @@ if [ "$os" = linux ]; then
   fi
 fi
 
+# Signing: the programs the bundler does not sign itself (they ship as resources) are signed here first.
+sign_args=()
+timestamp_url="http://timestamp.digicert.com"
+if [ "$os" = windows ] && [ -n "${WINDOWS_CERTIFICATE_THUMBPRINT:-}" ]; then
+  step "Signing the browser helper and the command-line tool (Authenticode)"
+  signtool="$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64/signtool.exe 2>/dev/null | sort -V | tail -1)"
+  [ -n "$signtool" ] || die "signtool.exe (Windows SDK) was not found"
+  for exe in target/release/velox-native-host.exe target/release/velox-cli.exe; do
+    "$signtool" sign /sha1 "$WINDOWS_CERTIFICATE_THUMBPRINT" /fd sha256 /tr "$timestamp_url" /td sha256 "$exe"
+  done
+  sign_args=(--config "{\"bundle\":{\"windows\":{\"certificateThumbprint\":\"$WINDOWS_CERTIFICATE_THUMBPRINT\",\"digestAlgorithm\":\"sha256\",\"timestampUrl\":\"$timestamp_url\"}}}")
+elif [ "$os" = macos ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+  step "Signing the browser helper (Developer ID, hardened runtime)"
+  codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" target/release/velox-native-host
+  codesign --verify --strict target/release/velox-native-host
+  [ -n "${APPLE_ID:-}" ] && note "the app will be notarized with Apple ($APPLE_TEAM_ID)" || note "APPLE_ID not set: signed, not notarized"
+else
+  note "no signing certificate configured: the installers are unsigned"
+fi
+
 step "Building the app and its installer ($conf)"
 # runs the UI build (tsc + vite) first, then compiles velox-desktop and bundles it
-npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf"
+npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"}
 
 step "Packaging release/ (installer, portable zip, extension zips, SHA256SUMS.txt)"
 node scripts/package-release.mjs

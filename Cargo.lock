@@ -4475,9 +4475,11 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
  "windows 0.61.3",
  "windows-sys 0.61.2",
  "winreg",
+ "zbus",
 ]
 
 [[package]]
@@ -5318,6 +5320,7 @@ dependencies = [
  "browser-bridge",
  "diagnostics",
  "download-manager",
+ "libloading",
  "path-safety",
  "rfd",
  "secrets",

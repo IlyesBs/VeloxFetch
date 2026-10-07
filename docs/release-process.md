@@ -81,16 +81,18 @@ The report is written to `release/security-gate-report.json`.
 Advisories change daily even when the code does not. The gate runs with the tests on every branch commit; between
 commits, run `node scripts/security-gate.mjs` now and then (or `bash scripts/build-release.sh`, which ends with it).
 
-## Signing (not done yet: needs certificates only the owner can obtain)
+## Signing (wired; active as soon as the owner adds the certificates)
 
-| Platform | What | Secret (release environment only) |
+| Platform | What | Secrets (environment `release` for tags, `build` otherwise) |
 |---|---|---|
-| Windows | Authenticode (`signtool sign /fd sha256 /tr <RFC 3161 timestamp server> /td sha256`) of `velox-desktop.exe`, `velox-native-host.exe`, and the installer; an EV / OV certificate removes the SmartScreen warning | `WINDOWS_CERT_PFX_BASE64` (+ password) |
-| macOS | Developer ID signing with the hardened runtime, then notarisation and stapling | `APPLE_CERTIFICATE` (+ Apple ID / team id) |
-| all | detached GPG (or minisign) signature over `SHA256SUMS.txt`, public key published on the project page and in the repository | `RELEASE_GPG_KEY` |
+| Windows | Authenticode, SHA-256 with an RFC 3161 timestamp: `velox-native-host.exe` and `velox-cli.exe` by `scripts/build-release.sh` (signtool), `velox-desktop.exe` and the setup by the bundler (`certificateThumbprint`). An EV / OV certificate removes the SmartScreen warning | `WINDOWS_CERT_PFX_BASE64`, `WINDOWS_CERT_PASSWORD` |
+| macOS | Developer ID with the hardened runtime (`packaging/macos/Entitlements.plist`: no entitlements): the helper by the script (`codesign --options runtime --timestamp`), the app by the bundler, then notarized and stapled | `APPLE_CERTIFICATE` (base64 .p12), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`; notarization: `APPLE_ID`, `APPLE_PASSWORD` (app-specific password), `APPLE_TEAM_ID` |
+| all | detached armored GPG signature `SHA256SUMS.txt.asc` over the checksums, made by the `release` job | `RELEASE_GPG_KEY` (a key without passphrase, used for releases only) |
 
-The `release` job runs only on a `v*` tag, in the protected `release` environment (required reviewers), and **fails when any of the
-three secrets is missing**, so an unsigned installer cannot be published by accident.
+How it runs: the Build workflow imports the certificate into the runner's store / a temporary keychain only when its secret
+exists (otherwise that system's files are unsigned, and the build says so). Locally, the same script signs when
+`WINDOWS_CERTIFICATE_THUMBPRINT` or `APPLE_SIGNING_IDENTITY` is set. A tag still produces a **draft** release, checked by hand
+(docs/manual-test.md) before it is made public.
 
 ## Verifying a download (for users)
 

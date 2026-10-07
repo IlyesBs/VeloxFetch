@@ -377,15 +377,15 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 14 | Observability and diagnostics | ✅ | Per-download timeline, local redacted log, reports |
 | + | Extras before Phase 15 | ✅ | Smart throttle, live preview, 64 connections, neon glass UI, separate Active / Completed pages, real network / disk counters, delete from disk |
 | 15 | Cross-platform system integration | ✅ | A `SystemIntegration` trait (notify, prevent sleep, shutdown / sleep, register protocol) per OS, so OS code never leaks into the downloader |
-| **16** | Windows | 🔜 | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
-| 17 | Linux | ⏳ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
-| 18 | macOS | ⏳ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| 19 | Auto update | ⏳ | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
+| 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
+| 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
+| 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
+| **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
 | 22 | Beta | ⏳ | Internal alpha, then private beta, public beta, RC and stable; opt-in, documented crash and performance reports |
 
-> **Phase 16 starts only when the owner says "Start phase 16".**
+> **Phase 19 starts only when the owner says "Start phase 19".**
 
 ### Open items (known gaps)
 
@@ -394,8 +394,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 - "up to date" in the status bar, which needs Phase 19.
 
 **Other open items:**
-- no tray icon or system notifications yet (Phase 16);
-- release signing is waiting for certificates;
+- release signing is wired but waits for the owner's certificates (docs/release-process.md);
 - some deep Settings panels and dialogs are still English only.
 
 ---

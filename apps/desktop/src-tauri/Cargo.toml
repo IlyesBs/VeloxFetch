@@ -17,7 +17,7 @@ custom-protocol = ["tauri/custom-protocol"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 download-manager = { path = "../../../crates/download-manager" }
 browser-bridge = { path = "../../../crates/browser-bridge" }
 system-integration = { path = "../../../crates/system-integration" }
@@ -39,6 +39,10 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 webview2-com = "0.38"
 # Bring the running instance forward when VeloxFetch is started a second time (same version as wry's).
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation"] }
+
+# Linux: look for the tray library before making the tray icon (the same version the tray code uses).
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.7"
 
 [dev-dependencies]
 serde_json = "1"

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  VeloxFetch's entitlements under the hardened runtime (Developer ID, notarized, outside the App Store).
+  Deliberately empty: no JIT, no unsigned executable memory, no disabled library validation, no DYLD variables,
+  no debugger attachment. No App Sandbox either: the app writes to folders the user picks anywhere and starts the
+  checked video tools, which the sandbox does not allow; its own rules (path-safety, fixed programs) apply instead.
+-->
+<plist version="1.0">
+<dict/>
+</plist>

@@ -5,6 +5,7 @@ import { Icon, type IconName } from "../ui/icons";
 import { Panel } from "../ui/primitives";
 import { BrowserSettings } from "../components/BrowserSettings";
 import { ClipboardSettings } from "../components/ClipboardSettings";
+import { DesktopSettings } from "../components/DesktopSettings";
 import { DiagnosticsSettings } from "../components/DiagnosticsSettings";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { PowerSettings } from "../components/PowerSettings";
@@ -138,6 +139,7 @@ export function SettingsView() {
               ))}
             </div>
           </Panel>
+          <DesktopSettings />
         </Group>
 
         <Group id="set-folders">

@@ -70,9 +70,33 @@ const COMMANDS: &[&str] = &[
     "fetch_video_tools",
     "set_video_bar",
     "window_control",
+    "get_desktop_options",
+    "set_desktop_options",
 ];
 
+/// The UI's locale files, embedded so the few texts Rust shows itself (tray menu, notifications) use the same words
+/// in the same languages. Every file in the folder is picked up, like the UI does.
+fn embed_locales() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/locales");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .expect("the UI's locale folder")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut out = String::from("/// `(language code, locale file text)` for every UI language.\npub const LOCALES: &[(&str, &str)] = &[\n");
+    for f in files {
+        let code = f.file_stem().unwrap().to_string_lossy().into_owned();
+        let path = f.canonicalize().unwrap();
+        out.push_str(&format!("    ({code:?}, include_str!({:?})),\n", path.to_string_lossy()));
+    }
+    out.push_str("];\n");
+    std::fs::write(std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("locales.rs"), out).unwrap();
+}
+
 fn main() {
+    embed_locales();
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)))
         .expect("failed to run tauri-build");
 }

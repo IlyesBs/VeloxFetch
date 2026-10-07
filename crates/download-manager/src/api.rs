@@ -563,6 +563,33 @@ pub struct SetSmartThrottle {
     pub share_percent: Option<u8>,
 }
 
+/// How the app behaves on the desktop (see `manager/desktop.rs`): tray, start at login, notifications, and the
+/// language of the few texts Rust shows itself (tray menu, notifications).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopPrefsDto {
+    /// Closing the window keeps VeloxFetch running in the tray (when there is a tray).
+    pub close_to_tray: bool,
+    /// Started (in the tray) when the user logs in. Read from the system, so it is never shown on when it is not.
+    pub start_at_login: bool,
+    /// A system notification when a download finishes or fails while the window is not in front.
+    pub notify_finished: bool,
+    pub language: String,
+    /// This desktop shows tray icons (some Linux desktops do not).
+    pub tray_available: bool,
+    pub start_at_login_available: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetDesktopPrefs {
+    pub close_to_tray: Option<bool>,
+    pub start_at_login: Option<bool>,
+    pub notify_finished: Option<bool>,
+    /// A language code like `en`, `fr`, `ar`, `pt-br`.
+    pub language: Option<String>,
+}
+
 /// What the live preview can play so far (see `manager/preview.rs`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -901,6 +928,8 @@ pub struct ManagerConfig {
     /// The application log (lines for Settings > Diagnostics, detailed logging switch, the log folder).
     /// `None`: no log (tests, the command-line tool) and the diagnostics commands say so.
     pub log: Option<diagnostics::LogHandle>,
+    /// The program to start at login (the app itself; an AppImage file). `None`: starting at login is not offered.
+    pub app_launcher: Option<PathBuf>,
 }
 
 impl ManagerConfig {
@@ -926,6 +955,7 @@ impl ManagerConfig {
             media_scratch_max_age: std::time::Duration::from_secs(15 * 60),
             organize_default: false,
             log: None,
+            app_launcher: None,
         }
     }
 }

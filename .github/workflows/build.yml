@@ -57,6 +57,12 @@ jobs:
     name: build (${{ matrix.name }})
     needs: [plan]
     runs-on: ${{ matrix.os }}
+    # Tags build in the protected "release" environment (its reviewers approve, and only it holds the signing
+    # secrets); everything else in "build" (no secrets unless the owner adds test certificates there).
+    environment: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'build' }}
+    env:
+      WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
     strategy:
       fail-fast: false
       # Linux is built on the oldest supported Ubuntu: the packages then also run on older distributions.
@@ -73,8 +79,47 @@ jobs:
       # The same script as a local build: it installs what is missing (Linux libraries with apt), builds the
       # extension, the helper, the app and its installers, and collects them with SHA256SUMS.txt in release/.
       # The security gate runs with the tests, on every commit of the branch (ci.yml).
+      # Signing certificates, only when the secrets exist (otherwise the build is unsigned). They live in the
+      # "release" environment for tags (required reviewers), else in the "build" environment.
+      - name: Import the Windows code-signing certificate
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Import the Apple Developer ID certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          pass="$(openssl rand -hex 16)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$pass" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pass" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
       - name: Build the release
         shell: bash
+        env:
+          # macOS notarization (used only when set; see scripts/build-release.sh).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash scripts/build-release.sh --skip-gate
       - name: Artifact name (a branch like feature/x cannot have "/" in it)
         id: ref
@@ -113,7 +158,7 @@ jobs:
             [ -e "out/$name" ] || cp "$f" "out/$name"
           done
           (cd out && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
-      - name: Publish (a private draft while the installers cannot be signed)
+      - name: Publish as a private draft (checked by hand before it is made public)
         env:
           GH_TOKEN: ${{ github.token }}
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -121,12 +166,15 @@ jobs:
           RELEASE_GPG_KEY: ${{ secrets.RELEASE_GPG_KEY }}
           TAG: ${{ github.ref_name }}
         run: |
-          if [ -n "$WINDOWS_CERT_PFX_BASE64" ] && [ -n "$APPLE_CERTIFICATE" ] && [ -n "$RELEASE_GPG_KEY" ]; then
-            # Signing steps (Authenticode with a timestamp, Apple notarisation, a detached GPG signature over
-            # SHA256SUMS) go here once the certificates exist; see docs/release-process.md.
-            echo "signing is not wired yet: publishing as a draft" >&2
+          if [ -z "$WINDOWS_CERT_PFX_BASE64" ] || [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "some installers are unsigned (no certificate in the release environment)" >&2
           fi
-          # Unsigned installers are never published: the release stays a draft only the owners see, to be
-          # checked (docs/manual-test.md) and signed before it is made public by hand.
+          if [ -n "$RELEASE_GPG_KEY" ]; then
+            # A detached signature over the checksums: whoever has the public key can check every file.
+            echo "$RELEASE_GPG_KEY" | gpg --batch --import
+            gpg --batch --yes --armor --detach-sign --output out/SHA256SUMS.txt.asc out/SHA256SUMS.txt
+          fi
+          # Never published directly: the release stays a draft only the owners see, to be
+          # checked (docs/manual-test.md) before it is made public by hand.
           gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --draft --title "VeloxFetch $TAG" \
-            --notes "Built by CI from $GITHUB_SHA. Unsigned: check and sign before publishing. SHA-256 sums in SHA256SUMS.txt."
+            --notes "Built by CI from $GITHUB_SHA. Check it (docs/manual-test.md) before publishing. SHA-256 sums in SHA256SUMS.txt (signed in SHA256SUMS.txt.asc when the release key is set)."

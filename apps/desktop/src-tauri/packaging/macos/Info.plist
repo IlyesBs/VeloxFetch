@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into VeloxFetch.app's Info.plist (tauri.release.macos.conf.json). -->
+<plist version="1.0">
+<dict>
+  <!-- veloxfetch:// links start the app (macOS reads this from the bundle; nothing is registered at runtime). -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>app.velox.fetch</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>veloxfetch</string>
+      </array>
+    </dict>
+  </array>
+  <!-- Notifications and the menu bar icon use the app's own name. -->
+  <key>NSUserNotificationAlertStyle</key>
+  <string>banner</string>
+</dict>
+</plist>

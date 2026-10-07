@@ -85,6 +85,27 @@ export interface LogLine {
   text: string;
 }
 
+/** Settings > Appearance > On the desktop (tray, start at login, notifications). Mirrors `DesktopPrefsDto`. */
+export interface DesktopPrefs {
+  /** Closing the window keeps VeloxFetch running in the tray (when there is a tray). */
+  closeToTray: boolean;
+  /** Started in the tray when the user logs in (read from the system). */
+  startAtLogin: boolean;
+  /** A notification when a download finishes or fails while the window is not in front. */
+  notifyFinished: boolean;
+  language: string;
+  /** This desktop shows tray icons (some Linux desktops do not). */
+  trayAvailable: boolean;
+  startAtLoginAvailable: boolean;
+}
+
+export interface SetDesktopPrefs {
+  closeToTray?: boolean;
+  startAtLogin?: boolean;
+  notifyFinished?: boolean;
+  language?: string;
+}
+
 /** Settings > Speed > Smart throttle. */
 export interface SmartThrottle {
   enabled: boolean;

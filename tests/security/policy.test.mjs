@@ -532,6 +532,44 @@ test("Phase 15: the operating system is reached through SystemIntegration only, 
   assert.match(sys, /xml_escape\(&n\.title\)/, "Windows toast text is escaped");
 });
 
+test("Phases 16-18: tray, start at login and notifications stay per user, opt-in where it matters, and never widen what the UI can do", () => {
+  const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  const desk = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "desktop.rs"));
+  const mgr = withoutTestModules(read("crates", "download-manager", "src", "manager", "desktop.rs"));
+  const api = read("crates", "download-manager", "src", "api.rs");
+  const sys = withoutTestModules(read("crates", "system-integration", "src", "system.rs"));
+  // Debug builds (and every test that runs them) never touch the machine's login items.
+  assert.match(lib, /cfg\.app_launcher = if cfg!\(debug_assertions\) \{ None \} else \{ desktop::launcher\(\) \};/);
+  // The settings command takes yes / no answers and a language code, nothing else (no path, no program).
+  assert.match(api, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct SetDesktopPrefs \{\s*pub close_to_tray: Option<bool>,\s*pub start_at_login: Option<bool>,\s*pub notify_finished: Option<bool>,[\s\S]{0,80}pub language: Option<String>,\s*\}/);
+  assert.match(mgr, /if !valid_language\(lang\)/, "the language is checked before it is stored");
+  assert.match(mgr, /if self\.flag\(START_AT_LOGIN_KEY, false\) && !system\.starts_at_login\(exe\)/, "start at login is only kept up to date once the user turned it on (off by default)");
+  // Start at login runs only the app itself, hidden in the tray; macOS never restarts it after the user quits.
+  assert.match(sys, /format!\("\\"\{\}\\" \{HIDDEN_ARG\}", exe\.display\(\)\)/, "Windows Run value: the quoted app and --hidden");
+  assert.match(sys, /<key>KeepAlive<\/key><false\/>/);
+  assert.match(sys, /fn check_login_exe/, "the program path is checked (absolute, no quotes or new lines)");
+  assert.match(sys, /pub fn body_text\(body: &str\)/, "Linux notification bodies are escaped (servers read markup)");
+  // The tray library is looked for before the tray code (which stops the program when it is missing) runs.
+  assert.ok(desk.indexOf("if !tray_possible()") < desk.indexOf("TrayIconBuilder::with_id"), "tray checked before it is made");
+  // A desktop without a tray never hides the window: closing then quits.
+  assert.match(desk, /!prefs\.close_to_tray \|\| !prefs\.tray_available/);
+  // Only Rust shows the window (so a run started hidden at login stays in the tray): the UI cannot show or focus it.
+  const caps = read("apps", "desktop", "src-tauri", "capabilities", "main-window.json");
+  assert.ok(!caps.includes("core:window:allow-show") && !caps.includes("core:window:allow-set-focus"));
+  // The show signal of a second launch carries nothing and is the user's only.
+  assert.match(desk, /from_mode\(0o600\)/);
+  // macOS: hardened runtime, no entitlement that weakens it.
+  const ent = read("apps", "desktop", "src-tauri", "packaging", "macos", "Entitlements.plist");
+  assert.match(ent, /<dict\/>/, "no entitlements at all");
+  const mac = JSON.parse(read("apps", "desktop", "src-tauri", "tauri.release.macos.conf.json"));
+  assert.equal(mac.bundle.macOS.hardenedRuntime, true);
+  // Signing secrets reach only the steps that import them; the build job never prints them.
+  const build = read(".github", "workflows", "build.yml");
+  assert.match(build, /if: runner\.os == 'Windows' && env\.WINDOWS_CERT_PFX_BASE64 != ''/);
+  assert.match(build, /if: runner\.os == 'macOS' && env\.APPLE_CERTIFICATE != ''/);
+  assert.ok(!/echo "\$(WINDOWS_CERT|APPLE_CERTIFICATE|APPLE_PASSWORD)/.test(build.replace(/echo "\$APPLE_CERTIFICATE" \| base64 --decode/, "")), "no secret is echoed to the log");
+});
+
 test("video tools are fetched only from fixed https sources, checked against the published checksum before use, one fixed entry out of an archive", () => {
   const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
   // The only sources are the official ones, compiled in (the UI can never name one).

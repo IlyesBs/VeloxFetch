@@ -78,7 +78,8 @@ export function t(key: Key, vars?: Record<string, string | number>): string {
   return vars ? text.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? wrap(String(vars[k])) : m)) : text;
 }
 
-function subscribe(f: () => void) {
+/** Call `f` on every language change; returns the unsubscribe. */
+export function subscribe(f: () => void) {
   subs.add(f);
   return () => {
     subs.delete(f);

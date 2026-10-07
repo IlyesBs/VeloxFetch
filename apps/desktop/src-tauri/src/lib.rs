@@ -11,6 +11,7 @@
 mod authz;
 mod bridge;
 mod clipboard;
+mod desktop;
 mod preview_server;
 mod smart_throttle;
 mod webview_guard;
@@ -133,6 +134,8 @@ command!(set_video_bar, SetVideoBar, (enabled: bool) -> (), |m| m.set_video_bar(
 #[derive(serde::Deserialize, Clone, Copy, Debug)]
 #[serde(rename_all = "camelCase")]
 enum WindowAction {
+    /// The UI has painted: show the window (unless this run started hidden in the tray).
+    Ready,
     Minimize,
     ToggleMaximize,
     Close,
@@ -149,6 +152,7 @@ async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<b
     guard(&window, Command::WindowControl)?;
     let failed = |e: tauri::Error| ApiError { code: "window", message: format!("the window could not do that: {e}") };
     match action {
+        WindowAction::Ready => desktop::window_ready(&window),
         WindowAction::Minimize => window.minimize().map_err(failed)?,
         WindowAction::ToggleMaximize => {
             let was = window.is_maximized().unwrap_or(false);
@@ -206,6 +210,28 @@ async fn set_clipboard_watch(
 ) -> Result<clipboard::ClipboardState, ApiError> {
     guard(&window, Command::SetClipboardWatch)?;
     state.clipboard.set(&state.manager, enabled).await
+}
+
+/// Tray, start at login, notifications, language: stored by the manager; the tray menu follows the language.
+#[tauri::command]
+async fn get_desktop_options(window: WebviewWindow, state: State<'_, AppState>) -> Result<download_manager::DesktopPrefsDto, ApiError> {
+    guard(&window, Command::GetDesktopOptions)?;
+    Ok(state.manager.desktop_prefs())
+}
+
+#[tauri::command]
+async fn set_desktop_options(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    request: download_manager::SetDesktopPrefs,
+) -> Result<download_manager::DesktopPrefsDto, ApiError> {
+    guard(&window, Command::SetDesktopOptions)?;
+    let relabel = request.language.is_some();
+    let prefs = state.manager.set_desktop_prefs(request).await.map_err(ApiError::from)?;
+    if relabel {
+        desktop::relabel_tray(window.app_handle(), &prefs.language);
+    }
+    Ok(prefs)
 }
 
 command!(set_power_action, SetPowerAction, (request: SetPowerAction) -> QueueStateDto, |m| m.set_power_action(request));
@@ -408,7 +434,7 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::
     // frame). If the UI never gets there, show it anyway so the app can't stay invisible.
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(6));
-        if !window.is_visible().unwrap_or(true) {
+        if !desktop::starts_hidden() && !window.is_visible().unwrap_or(true) {
             let _ = window.show();
         }
     });
@@ -643,6 +669,8 @@ pub fn run() {
                 bridge::LinkClaim::Ours(l) => Some(l),
                 bridge::LinkClaim::Unavailable => None,
                 bridge::LinkClaim::TakenByAnotherInstance => {
+                    #[cfg(unix)]
+                    desktop::ask_running_copy_to_show(&db_path_dir);
                     focus_running_instance();
                     std::process::exit(0);
                 }
@@ -652,6 +680,8 @@ pub fn run() {
             cfg.log = Some(log);
             // The real operating system (power actions, files, keeping awake): only the app itself gets it.
             cfg.system = download_manager::SystemHandle::native();
+            // Starting at login: offered by release builds (debug builds and their tests never touch login items).
+            cfg.app_launcher = if cfg!(debug_assertions) { None } else { desktop::launcher() };
             // New files are sorted into Video / Audio / Documents / ... folders unless the user turns it off in Settings.
             cfg.organize_default = true;
             // yt-dlp, Deno and ffmpeg are fetched from their official servers the first time a video page needs
@@ -718,6 +748,14 @@ pub fn run() {
                     m.prefetch_video_tools();
                 });
             }
+            // The tray first: whether there is one decides what closing the window and `--hidden` do.
+            let tray = desktop::create_tray(app.handle(), &manager);
+            manager.set_tray_available(tray);
+            desktop::note_start_args(tray);
+            manager.refresh_start_at_login();
+            desktop::watch_for_notifications(app.handle().clone(), manager.clone());
+            #[cfg(unix)]
+            desktop::listen_for_show(app.handle().clone(), &data_dir);
             app.manage(AppState { manager, bridge, clipboard });
             create_main_window(app.handle())?;
             // First start: set the browser extension up for the default browser (once; see auto_install_once).
@@ -732,6 +770,18 @@ pub fn run() {
                 }
             });
             Ok(())
+        })
+        // The close button hides to the tray when the user wants that (and there is a tray).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == authz::MAIN {
+                    if let Some(state) = window.try_state::<AppState>() {
+                        if desktop::close_to_tray(window.app_handle(), &state.manager) {
+                            api.prevent_close();
+                        }
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             create_download,
@@ -802,6 +852,8 @@ pub fn run() {
             get_preview_info,
             get_video_tools,
             fetch_video_tools,
+            get_desktop_options,
+            set_desktop_options,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the VeloxFetch application");
@@ -816,6 +868,11 @@ pub fn run() {
                 REBUILDING.store(false, Ordering::SeqCst);
             }
         }
+        // macOS: a click on the Dock icon while the window is hidden in the tray brings it back.
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = &event {
+            desktop::show_main(handle);
+        }
         // Pause everything and let it save before the process ends, so no progress is lost.
         if let RunEvent::ExitRequested { api, code, .. } = event {
             // Closing the last window while it is being replaced is not a request to quit.
@@ -823,6 +880,7 @@ pub fn run() {
                 api.prevent_exit();
                 return;
             }
+            desktop::quitting();
             if !shutting_down.swap(true, Ordering::SeqCst) {
                 api.prevent_exit();
                 let handle = handle.clone();

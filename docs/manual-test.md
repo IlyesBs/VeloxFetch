@@ -184,3 +184,18 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 3. Start VeloxFetch a second time from the Start menu: the running window comes to the front, no second copy appears.
 4. The Disk tile shows the free space right after start, before any download.
 5. Open a page with a video: the **Download video** bar appears over it without changing any setting.
+
+## O. On the desktop: tray, start at login, notifications (Phases 16-18, once per OS)
+1. Settings > Appearance > **On the desktop**: the three switches are there (close to tray and notifications on, start at login off).
+2. Close the window: it disappears, the tray icon stays (Windows notification area, macOS menu bar, Linux panel), one notification says
+   VeloxFetch is still running. A download sent from the browser still arrives. The tray menu opens the window, pauses / resumes all, quits.
+3. Linux desktop without a tray (GNOME without the AppIndicator extension): the switch is greyed with an explanation, closing quits.
+4. Turn on **Start VeloxFetch when I log in**, log out and in: VeloxFetch is in the tray, no window. Windows: Task Manager > Startup apps
+   lists it; Linux: `~/.config/autostart/app.velox.fetch.desktop`; macOS: `~/Library/LaunchAgents/app.velox.fetch.plist`. Turn it off: gone.
+5. Start VeloxFetch again from the menu / dock while it is in the tray: the window comes back, no second copy.
+6. With the window hidden or behind another one, let a download finish and make one fail: one notification each, with the file name.
+   With the window in front: none. Change the language: the tray menu and the notifications follow.
+7. Windows: `powercfg /requests` lists VeloxFetch while downloading (keep awake); macOS: notifications and the menu bar icon show.
+8. Signed builds: Windows file properties > Digital signatures (app, helper, setup); macOS `spctl -a -vv VeloxFetch.app` says
+   "Notarized Developer ID".
+
