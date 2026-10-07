@@ -435,3 +435,16 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   the program path must be absolute, and the desktop entry quotes it as its specification requires. Registering it
   and handling the links is wired in Phases 16 to 18.
 * Policy test: `Phase 15: the operating system is reached through SystemIntegration only...`.
+
+### Starting the app for a browser download
+
+* The helper starts the app only for a validated `download`, never for a `ping`, at most once per session, and
+  only a program it found itself: fixed places relative to the helper, or the absolute path the app wrote in its own
+  user-only data folder (the folder that already holds the link token: whoever can write there is already the
+  user). Nothing in a browser message chooses what runs.
+* Inside a snap / Flatpak the helper only asks the XDG desktop portal to open the fixed link `veloxfetch://start`;
+  the app ignores the link's content (it just starts, and a second copy leaves). The link is registered for the
+  user only (`~/.local/share/applications`), only in release builds, and only while a sandboxed browser is
+  connected; it is removed when none is.
+* The started app runs in its own process group (Unix) or detached (Windows): ending the browser never ends it.
+

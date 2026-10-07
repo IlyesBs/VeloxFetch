@@ -113,13 +113,23 @@ pub fn install(b: &SandboxedBrowser, spec: &HostSpec) -> io::Result<()> {
     if !spec.host_exe.is_absolute() || !spec.host_exe.is_file() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "the native host program was not found next to the application"));
     }
-    std::fs::create_dir_all(&b.data_dir)?;
-    let copy = b.host_copy();
-    if !same_file_content(&spec.host_exe, &copy) {
+    copy_helper(&spec.host_exe, &b.data_dir)?;
+    if let Some(dir) = b.manifest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&b.manifest, manifest_json(b.browser, &spec_for(b, spec)))
+}
+
+/// Keep a copy of the helper program `src` in `dir` (only rewritten when it changed). Returns the copy.
+/// Also used for an AppImage, whose own files vanish when it closes while browsers must still find the helper.
+pub fn copy_helper(src: &Path, dir: &Path) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let copy = dir.join(src.file_name().unwrap_or_else(|| "velox-native-host".as_ref()));
+    if !same_file_content(src, &copy) {
         // Write beside, then rename: a browser starting the helper meanwhile never runs half a file.
-        let tmp = b.data_dir.join(".velox-native-host.new");
+        let tmp = dir.join(".velox-native-host.new");
         let _ = std::fs::remove_file(&tmp);
-        std::fs::copy(&spec.host_exe, &tmp)?;
+        std::fs::copy(src, &tmp)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -127,10 +137,7 @@ pub fn install(b: &SandboxedBrowser, spec: &HostSpec) -> io::Result<()> {
         }
         std::fs::rename(&tmp, &copy)?;
     }
-    if let Some(dir) = b.manifest.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::write(&b.manifest, manifest_json(b.browser, &spec_for(b, spec)))
+    Ok(copy)
 }
 
 /// Remove the registration and the helper copy (the token and the link go when the app stops serving there).

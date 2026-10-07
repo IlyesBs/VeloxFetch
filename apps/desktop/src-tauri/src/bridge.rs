@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use browser_bridge::launch as app_start;
 use browser_bridge::server::{BoxFuture, DownloadAccepted, Handler, HandlerError, ServerConfig};
 use browser_bridge::{
     chromium_ids, serve, Allowlist, Caller, DownloadRequest, Endpoint, Listener, MediaHint, Token, CHROME_EXTENSION_ID, CHROME_STORE_ID,
@@ -22,6 +23,7 @@ use system_integration::browser_launch as launch;
 use system_integration::native_messaging::{self as nm, Browser, HostSpec, Status, Target};
 use system_integration::sandboxed_browsers::{self as sandboxed, SandboxedBrowser};
 use system_integration::store_extension as store;
+use system_integration::system::{NativeSystem, ProtocolHandler, SystemIntegration};
 use system_integration::Platform;
 
 /// Turns browser handoffs into downloads.
@@ -147,6 +149,9 @@ pub struct Bridge {
     link: Option<(Token, Arc<AppHandler>)>,
     /// Sandbox folders the link is already served in.
     served: Mutex<HashSet<PathBuf>>,
+    /// Linux release builds: the `veloxfetch://` link that lets a sandboxed browser's helper have the desktop start
+    /// the app when it is closed (registered while a sandboxed browser is connected).
+    start_link: Option<ProtocolHandler>,
 }
 
 /// Debug builds only (end-to-end tests): register into a scratch registry key instead of the real
@@ -206,6 +211,18 @@ impl Bridge {
         };
         let link_running = link.is_some();
 
+        // How the browsers' helper starts this app when a download comes while it is closed. An AppImage runs from
+        // a folder that vanishes when it closes: the AppImage file itself is what to start.
+        let appimage = std::env::var_os("APPIMAGE")
+            .map(PathBuf::from)
+            .filter(|p| Platform::current() == Platform::Linux && p.is_absolute() && p.is_file());
+        let app = appimage.clone().or_else(|| std::env::current_exe().ok());
+        if let (true, Some(app)) = (link_running, &app) {
+            if let Err(e) = app_start::record_app(data_dir, app) {
+                tracing::warn!(error = %e, "browser bridge: cannot record where the app is; browsers cannot start it");
+            }
+        }
+
         // Beside the application (Windows installer, portable, dev builds) or in the platform's
         // resource folder (Linux packages, macOS bundle).
         let host_name = if cfg!(windows) { "velox-native-host.exe" } else { "velox-native-host" };
@@ -217,6 +234,14 @@ impl Bridge {
             .map(|d| d.join(host_name))
             .find(|p| p.is_file())
             .unwrap_or_default();
+        // Registered from inside an AppImage, the helper would be gone as soon as the app closes: use a copy.
+        let host_exe = match appimage {
+            Some(_) if host_exe.is_file() => sandboxed::copy_helper(&host_exe, data_dir).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "browser bridge: cannot keep a copy of the helper");
+                host_exe
+            }),
+            _ => host_exe,
+        };
         let spec = HostSpec {
             name: HOST_NAME.to_string(),
             description: "VeloxFetch browser integration".to_string(),
@@ -254,6 +279,9 @@ impl Bridge {
             sandbox_roots,
             link,
             served: Mutex::new(HashSet::new()),
+            start_link: app
+                .filter(|_| !cfg!(debug_assertions) && Platform::current() == Platform::Linux)
+                .map(|exe| ProtocolHandler { scheme: app_start::SCHEME.into(), exe }),
         };
         bridge.refresh_sandboxed();
         bridge
@@ -282,6 +310,22 @@ impl Bridge {
                 }
             }
             self.serve_in(b);
+        }
+        self.sync_start_link();
+    }
+
+    /// Have the `veloxfetch://` link start this app exactly while a sandboxed browser is connected.
+    fn sync_start_link(&self) {
+        let Some(h) = &self.start_link else { return };
+        let system = NativeSystem::new();
+        let wanted = self.sandboxed().iter().any(|b| b.manifest.is_file());
+        let res = match (wanted, system.protocol_registered(h)) {
+            (true, false) => system.register_protocol(h),
+            (false, true) => system.unregister_protocol(&h.scheme),
+            _ => Ok(()),
+        };
+        if let Err(e) = res {
+            tracing::warn!(error = %e, "browser bridge: cannot update the link that starts the app");
         }
     }
 

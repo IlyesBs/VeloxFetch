@@ -19,6 +19,7 @@ use crate::auth::Token;
 use crate::caller::Caller;
 use crate::client::{Client, ClientError};
 use crate::frame::{read_frame, write_frame, FrameError, MAX_BROWSER_MESSAGE, MAX_REPLY};
+use crate::launch;
 use crate::protocol::{parse_message, Message, Reply};
 use crate::transport::Endpoint;
 
@@ -29,6 +30,9 @@ pub struct HostConfig {
     pub data_dir: PathBuf,
     /// The desktop app to start when it is not running (`None` = never start it).
     pub app_exe: Option<PathBuf>,
+    /// Otherwise (or when it cannot be started from here), ask the desktop to start it: a browser in a snap or a
+    /// Flatpak may not start programs itself (see [`crate::launch`]).
+    pub start_through_desktop: bool,
     /// How long to wait for a freshly started app to come up.
     pub launch_wait: Duration,
 }
@@ -40,25 +44,25 @@ struct Link<'a> {
     launched: bool,
 }
 
-fn launch(exe: &std::path::Path) -> io::Result<()> {
-    let mut cmd = std::process::Command::new(exe);
-    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const DETACHED_PROCESS: u32 = 0x0000_0008;
-        const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
-        // Outlive the browser and the host; if the browser's job forbids breakaway, fall back.
-        if cmd.creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB).spawn().is_ok() {
-            return Ok(());
-        }
-        cmd.creation_flags(DETACHED_PROCESS).spawn().map(|_| ())
-    }
-    #[cfg(not(windows))]
-    cmd.spawn().map(|_| ())
-}
-
 impl Link<'_> {
+    fn app(&self) -> Option<&std::path::Path> {
+        self.cfg.app_exe.as_deref().filter(|p| p.is_file())
+    }
+
+    fn can_launch(&self) -> bool {
+        self.app().is_some() || self.cfg.start_through_desktop
+    }
+
+    /// Start the app: the program itself when it is reachable, else through the desktop.
+    async fn launch(&self) -> io::Result<()> {
+        match self.app().map(launch::start_program) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(_)) | None if self.cfg.start_through_desktop => launch::start_through_desktop().await,
+            Some(Err(e)) => Err(e),
+            None => Err(io::Error::new(io::ErrorKind::NotFound, "no app to start")),
+        }
+    }
+
     async fn try_connect(&self) -> Result<Client, ClientError> {
         // Re-read the token every time: a restarted app writes a new one.
         let token = Token::read_file(&self.cfg.data_dir).map_err(|_| ClientError::Unavailable)?;
@@ -70,12 +74,9 @@ impl Link<'_> {
         if self.client.is_none() {
             let c = match self.try_connect().await {
                 Ok(c) => c,
-                Err(ClientError::Unavailable)
-                    if may_launch && !self.launched && self.cfg.app_exe.as_deref().is_some_and(|p| p.is_file()) =>
-                {
+                Err(ClientError::Unavailable) if may_launch && !self.launched && self.can_launch() => {
                     self.launched = true;
-                    let exe = self.cfg.app_exe.clone().unwrap();
-                    launch(&exe).map_err(|_| Reply::err("app_not_running", "VeloxFetch is not running and could not be started"))?;
+                    self.launch().await.map_err(|_| Reply::err("app_not_running", "VeloxFetch is not running and could not be started"))?;
                     let deadline = tokio::time::Instant::now() + self.cfg.launch_wait;
                     loop {
                         match self.try_connect().await {

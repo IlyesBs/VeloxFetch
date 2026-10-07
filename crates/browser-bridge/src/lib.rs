@@ -18,6 +18,7 @@ pub mod caller;
 pub mod client;
 pub mod frame;
 pub mod host;
+pub mod launch;
 pub mod protocol;
 pub mod server;
 pub mod transport;
