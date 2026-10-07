@@ -133,7 +133,12 @@ mod imp {
             if std::os::unix::net::UnixStream::connect(&ep.0).is_ok() {
                 return Err(io::Error::new(io::ErrorKind::AddrInUse, "another instance owns the link"));
             }
-            let _ = std::fs::remove_file(&ep.0); // a stale socket from a crashed run
+            // A stale socket from a crashed run goes; on the very first start the data folder does not exist yet (the
+            // database makes it later), so it is made here.
+            let _ = std::fs::remove_file(&ep.0);
+            if let Some(dir) = std::path::Path::new(&ep.0).parent() {
+                std::fs::create_dir_all(dir)?;
+            }
             let l = UnixListener::bind(&ep.0)?;
             std::fs::set_permissions(&ep.0, std::fs::Permissions::from_mode(0o600))?;
             Ok(Self(l))

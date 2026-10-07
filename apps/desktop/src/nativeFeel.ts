@@ -45,13 +45,6 @@ let shown = false;
 export function showWindowWhenReady(): void {
   if (shown) return;
   shown = true;
-  void import("@tauri-apps/api/window")
-    .then(async (m) => {
-      const w = m.getCurrentWindow();
-      await w.show();
-      await w.setFocus();
-    })
-    .catch(() => {
-      /* not running inside Tauri (tests) - nothing to show */
-    });
+  // Rust shows it (and leaves it in the tray when VeloxFetch was started hidden at login).
+  void import("./chrome").then((m) => m.windowControl("ready"));
 }

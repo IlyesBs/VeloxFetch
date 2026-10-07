@@ -33,6 +33,8 @@ pub enum Command {
     SetSchedule,
     SetPowerAction,
     SetKeepAwake,
+    GetDesktopOptions,
+    SetDesktopOptions,
     GetBrowserIntegration,
     SetBrowserIntegration,
     InstallBrowserExtension,
@@ -84,7 +86,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 68] = [
+    pub const ALL: [Command; 70] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -106,6 +108,8 @@ impl Command {
         Command::SetSchedule,
         Command::SetPowerAction,
         Command::SetKeepAwake,
+        Command::GetDesktopOptions,
+        Command::SetDesktopOptions,
         Command::GetBrowserIntegration,
         Command::SetBrowserIntegration,
         Command::InstallBrowserExtension,
@@ -179,6 +183,8 @@ impl Command {
             Command::SetSchedule => "set_schedule",
             Command::SetPowerAction => "set_power_action",
             Command::SetKeepAwake => "set_keep_awake",
+            Command::GetDesktopOptions => "get_desktop_options",
+            Command::SetDesktopOptions => "set_desktop_options",
             Command::GetBrowserIntegration => "get_browser_integration",
             Command::SetBrowserIntegration => "set_browser_integration",
             Command::InstallBrowserExtension => "install_browser_extension",
@@ -307,6 +313,8 @@ mod tests {
             Command::SetSchedule,
             Command::SetPowerAction,
             Command::SetKeepAwake,
+            Command::GetDesktopOptions,
+            Command::SetDesktopOptions,
             Command::GetBrowserIntegration,
             Command::SetBrowserIntegration,
             Command::InstallBrowserExtension,
@@ -385,14 +393,12 @@ mod tests {
     /// Least privilege: only our own commands plus event listening and showing the window. Nothing broad, no plugins.
     #[test]
     fn capabilities_grant_no_broad_or_dangerous_permissions() {
-        // Window show/focus: the window starts hidden and the UI shows it after its first paint. The rest is the UI's
-        // own title bar (no system one): dragging it and double-click to maximize. Its buttons go through our own
+        // The UI's own title bar (no system one): dragging it and double-click to maximize. Its buttons, and showing
+        // the window after the first paint (Rust decides: not when started hidden in the tray), go through our own
         // `window_control` command, which acts on the calling window only.
         let allowed_core: BTreeSet<&str> = [
             "core:event:allow-listen",
             "core:event:allow-unlisten",
-            "core:window:allow-show",
-            "core:window:allow-set-focus",
             "core:window:allow-start-dragging",
             "core:window:allow-internal-toggle-maximize",
         ]

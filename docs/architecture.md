@@ -153,6 +153,10 @@ Settings keys: `queue.max_active`, `queue.max_connections`, `queue.paused`, `que
                                                                     a download needs it                    then the manager
 ```
 
+* **On the desktop (phases 16-18).** `apps/desktop/src-tauri/src/desktop.rs`: the tray icon and menu, closing to the tray, `--hidden`
+  starts at login, notifications when a download ends while the window is not in front, and the show signal of a second launch. Its
+  texts come from the UI's locale files, embedded at build time. The choices are stored by the manager (`manager/desktop.rs`), and
+  start at login goes through `SystemIntegration::set_start_at_login` (Windows `Run` key, XDG autostart, macOS launch agent).
 * **A download while the app is closed.** The helper starts the app for a `download` (never for a `ping`) and
   waits for its link. It finds the app by itself, never from a message (`browser_bridge::launch`): beside the
   helper (Windows, portable), `../../bin` (Linux packages), `../MacOS` (macOS bundle), else the path the app

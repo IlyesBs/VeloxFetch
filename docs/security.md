@@ -448,3 +448,26 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   connected; it is removed when none is.
 * The started app runs in its own process group (Unix) or detached (Windows): ending the browser never ends it.
 
+## Phases 16-18: Windows, Linux and macOS on the desktop
+
+* **Tray / close to tray.** Closing the window hides it only when the user wants that *and* the desktop shows tray icons; on Linux the
+  AppIndicator library is looked for before the tray code runs (that code stops the program when it is missing). No tray: closing quits.
+* **Start at login** is off by default and only follows the user's switch: the Windows `Run` value (HKCU), an XDG autostart file
+  (`~/.config/autostart`), a macOS launch agent (`~/Library/LaunchAgents`, `KeepAlive` false: never restarted after the user quits).
+  Each runs only the app itself, quoted, with `--hidden`; the path is checked (absolute, no quotes or new lines). Debug builds never
+  offer it. The uninstaller removes the Windows value.
+* **Notifications** carry the file name only, cleaned of control characters and bounded; Linux uses the desktop's notification service
+  over D-Bus (body escaped, servers read markup), then `notify-send`; Windows toasts escape XML; macOS passes the text as argv.
+* **Keeping awake on Linux** falls back to logind's inhibitor over D-Bus ("idle" only) when `systemd-inhibit` is missing; the handle is
+  a file descriptor released when dropped or when the app ends.
+* **The window is shown only by Rust** (`window_control: ready`): the UI lost the `show` / `set-focus` window permissions.
+* **A second launch** on Linux / macOS signals the running copy over a socket in the data folder (mode 0600; the user's private
+  runtime folder when the path is too long). The connection carries nothing: it only means "show the window".
+* **First start fix:** the browser link now creates the data folder before it binds, so the very first run after installing has browser
+  integration and the one-copy guard.
+* **Windows install:** per-machine into Program Files (admin-only writes), DLL search without the current folder
+  (`path_safety::harden_process`), `veloxfetch://` registered by the installer and removed with it. No file associations: the app owns no
+  file type, and taking one over (`.txt` lists) would hijack the user's files.
+* **macOS:** hardened runtime with no entitlements; no App Sandbox (the app writes to folders the user picks and starts the checked video
+  tools); `veloxfetch://` declared in the bundle's Info.plist.
+

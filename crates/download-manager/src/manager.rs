@@ -14,6 +14,7 @@ use tokio::sync::{broadcast, watch};
 use crate::api::*;
 use crate::validate;
 
+mod desktop;
 mod diag;
 mod files;
 mod media;
@@ -119,6 +120,8 @@ struct Inner {
     awake: Mutex<Option<system_integration::KeepAwake>>,
     /// Keeping awake failed on this system: not tried again until the setting is changed.
     awake_unavailable: AtomicBool,
+    /// The app found a tray it can show its icon in.
+    tray_available: AtomicBool,
     /// yt-dlp hung or failed with Deno and worked without it on this computer: until the app restarts,
     /// video pages are read and downloaded without a JavaScript runtime.
     js_broken: AtomicBool,
@@ -256,6 +259,7 @@ impl DownloadManager {
             shutting_down: AtomicBool::new(false),
             awake: Mutex::new(None),
             awake_unavailable: AtomicBool::new(false),
+            tray_available: AtomicBool::new(false),
             js_broken: AtomicBool::new(false),
             secrets_sealed,
             storage,

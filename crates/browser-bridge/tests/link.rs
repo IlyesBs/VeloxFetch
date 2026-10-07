@@ -259,3 +259,18 @@ async fn a_second_instance_cannot_take_the_link_and_is_told_why() {
     connect(&ep).await.expect("still reachable");
     tokio::time::timeout(Duration::from_secs(5), accept).await.unwrap().unwrap().unwrap();
 }
+
+/// The very first start after installing: the data folder does not exist yet when the link is opened. It must
+/// still be opened (otherwise browser integration and the one-copy guard are off for that whole run).
+#[cfg(unix)]
+#[tokio::test]
+async fn the_link_opens_on_the_very_first_start_before_the_data_folder_exists() {
+    let dir = std::env::temp_dir().join(format!("velox-first-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let ep = Endpoint::default_for(&dir.join("app.velox.fetch"));
+    let first = Listener::bind(&ep).expect("the folder is made");
+    let second = Listener::bind(&ep).err().expect("and the link is owned from then on");
+    assert!(browser_bridge::owned_by_another_instance(&second));
+    drop(first);
+    let _ = std::fs::remove_dir_all(dir);
+}

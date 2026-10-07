@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-desktop-options"
+description = "Enables the set_desktop_options command without any pre-configured scope."
+commands.allow = ["set_desktop_options"]
+
+[[permission]]
+identifier = "deny-set-desktop-options"
+description = "Denies the set_desktop_options command without any pre-configured scope."
+commands.deny = ["set_desktop_options"]

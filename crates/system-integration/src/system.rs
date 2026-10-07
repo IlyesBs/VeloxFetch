@@ -127,6 +127,10 @@ pub trait SystemIntegration: Send + Sync {
     fn unregister_protocol(&self, scheme: &str) -> Result<(), SystemError>;
     /// Registered exactly as [`register_protocol`](Self::register_protocol) would do it.
     fn protocol_registered(&self, h: &ProtocolHandler) -> bool;
+    /// Start `exe` [`HIDDEN_ARG`] (in the tray) when the user logs in; `None` stops it. Per user.
+    fn set_start_at_login(&self, exe: Option<&Path>) -> Result<(), SystemError>;
+    /// Set up exactly as [`set_start_at_login`](Self::set_start_at_login) would do it for `exe`.
+    fn starts_at_login(&self, exe: &Path) -> bool;
 }
 
 // ------------------------------------------------------------------------------------- commands (pure)
@@ -201,6 +205,91 @@ pub fn windows_protocol_command(exe: &Path) -> String {
     format!("\"{}\" \"%1\"", exe.display())
 }
 
+/// The argument the app is started with at login: straight to the tray, no window.
+pub const HIDDEN_ARG: &str = "--hidden";
+
+/// Windows: the `Run` value that starts the app at login (`"C:\...\velox-desktop.exe" --hidden`).
+pub fn windows_login_command(exe: &Path) -> String {
+    format!("\"{}\" {HIDDEN_ARG}", exe.display())
+}
+
+/// Linux: the XDG autostart entry (`~/.config/autostart/app.velox.fetch.desktop`).
+pub fn autostart_file(config_home: &Path) -> PathBuf {
+    config_home.join("autostart").join("app.velox.fetch.desktop")
+}
+
+/// Linux: the autostart entry's text (every desktop that follows the XDG autostart specification).
+pub fn autostart_entry(exe: &Path) -> String {
+    format!(
+        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nExec=\"{}\" {HIDDEN_ARG}\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n",
+        desktop_exec_quote(exe)
+    )
+}
+
+/// macOS: the per-user launch agent (`~/Library/LaunchAgents/app.velox.fetch.plist`).
+pub fn launch_agent_file(home: &Path) -> PathBuf {
+    home.join("Library/LaunchAgents/app.velox.fetch.plist")
+}
+
+/// macOS: the launch agent's text: runs the app once at login, never restarts it.
+pub fn launch_agent_plist(exe: &Path) -> String {
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n",
+            "<plist version=\"1.0\">\n<dict>\n",
+            "  <key>Label</key><string>app.velox.fetch</string>\n",
+            "  <key>ProgramArguments</key><array><string>{}</string><string>{}</string></array>\n",
+            "  <key>RunAtLoad</key><true/>\n",
+            "  <key>KeepAlive</key><false/>\n",
+            "  <key>ProcessType</key><string>Interactive</string>\n",
+            "</dict>\n</plist>\n"
+        ),
+        xml_escape(&exe.to_string_lossy()),
+        HIDDEN_ARG
+    )
+}
+
+/// A program path inside a desktop entry's `Exec=` double quotes (`"`, `` ` ``, `$`, `\\` escaped, `%` doubled).
+fn desktop_exec_quote(exe: &Path) -> String {
+    let mut out = String::new();
+    for c in exe.to_string_lossy().chars() {
+        match c {
+            '"' | '`' | '$' | '\\' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '%' => out.push_str("%%"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn check_login_exe(exe: &Path) -> Result<(), SystemError> {
+    if !exe.is_absolute() || exe.to_string_lossy().contains(['"', '\n', '\r']) {
+        return Err(SystemError::Failed("the program path is not usable to start at login".into()));
+    }
+    Ok(())
+}
+
+/// Write `text` to `file` through a temporary file next to it (never half a file).
+fn write_whole(file: &Path, text: &str) -> io::Result<()> {
+    if let Some(dir) = file.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = file.with_extension("velox-new");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(&tmp, file)
+}
+
+fn remove_if_there(file: &Path) -> io::Result<()> {
+    match std::fs::remove_file(file) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 /// Linux: where the handler's desktop entry lives.
 pub fn desktop_file(data_home: &Path, scheme: &str) -> PathBuf {
     data_home.join("applications").join(format!("{scheme}-url-handler.desktop"))
@@ -209,19 +298,9 @@ pub fn desktop_file(data_home: &Path, scheme: &str) -> PathBuf {
 /// Linux: the desktop entry that hands `scheme:` links to `exe` (quoted as the desktop entry specification
 /// wants: inside double quotes, `"`, `` ` ``, `$` and `\` escaped, `%` doubled).
 pub fn desktop_entry(h: &ProtocolHandler) -> String {
-    let mut exe = String::new();
-    for c in h.exe.to_string_lossy().chars() {
-        match c {
-            '"' | '`' | '$' | '\\' => {
-                exe.push('\\');
-                exe.push(c);
-            }
-            '%' => exe.push_str("%%"),
-            c => exe.push(c),
-        }
-    }
     format!(
-        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nExec=\"{exe}\" %u\nNoDisplay=true\nTerminal=false\nMimeType=x-scheme-handler/{};\n",
+        "[Desktop Entry]\nType=Application\nName={APP_NAME}\nExec=\"{}\" %u\nNoDisplay=true\nTerminal=false\nMimeType=x-scheme-handler/{};\n",
+        desktop_exec_quote(&h.exe),
         h.scheme
     )
 }
@@ -266,6 +345,10 @@ pub struct NativeSystem {
     platform: Platform,
     /// Linux: `$XDG_DATA_HOME` (or `~/.local/share`), where the protocol's desktop entry goes.
     data_home: Option<PathBuf>,
+    /// Linux: `$XDG_CONFIG_HOME` (or `~/.config`), where the autostart entry goes.
+    config_home: Option<PathBuf>,
+    /// macOS: the home folder (launch agents).
+    home: Option<PathBuf>,
     /// Windows: the app's id, as its Start menu shortcut carries it (toasts are shown under it).
     app_id: String,
 }
@@ -282,7 +365,12 @@ impl NativeSystem {
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")));
-        Self { platform: Platform::current(), data_home, app_id: "app.velox.fetch".into() }
+        let home = std::env::var_os("HOME").map(PathBuf::from).filter(|p| p.is_absolute());
+        let config_home = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .or_else(|| home.as_ref().map(|h| h.join(".config")));
+        Self { platform: Platform::current(), data_home, config_home, home, app_id: "app.velox.fetch".into() }
     }
 }
 
@@ -321,7 +409,15 @@ impl SystemIntegration for NativeSystem {
             return windows::keep_awake();
         }
         let c = keep_awake_command(self.platform, why, std::process::id()).ok_or(SystemError::Unsupported("keeping the computer awake"))?;
-        let mut child = run(&c, Stdio::piped()).map_err(|e| match e.kind() {
+        let spawned = run(&c, Stdio::piped());
+        // Linux without the systemd-inhibit tool: ask logind itself over D-Bus.
+        #[cfg(target_os = "linux")]
+        if spawned.is_err() {
+            if let Ok(guard) = linux_dbus::inhibit_idle(why) {
+                return Ok(guard);
+            }
+        }
+        let mut child = spawned.map_err(|e| match e.kind() {
             io::ErrorKind::NotFound => SystemError::Unsupported("keeping the computer awake (no systemd-inhibit / caffeinate)"),
             _ => SystemError::Io(e),
         })?;
@@ -341,6 +437,11 @@ impl SystemIntegration for NativeSystem {
     fn notify(&self, n: &Notification) -> Result<(), SystemError> {
         if self.platform == Platform::Windows {
             return windows::toast(&self.app_id, n);
+        }
+        // Linux: the desktop's notification service over D-Bus first (present on every desktop, unlike notify-send).
+        #[cfg(target_os = "linux")]
+        if linux_dbus::notify(n).is_ok() {
+            return Ok(());
         }
         let c = notify_command(self.platform, n).ok_or(SystemError::Unsupported("notifications"))?;
         run_to_end(&c).map_err(|e| match e {
@@ -402,6 +503,117 @@ impl SystemIntegration for NativeSystem {
                 .is_some_and(|text| text == desktop_entry(h)),
             _ => false,
         }
+    }
+
+    fn set_start_at_login(&self, exe: Option<&Path>) -> Result<(), SystemError> {
+        if let Some(exe) = exe {
+            check_login_exe(exe)?;
+        }
+        let missing = |what| SystemError::Unsupported(what);
+        match self.platform {
+            Platform::Windows => windows::set_start_at_login(exe),
+            Platform::Linux => {
+                let file = autostart_file(self.config_home.as_deref().ok_or(missing("starting at login (no home folder)"))?);
+                match exe {
+                    Some(exe) => write_whole(&file, &autostart_entry(exe))?,
+                    None => remove_if_there(&file)?,
+                }
+                Ok(())
+            }
+            Platform::MacOs => {
+                let file = launch_agent_file(self.home.as_deref().ok_or(missing("starting at login (no home folder)"))?);
+                match exe {
+                    Some(exe) => write_whole(&file, &launch_agent_plist(exe))?,
+                    None => remove_if_there(&file)?,
+                }
+                Ok(())
+            }
+            Platform::Other => Err(missing("starting at login")),
+        }
+    }
+
+    fn starts_at_login(&self, exe: &Path) -> bool {
+        let read = |file: Option<PathBuf>| file.and_then(|f| std::fs::read_to_string(f).ok());
+        match self.platform {
+            Platform::Windows => windows::starts_at_login(exe),
+            Platform::Linux => read(self.config_home.as_deref().map(autostart_file)).is_some_and(|t| t == autostart_entry(exe)),
+            Platform::MacOs => read(self.home.as_deref().map(launch_agent_file)).is_some_and(|t| t == launch_agent_plist(exe)),
+            Platform::Other => false,
+        }
+    }
+}
+
+/// Linux D-Bus: the desktop's notification service (session bus) and logind's sleep inhibitor (system bus). Each
+/// call runs on a small runtime of its own, on its own thread, so it works from any caller (async or not).
+#[cfg(target_os = "linux")]
+mod linux_dbus {
+    use std::collections::HashMap;
+
+    use super::{KeepAwake, Notification, SystemError, APP_NAME};
+
+    fn on_own_runtime<T: Send + 'static>(
+        job: impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, zbus::Error>>>> + Send + 'static,
+    ) -> Result<T, SystemError> {
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(SystemError::Io)?;
+            let work = job();
+            rt.block_on(async move {
+                tokio::time::timeout(std::time::Duration::from_secs(5), work)
+                    .await
+                    .map_err(|_| SystemError::Failed("the desktop did not answer".into()))?
+                    .map_err(|e| SystemError::Failed(e.to_string()))
+            })
+        })
+        .join()
+        .unwrap_or_else(|_| Err(SystemError::Failed("D-Bus call failed".into())))
+    }
+
+    /// Body text for a notification server: some read `<b>` / `&` as markup, so it is escaped (the title never is).
+    pub fn body_text(body: &str) -> String {
+        body.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    }
+
+    pub fn notify(n: &Notification) -> Result<(), SystemError> {
+        let (title, body) = (n.title.clone(), body_text(&n.body));
+        on_own_runtime(move || {
+            Box::pin(async move {
+                let conn = zbus::Connection::session().await?;
+                let hints: HashMap<&str, zbus::zvariant::Value<'_>> = HashMap::new();
+                let actions: Vec<&str> = Vec::new();
+                conn.call_method(
+                    Some("org.freedesktop.Notifications"),
+                    "/org/freedesktop/Notifications",
+                    Some("org.freedesktop.Notifications"),
+                    "Notify",
+                    &(APP_NAME, 0u32, "app.velox.fetch", title.as_str(), body.as_str(), actions, hints, -1i32),
+                )
+                .await?;
+                Ok(())
+            })
+        })
+    }
+
+    /// Hold logind's "idle" inhibitor: released when the returned file handle is closed (dropping the guard, or the
+    /// app ending).
+    pub fn inhibit_idle(why: &str) -> Result<KeepAwake, SystemError> {
+        let why = why.to_string();
+        let fd: std::os::fd::OwnedFd = on_own_runtime(move || {
+            Box::pin(async move {
+                let conn = zbus::Connection::system().await?;
+                let reply = conn
+                    .call_method(
+                        Some("org.freedesktop.login1"),
+                        "/org/freedesktop/login1",
+                        Some("org.freedesktop.login1.Manager"),
+                        "Inhibit",
+                        &("idle", APP_NAME, why.as_str(), "block"),
+                    )
+                    .await?;
+                let fd: zbus::zvariant::OwnedFd = reply.body().deserialize()?;
+                Ok(std::os::fd::OwnedFd::from(fd))
+            })
+        })?;
+        Ok(KeepAwake::new(move || drop(fd)))
     }
 }
 
@@ -466,6 +678,31 @@ mod windows {
         }
     }
 
+    const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+
+    pub fn set_start_at_login(exe: Option<&std::path::Path>) -> Result<(), SystemError> {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+        let (run, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(RUN_KEY)?;
+        match exe {
+            Some(exe) => run.set_value(super::APP_NAME, &super::windows_login_command(exe))?,
+            None => match run.delete_value(super::APP_NAME) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => {}
+            },
+        }
+        Ok(())
+    }
+
+    pub fn starts_at_login(exe: &std::path::Path) -> bool {
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+        use winreg::RegKey;
+        RegKey::predef(HKEY_CURRENT_USER)
+            .open_subkey_with_flags(RUN_KEY, KEY_READ)
+            .and_then(|k| k.get_value::<String, _>(super::APP_NAME))
+            .is_ok_and(|v| v == super::windows_login_command(exe))
+    }
+
     pub fn protocol_registered(h: &ProtocolHandler) -> bool {
         use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
         use winreg::RegKey;
@@ -495,6 +732,12 @@ mod windows {
     pub fn protocol_registered(_: &ProtocolHandler) -> bool {
         false
     }
+    pub fn set_start_at_login(_: Option<&std::path::Path>) -> Result<(), SystemError> {
+        Err(SystemError::Unsupported("not Windows"))
+    }
+    pub fn starts_at_login(_: &std::path::Path) -> bool {
+        false
+    }
 }
 
 // ------------------------------------------------------------------------------------- the pretend system
@@ -511,6 +754,8 @@ pub enum SystemCall {
     ReleaseAwake,
     RegisterProtocol(String),
     UnregisterProtocol(String),
+    /// Start at login set up for this program (`None`: removed).
+    StartAtLogin(Option<PathBuf>),
 }
 
 /// Records what would have happened and touches nothing on the machine. Used by tests and by debug builds
@@ -521,11 +766,18 @@ pub struct DryRunSystem {
     power_supported: Vec<PowerAction>,
     power_fails: bool,
     protocols: Mutex<HashSet<(String, PathBuf)>>,
+    login: Mutex<Option<PathBuf>>,
 }
 
 impl Default for DryRunSystem {
     fn default() -> Self {
-        Self { calls: Default::default(), power_supported: PowerAction::ALL.to_vec(), power_fails: false, protocols: Default::default() }
+        Self {
+            calls: Default::default(),
+            power_supported: PowerAction::ALL.to_vec(),
+            power_fails: false,
+            protocols: Default::default(),
+            login: Default::default(),
+        }
     }
 }
 
@@ -638,6 +890,19 @@ impl SystemIntegration for DryRunSystem {
     fn protocol_registered(&self, h: &ProtocolHandler) -> bool {
         self.protocols.lock().unwrap_or_else(|p| p.into_inner()).contains(&(h.scheme.clone(), h.exe.clone()))
     }
+
+    fn set_start_at_login(&self, exe: Option<&Path>) -> Result<(), SystemError> {
+        if let Some(exe) = exe {
+            check_login_exe(exe)?;
+        }
+        self.record(SystemCall::StartAtLogin(exe.map(Path::to_path_buf)));
+        *self.login.lock().unwrap_or_else(|p| p.into_inner()) = exe.map(Path::to_path_buf);
+        Ok(())
+    }
+
+    fn starts_at_login(&self, exe: &Path) -> bool {
+        self.login.lock().unwrap_or_else(|p| p.into_inner()).as_deref() == Some(exe)
+    }
 }
 
 #[cfg(test)]
@@ -713,7 +978,8 @@ mod tests {
     fn the_linux_protocol_is_registered_in_the_users_own_folder() {
         let dir = std::env::temp_dir().join(format!("velox-proto-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let sys = NativeSystem { platform: Platform::Linux, data_home: Some(dir.clone()), app_id: String::new() };
+        let sys =
+            NativeSystem { platform: Platform::Linux, data_home: Some(dir.clone()), config_home: None, home: None, app_id: String::new() };
         let h = ProtocolHandler { scheme: PROTOCOL_SCHEME.into(), exe: PathBuf::from("/opt/VeloxFetch/velox-desktop") };
         assert!(!sys.protocol_registered(&h));
         // Without xdg-mime the default cannot be set, but the entry is written either way.
@@ -727,6 +993,82 @@ mod tests {
         sys.unregister_protocol(PROTOCOL_SCHEME).unwrap();
         assert!(!sys.protocol_registered(&h));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn start_at_login_entries_quote_the_program_and_start_hidden() {
+        let exe = Path::new("/opt/Velox $Fetch/100%/velox-desktop");
+        let entry = autostart_entry(exe);
+        assert!(entry.contains("Exec=\"/opt/Velox \\$Fetch/100%%/velox-desktop\" --hidden\n"), "{entry}");
+        assert!(entry.starts_with("[Desktop Entry]\nType=Application\n"));
+        assert_eq!(autostart_file(Path::new("/h/.config")), Path::new("/h/.config/autostart/app.velox.fetch.desktop"));
+
+        let plist = launch_agent_plist(Path::new("/Applications/A&B <x>.app/Contents/MacOS/velox-desktop"));
+        assert!(
+            plist.contains("<string>/Applications/A&amp;B &lt;x&gt;.app/Contents/MacOS/velox-desktop</string><string>--hidden</string>"),
+            "{plist}"
+        );
+        assert!(plist.contains("<key>KeepAlive</key><false/>"), "never restarted after the user quits");
+        assert_eq!(launch_agent_file(Path::new("/Users/u")), Path::new("/Users/u/Library/LaunchAgents/app.velox.fetch.plist"));
+
+        assert_eq!(
+            windows_login_command(Path::new(r"C:\Program Files\VeloxFetch\velox-desktop.exe")),
+            r#""C:\Program Files\VeloxFetch\velox-desktop.exe" --hidden"#
+        );
+
+        let dry = DryRunSystem::new();
+        assert!(dry.set_start_at_login(Some(Path::new("relative/app"))).is_err());
+        assert!(dry.set_start_at_login(Some(Path::new("/bad\"quote"))).is_err());
+        dry.set_start_at_login(Some(exe)).unwrap();
+        assert!(dry.starts_at_login(exe) && !dry.starts_at_login(Path::new("/other")));
+        dry.set_start_at_login(None).unwrap();
+        assert!(!dry.starts_at_login(exe));
+    }
+
+    #[test]
+    fn start_at_login_is_written_in_the_users_own_folders_and_removed() {
+        let dir = std::env::temp_dir().join(format!("velox-login-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let exe = Path::new("/opt/VeloxFetch/velox-desktop");
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let sys = NativeSystem {
+                platform,
+                data_home: None,
+                config_home: Some(dir.join("config")),
+                home: Some(dir.join("home")),
+                app_id: String::new(),
+            };
+            assert!(!sys.starts_at_login(exe));
+            sys.set_start_at_login(Some(exe)).unwrap();
+            assert!(sys.starts_at_login(exe), "{platform:?}");
+            assert!(!sys.starts_at_login(Path::new("/moved/velox-desktop")), "a moved app counts as not set up");
+            sys.set_start_at_login(None).unwrap();
+            sys.set_start_at_login(None).unwrap(); // twice is fine
+            assert!(!sys.starts_at_login(exe));
+        }
+        assert!(!dir.join("config/autostart/app.velox.fetch.desktop").exists());
+        assert!(!dir.join("home/Library/LaunchAgents/app.velox.fetch.plist").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_notification_bodies_are_never_markup() {
+        assert_eq!(linux_dbus::body_text("<b>a & b</b>"), "&lt;b&gt;a &amp; b&lt;/b&gt;");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "shows a real notification and holds a real inhibitor; run by hand: cargo test -- --ignored desktop_really"]
+    fn the_desktop_really_shows_a_notification_and_holds_logind() {
+        linux_dbus::notify(&Notification::new("VeloxFetch test", "<b>bold?</b> & done")).unwrap();
+        let guard = linux_dbus::inhibit_idle("VeloxFetch D-Bus test").unwrap();
+        let list = Command::new("systemd-inhibit").arg("--list").output().unwrap();
+        assert!(String::from_utf8_lossy(&list.stdout).contains("VeloxFetch D-Bus test"));
+        drop(guard);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let list = Command::new("systemd-inhibit").arg("--list").output().unwrap();
+        assert!(!String::from_utf8_lossy(&list.stdout).contains("VeloxFetch D-Bus test"));
     }
 
     #[test]
