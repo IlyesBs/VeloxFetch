@@ -59,10 +59,14 @@ mod path_tests {
     fn a_long_folder_gets_a_short_socket_name_on_both_sides() {
         let short = Path::new("/home/u/.local/share/app.velox.fetch");
         assert_eq!(unix_socket_path(short), short.join("bridge.sock"));
-        let long = Path::new("/home/twenty-char-username/.var/app/io.github.ungoogled_software.ungoogled_chromium/data/app.velox.fetch");
-        assert!(long.join("bridge.sock").as_os_str().len() > 107, "the case this guards against");
+        // A folder just short enough for `s` but too long for `bridge.sock`, measured against this system's limit
+        // (Linux 107, macOS 103), e.g. a Flatpak browser with a long id under a long user name.
+        let base = "/home/twenty-char-username/.var/app/io.github.ungoogled_software.ungoogled_chromium/data/";
+        let long = std::path::PathBuf::from(format!("{base}{}", "x".repeat(MAX_SOCKET_PATH - 2 - base.len())));
+        let long = long.as_path();
+        assert!(long.join("bridge.sock").as_os_str().len() > MAX_SOCKET_PATH, "the case this guards against");
         assert_eq!(unix_socket_path(long), long.join("s"));
-        assert!(unix_socket_path(long).as_os_str().len() <= MAX_SOCKET_PATH);
+        assert_eq!(unix_socket_path(long).as_os_str().len(), MAX_SOCKET_PATH, "the short name fits exactly");
         assert_eq!(Endpoint::default_for(long), Endpoint::default_for(long), "the same answer every time");
     }
 }
