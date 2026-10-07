@@ -83,8 +83,12 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   - takes over browser downloads, with a confirmation window before anything starts;
   - passes on the referrer, cookies and user agent so protected links work. They are kept sealed and deleted
     when the download ends;
-  - shows a **"Download video" bar** over videos on pages.
-- **Install:** a button in Settings > Browser registers the helper per user and opens the extension page.
+  - shows a **"Download video" bar** over videos on pages;
+  - **starts VeloxFetch when it is closed**: a download sent from the browser opens the app and arrives in it. The
+    helper finds the app itself (beside it, the Linux packages' `bin`, the macOS bundle, or the path the app recorded
+    for an AppImage); a browser in a snap / Flatpak asks the desktop to open `veloxfetch://start`.
+- **Install:** a button in Settings > Browser registers the helper per user and opens the extension page. Browsers
+  installed as snap / Flatpak packages get their own copy of the helper and link.
 
 ### Videos
 - **Video pages** (YouTube, Vimeo… through yt-dlp):
@@ -101,18 +105,41 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 - **Refused, with a clear reason:** DRM-protected services (Netflix, Shahid…), encrypted streams and live streams.
 
 ### Smart throttle
-- **What it does:** while a listed game or call app runs, downloads keep only a share of their speed. They
-  return to full speed when it closes. Examples: LoL, Valorant, CS2, Zoom, Teams.
+- **What it does:** downloads give way to what the user is doing and take the whole connection when it is free.
+  - **Automatic mode** (on by default once Smart throttle is on): when something else uses the internet while the
+    user is at the computer (browsing, a video), downloads slow down; heavy traffic while the user is away slows them
+    less; when the network is free or the computer idle (no input for 2 minutes), full speed.
+  - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), downloads keep only a
+    share of the speed; full speed again when it closes.
+- **Steady, never stuck:** smoothed readings, separate on / off thresholds, two readings to confirm before slowing,
+  a calm period before speeding up (longer on an unsteady network), then steps of 1.5x. Downloads never go below the
+  reserved minimum, so they never stop.
+- **Settings:** on / off, Automatic, the mode, "Downloads always keep at least" (default 256 KB/s), and the maximum
+  download speed (the global speed limit).
 - **Modes:**
 
-  | Mode | Speed kept |
-  |---|---|
-  | Eco | 10 % |
-  | Balanced | 25 % |
-  | Performance | 50 % |
+  | Mode | While browsing | During a game or a call |
+  |---|---|---|
+  | Aggressive | ~35 % | 10 % |
+  | Balanced | ~50 % | 25 % |
+  | Conservative | ~75 % | 50 % |
 
+- **Shows what it does:** a status line ("Full speed — network idle", "Reducing speed — active browsing detected",
+  "Bandwidth optimized — speeding back up"…) on the dashboard card, in Settings and in the status bar, and a graph
+  of the download speed with the current limit (Settings > Speed > Smart throttle).
 - **Default and look:** off by default. While it is on, the accent colour turns amber.
-- **Privacy:** only program *names* are read, and nothing about other programs is stored.
+- **Privacy:** only program *names*, the computer's *total* traffic and the *time since the last input* are read;
+  nothing is stored or sent.
+
+### On the desktop (tray, start at login, notifications)
+- **Tray:** closing the window keeps VeloxFetch running in the tray (downloads go on, the browser can still send
+  new ones). The tray menu opens the window, pauses / resumes everything, or quits. A desktop without tray icons
+  (some Linux desktops) closes the app as before.
+- **Start at login** (off by default): VeloxFetch starts quietly in the tray (Windows `Run` key, XDG autostart,
+  macOS launch agent).
+- **Notifications** when a download finishes or fails while the window is hidden or behind another one, in the
+  app's language. Starting VeloxFetch again brings the hidden window back.
+- Settings > Appearance > **On the desktop** holds the three switches.
 
 ### Live preview
 - The details of an audio / video download can **play it while it downloads**, from the bytes already on disk.
@@ -262,7 +289,8 @@ More: `docs/architecture.md`.
   5. a confirmation window opens;
   6. the download is created.
 - Only two commands exist: `ping` and `download`.
-- The host starts the app only for a download.
+- The host starts the app only for a download, never for a `ping`, and only a program it found itself (never one
+  named in a message). Inside a snap / Flatpak it asks the XDG desktop portal to open `veloxfetch://start` instead.
 
 ### 4.5 Videos
 - **Analysis:** a link is analysed (qualities, audio, subtitles). Nothing is written at this step.
@@ -317,6 +345,9 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
 | UI-only preferences (folded sidebar, density, sort, language, theme) | `localStorage` |
+| How the browser helper starts the app | `<app data>/app-path` (written by the app at each start) |
+| Start at login (when turned on) | Windows `HKCU\...\CurrentVersion\Run`, `~/.config/autostart/app.velox.fetch.desktop`, `~/Library/LaunchAgents/app.velox.fetch.plist` |
+| Second-launch signal (Linux / macOS) | `<app data>/show.sock` (or the user's runtime folder when the path is too long) |
 
 Nothing is sent to any server except the downloads themselves.
 

@@ -21,19 +21,42 @@ how segments are planned or how files are written; each one enters the engine th
 ```text
 src-tauri/src/smart_throttle.rs   every 3 s (Skip on missed ticks), only while enabled:
     sysinfo: process NAMES only (ProcessRefreshKind::nothing(), ~2-6 ms), on a blocking thread, 2 s limit
-    -> manager.smart_throttle_observe(Some(names))      failure / timeout / panic -> observe(None) = full speed
+    + automatic mode: SystemIntegration::user_idle()   (time since the last input only; ~1-2 ms)
+    -> manager.smart_throttle_observe_activity(names, idle)      timeout / panic -> observe(None) = full speed
 download-manager/src/manager/smart_throttle.rs
-    listed program running?  yes -> RateLimits::set_smart(Some(cap))   no / unknown -> set_smart(None)
-    cap = share (5-90 %, default 25 %) of the best total speed seen while not throttled, at least 256 KB/s
-          (1 MB/s until a speed was seen)
+    other traffic = computer's download counter (sysio, refreshed here even with the window hidden) - VeloxFetch's own
+    listed program running?   yes -> cap = share of the best speed seen (at least the reserved minimum)
+    else automatic mode?      Controller::step(other, idle, peak, share, minimum) -> cap or full speed, and why
+    -> RateLimits::set_smart(cap)    (only when it changed; logged with the reason)
 ```
+
+### Automatic mode (`Controller`)
+
+| Signal | Rule |
+|---|---|
+| Smoothing | each reading moves the smoothed traffic half way (`SMOOTHING` 0.5) |
+| Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > 48 KB/s (off below 24 KB/s) -> **browsing** |
+| Network busy | other traffic > max(512 KB/s, 15 % of the best speed) (off below half) -> **busy** |
+| Slow down | after 2 readings in a row (`CONFIRM`): cap = best speed x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the best speed |
+| No counters | full speed, the controller starts over (`unknown`) |
+
+Status codes (`SmartThrottleDto.reason`): `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`;
+the UI turns them into the status line (`throttle.ts`, `thr.*` texts). The best speed is learned only while nothing
+caps downloads. Idle time per OS: Windows `GetLastInputInfo`, macOS `CGEventSourceSecondsSinceLastEventType`, Linux
+GNOME `org.gnome.Mutter.IdleMonitor` -> `org.freedesktop.ScreenSaver.GetSessionIdleTime` -> logind `IdleHint` /
+`IdleSinceHint` (the way that answered is remembered).
+
+Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 KB/s; 32 KB/s to 1 GB/s), `.share`
+(25 %), `.apps`, `.peak`. The maximum download speed is the global speed limit (shown in the same panel).
 
 * Off by default (`smart_throttle.enabled`); the list and the share are saved settings. Default programs: popular
   games (League of Legends, VALORANT, CS2, Dota 2, Fortnite, Apex, Rocket League, GTA V, Overwatch, EA FC,
   eFootball, PUBG) and calls (Zoom, Teams). Discord is left out on purpose (often open all day); users can add it.
 * Matching: whole names, no case, `.exe` ignored (`League of Legends.exe` = `League of Legends`).
-* Commands: `get_smart_throttle`, `set_smart_throttle(request)`. UI: Settings > Speed > Smart throttle, with a live
-  status line ("Zoom is running: downloads are limited to 2.5 MB/s").
+* Commands: `get_smart_throttle`, `set_smart_throttle(request)` (`enabled`, `auto`, `minBps`, `sharePercent`, `apps`).
+  UI: Settings > Speed > Smart throttle (switches, mode, minimum, maximum, programs, live status line and bandwidth
+  graph), the dashboard card and the status bar.
 * Turning it off lifts the cap immediately (not at the next scan). Nothing about other programs is stored, logged
   or sent; only the matched name of a *listed* program appears in the log.
 
@@ -68,7 +91,11 @@ download-manager/src/manager/smart_throttle.rs
 `disk.rs` (a range delivered in one chunk still pays the limit), `planner.rs` (preview order), `manager/preview.rs`
 (range parsing, media types, never unwritten bytes), `manager/smart_throttle.rs` (matching, cap, list checks),
 `src-tauri` (`preview_server` ids only; the real process scan lists this process and takes milliseconds),
-`tests/integration/tests/smart_preview.rs` (4 tests through the real manager and engine),
+`manager/smart_throttle.rs` automatic mode (confirmation, no flapping between the thresholds, step-by-step recovery,
+unsteady network waits longer, idle / busy, minimum always kept, no counters = full speed), `system.rs` (idle time:
+dry run, and a by-hand test on the real desktop),
+`tests/integration/tests/smart_preview.rs` (5 tests through the real manager and engine; one slows a real download
+while browsing and recovers, checks the minimum, the switches and their persistence),
 `tests/e2e/desktop-preview.mjs` (real WebView2: a WAV plays while downloading through the protocol, seeking, CSP blocks
 scripts; the real process scan finds a listed program, the status line, a held-back download, full speed at once),
 policy tests "live preview: ..." and "smart throttle: ...".

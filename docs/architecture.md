@@ -276,9 +276,11 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   detailed / compact view, sort) and a side column (`SidePanels.tsx`: network and disk charts, upcoming
   downloads, quick actions). Only real numbers are shown: the Network and Disk panels read system counters (see
   *Performance model*).
-* **Smart throttle** (`ThrottleHud.tsx`): a gradient radial gauge whose core is the on/off button, a switch and
-  three modes (Eco 10 %, Balanced 25 %, Performance 50 % of the speed while a listed program runs). While it is
-  on, `html[data-throttle]` turns the accent amber everywhere (`throttle.ts`).
+* **Smart throttle** (`ThrottleHud.tsx`): a gradient radial gauge whose core is the on/off button (the arc shows the
+  share of the connection downloads may use right now), a switch, three modes (Aggressive / Balanced / Conservative)
+  and the live status line. `throttle.ts` polls the state every 3 s, keeps the speed / limit history for the graph in
+  Settings (`SmartThrottleSettings.tsx`, `BandwidthGraph`) and, while it is on, sets `html[data-throttle]`
+  (`limiting` while downloads are slowed), which turns the accent amber everywhere.
 * **Task cards** (`DownloadCard.tsx`): the file's kind as a big thumbnail with its extension, name, size and
   link, the neon progress track (green when finished) with the percent, live numbers, the 8x8 connection panel
   (`ThreadMatrix.tsx`: one cell per connection slot, lit cells flicker in CSS at a rate set by the
@@ -326,8 +328,9 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
   Commands: `get_download_diagnostics`, `get_logs`, `set_detailed_logging`, `get_diagnostics_report`, `open_log_folder`.
 
 * **Smart throttle and Live preview** (`docs/smart-throttle-and-preview.md`): `manager/smart_throttle.rs` decides a cap
-  that goes into the `smart` bucket of `RateLimits`; `src-tauri/src/smart_throttle.rs` feeds it the running program
-  names. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
+  that goes into the `smart` bucket of `RateLimits` (a listed program's share, or the automatic `Controller` fed by the
+  computer's other traffic from `sysio` and the user's idle time); `src-tauri/src/smart_throttle.rs` feeds it the running
+  program names and `SystemIntegration::user_idle`. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
   asynchronous custom protocol (`velox-preview`); `DownloadControl::set_preview` makes the engine start the last
   segment second.
 
