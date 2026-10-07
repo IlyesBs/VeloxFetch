@@ -22,6 +22,7 @@ mod network;
 mod pending;
 mod preview;
 mod queue;
+mod queues;
 mod smart_throttle;
 mod storage;
 mod sysio;
@@ -31,6 +32,7 @@ pub use media::is_stream_link;
 use pending::PendingList;
 pub use preview::{media_type as preview_media_type, PreviewResponse};
 use queue::QueueState;
+pub use queues::MAIN_QUEUE;
 pub use smart_throttle::{Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER};
 use storage::{Sorter, Storage};
 
@@ -99,6 +101,8 @@ struct Inner {
     disk: Mutex<DiskStats>,
     sysio: Arc<sysio::SysIo>,
     queue: Mutex<QueueState>,
+    /// The Smart Download Queues (`queues.rs`): several queues with rules, over the one slot scheduler.
+    queues: Mutex<queues::Queues>,
     pending: Mutex<PendingList>,
     media: Mutex<media::MediaState>,
     /// Smart throttle (`smart_throttle.rs`) and live preview (`preview.rs`): isolated features.
@@ -204,6 +208,9 @@ impl DownloadManager {
         // Saved queue settings (max active, connections, pause, schedule) override the defaults.
         let queue = QueueState::load(&store, &cfg)?;
         let scheduler = SlotScheduler::new(queue.max_active());
+        // An urgent download never waits only because less urgent ones hold every slot (one extra slot).
+        scheduler.set_express(true);
+        let queues = queues::Queues::load(&store);
         // Closed from the start when paused or outside the window, so nothing slips through
         // before the first evaluation.
         scheduler.set_paused(!queue.wants_open((cfg.clock.0)()));
@@ -246,6 +253,7 @@ impl DownloadManager {
             disk: Mutex::new(DiskStats::default()),
             sysio: Default::default(),
             queue: Mutex::new(queue),
+            queues: Mutex::new(queues),
             pending: Mutex::new(PendingList::default()),
             media: Mutex::new(Default::default()),
             smart: Mutex::new(smart),
@@ -271,6 +279,7 @@ impl DownloadManager {
         // First evaluation happens here, not in the background loop, so "what to do at launch" is
         // decided exactly once and can never race with the first user command.
         mgr.reconcile().await;
+        mgr.evaluate_queues().await;
         mgr.spawn_queue_loop();
         Ok(mgr)
     }
@@ -354,6 +363,7 @@ impl DownloadManager {
         let category = req.category.as_deref().map(validate::category).transpose()?;
         let speed_limit = validate::speed_limit(req.speed_limit)?;
         let checksum = req.checksum.as_deref().map(validate::checksum).transpose()?.map(|c| c.to_string());
+        let start_at = self.check_new_placement(&req)?;
 
         let rec = DownloadRecord {
             id: None,
@@ -379,9 +389,11 @@ impl DownloadManager {
             request_headers,
         };
         let id = self.save(&rec).await?;
+        self.place_new(id, req.queue_id, start_at).await;
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Added { download: dto.clone() });
-        if req.start.unwrap_or(true) {
+        // With a start time it waits for it (the queue starts it then).
+        if req.start.unwrap_or(true) && start_at.is_none() {
             return self.start_download(id).await;
         }
         Ok(dto)
@@ -409,6 +421,7 @@ impl DownloadManager {
 
     /// Start a queued, paused or failed download (idempotent if it is already running).
     pub async fn start_download(&self, id: i64) -> Result<DownloadDto, ManagerError> {
+        self.user_took_over(id).await;
         let dto = self.start_inner(id).await?;
         self.inner.queue.lock().unwrap().note_user_start();
         Ok(dto)
@@ -446,6 +459,7 @@ impl DownloadManager {
             self.inner.active.lock().unwrap().remove(&id);
             return Err(e);
         }
+        self.policy_for_new_run(id, rec.priority);
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Updated { download: dto.clone() });
         self.note_start(id, previous).await;
@@ -476,6 +490,7 @@ impl DownloadManager {
     /// Pause keeps all progress and the partial file; the download can be resumed later.
     pub async fn pause_download(&self, id: i64) -> Result<DownloadDto, ManagerError> {
         self.inner.queue.lock().unwrap().note_user_pause();
+        self.user_took_over(id).await;
         match self.active_handle(id) {
             Some((control, mut done)) => {
                 control.pause();
@@ -557,6 +572,7 @@ impl DownloadManager {
         let store = self.inner.store.clone();
         blocking(move || store.delete(id)).await?;
         self.inner.trackers.lock().unwrap().remove(&id);
+        self.forget_placement(id);
         self.emit(ManagerEvent::Removed { id });
         Ok(())
     }
@@ -811,10 +827,12 @@ impl DownloadManager {
     fn to_dto(&self, rec: &DownloadRecord) -> DownloadDto {
         let id = rec.id.unwrap_or_default();
         let explained = rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::explain);
-        let (live, running) = {
+        let (live, running, retrying) = {
             let active = self.inner.active.lock().unwrap();
-            (active.get(&id).map(|a| a.progress.snapshot()), active.contains_key(&id))
+            let a = active.get(&id);
+            (a.map(|a| a.progress.snapshot()), a.is_some(), a.is_some_and(|a| is_retrying(&a.progress)))
         };
+        let place = self.placement_of(id);
         let speed = self.inner.trackers.lock().unwrap().get(&id).map_or(0.0, |t| t.speed);
         let (downloaded, total, connections) = match &live {
             Some(s) if !s.segments.is_empty() => {
@@ -848,6 +866,11 @@ impl DownloadManager {
             error_code: rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::error_code),
             kind: downloader_core::classify_file(&display_name(rec), rec.content_type.as_deref()),
             idle: rec.status == DownloadStatus::Queued && !running,
+            queue_id: place.queue_id,
+            position: place.position,
+            start_at: place.start_at,
+            retrying: retrying && rec.status == DownloadStatus::Downloading,
+            held: rec.status == DownloadStatus::Paused && self.held_by_queue(id),
         }
     }
 
@@ -934,6 +957,7 @@ impl DownloadManager {
                     _ => None,
                 },
                 connections,
+                retrying: is_retrying(&progress),
             });
         }
         for id in newly_running {
@@ -1082,6 +1106,18 @@ fn dir_size(root: &Path) -> Option<u64> {
         }
     }
     Some(total)
+}
+
+/// Running, but nothing transfers: every connection (or the first request) waits to try again after an error.
+fn is_retrying(p: &ProgressHandle) -> bool {
+    let snap = p.snapshot();
+    if snap.segments.is_empty() {
+        // Still asking the server: retrying if the last thing that happened was a retry.
+        return p.download_id().is_some()
+            && matches!(p.events().last(), Some(e) if matches!(e.kind, downloader_core::RunEventKind::Retrying { .. }));
+    }
+    !snap.segments.iter().any(|s| s.status == SegmentStatus::Downloading)
+        && snap.segments.iter().any(|s| s.status == SegmentStatus::Retrying)
 }
 
 /// Name to show: the chosen file name, else what the URL suggests, else the URL itself.

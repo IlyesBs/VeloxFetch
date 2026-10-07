@@ -184,8 +184,8 @@ try {
   await click("[data-testid=nav-queue]");
   await waitFor(async () => (await count("[data-testid=queue-list] li")) >= 4, "queue rows");
   const queuedId = (await Promise.all(made.map(async (i) => [i, await status(i)]))).find(([, s]) => s === "queued")[0];
-  await fill(`[data-testid=queue-${queuedId}] select`, "highest");
-  await waitFor(async () => (await dl(queuedId))?.priority === "highest", "queue priority to apply");
+  await fill(`[data-testid=queue-${queuedId}] select`, "high");
+  await waitFor(async () => (await dl(queuedId))?.priority === "high", "queue priority to apply");
   check("queue lists running + waiting downloads and priority can be changed", true);
   await theme("light");
   await sleep(300);

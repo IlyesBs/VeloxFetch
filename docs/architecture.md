@@ -54,8 +54,8 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
 | `downloader-core` | The engine. Usable from the CLI, tests and the app without Tauri. |
 | `persistence` | SQLite store (WAL, versioned migrations), crash recovery. Implements the engine's `DownloadStore` trait. |
 | `download-manager` | Application controller the UI talks to. Owns create / start / pause / resume / cancel / retry / delete, the queue gate, the schedule and the power trigger, validates every input, emits events. |
-| `scheduler` | `Schedule` (start/stop/days, overnight windows): pure functions of a local timestamp. No clock, no I/O. |
-| `system-integration` | Clipboard text (`arboard`, all three OSes), default-browser detection and browser launching for the extension installer, `SystemIntegration` (Phase 15): the one door to the OS for power actions (shutdown / sleep / hibernate), show / open a file, keeping the computer awake while downloading, notifications and the `veloxfetch://` link protocol, with `NativeSystem` per OS and `DryRunSystem` for tests (fixed commands, no shell); snap / Flatpak browsers; registration of the native messaging host with browsers (registry on Windows, manifest files elsewhere). |
+| `scheduler` | `Schedule` (start/stop/days, overnight windows) and `queue_rules` (the Smart Download Queue's rules: time window, start time, idle, connection, busy line, big files): pure functions of a local timestamp and the readings passed in. No clock, no I/O. |
+| `system-integration` | Clipboard text (`arboard`, all three OSes), default-browser detection and browser launching for the extension installer, `SystemIntegration` (Phase 15): the one door to the OS for power actions (shutdown / sleep / hibernate), show / open a file, keeping the computer awake while downloading, notifications, the `veloxfetch://` link protocol, idle time and the connection (online, Wi-Fi / cable / mobile, read from the routing table and the adapter, nothing sent), with `NativeSystem` per OS and `DryRunSystem` for tests (fixed commands, no shell); snap / Flatpak browsers; registration of the native messaging host with browsers (registry on Windows, manifest files elsewhere). |
 | `media-engine` | Video streams (HLS `.m3u8`, DASH `.mpd`): manifest parsers, segment download with hard limits, optional ffmpeg remux. **A separate subsystem**: it shares only the HTTP client with the normal engine and nothing else (own job list, own events, own limits, no database rows). |
 | `path-safety` | File-name sanitising and validation, "is this path really inside the download folder" (links resolved), and opening a file without following a planted link. Used by the engine, the media engine and the manager's validation so the rules exist once. |
 | `secrets` | Sealing of small secrets (ChaCha20-Poly1305) with a key kept only in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), an in-memory store for tests, and the log-redaction helpers. `persistence` seals the browser's cookies / credentials with it; there is no plaintext fallback. |
@@ -65,7 +65,7 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
 | `apps/cli` | `velox` command-line client (also the engine's manual test harness). |
 | `apps/desktop` | Tauri v2 shell + React UI. |
 | `tests/integration` | Fault-injecting local HTTP server + end-to-end tests of the layers above. |
-| `tests/e2e` | Drives the real desktop app through WebView2 (IPC, CSP, shutdown, restart). |
+| `tests/e2e` | Drives the real desktop app through WebView2 / WebKitGTK (IPC, CSP, shutdown, restart, the Smart Download Queue). |
 
 
 ## Download lifecycle
@@ -143,6 +143,43 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   never closes it, no queue events are emitted for ordinary downloads (regression tests pin this).
 
 Settings keys: `queue.max_active`, `queue.max_connections`, `queue.paused`, `queue.held`, `queue.schedule`.
+
+## Smart Download Queue
+
+Several queues with plain rules on top of the queue above (full description: `docs/smart-download-queue.md`).
+
+```
+ every second (queue loop, after the gate above)
+   for each queue: rules (scheduler::queue_rules) on time · idle · connection · online · other traffic
+        closed ─► its running downloads pause, remembered in queues.held   open ─► they resume
+   start times that came ─► those downloads start ("start now": their queue's rules do not hold them)
+   big files (size known, < 1/4 done) ─► the queue made for them
+   SlotScheduler::set_policy(rank = queue order + place, blocked = downloads of closed queues)
+ a download that starts ─► policy_for_new_run (held back at once if its queue is closed)
+```
+
+* **Slots:**
+  - one `SlotScheduler` for everything;
+  - a free slot goes to the highest priority, then (among equals) to what the queue resumed, then to the queue
+    order and the place in the queue, then to the oldest;
+  - blocked downloads keep waiting while the next one goes.
+* **Express lane:** a High / Highest waiter that only waits behind less urgent running downloads gets one slot
+  over the limit (never more than one). The manager turns it on; the scheduler's default is off.
+* **The main queue (id 1)** has no rule unless the user gives it one. A download without a row in the `queue` table
+  is in it, at place `id × 1024`, so the old order is kept.
+* **Both layers must agree.** The global gate (pause, schedule window) and a queue's rules both have to allow a
+  start. The queues never touch the global pause, the schedule or the power action.
+* **Inputs:**
+  - **Idle time:** asked from `SystemIntegration` only when a queue uses the rule.
+  - **Connection:** read every ~5 s while something has to download, and again at once when a rule is saved.
+  - **Other traffic:** the system's download counter minus the queue's own downloads, smoothed.
+  - **No network:** confirmed by 2 readings. A download that is moving data proves the network works.
+  - **Smart Throttle:** while it slows downloads (`smart_is_limiting`), Low / Lowest waiters are held back.
+* **Events:** a `queues` event when anything a queue shows changes. `DownloadDto` carries `queueId`, `position`,
+  `startAt`, `retrying` and `held`; ticks carry `retrying`.
+
+Settings keys: `queues.list` (queues and rules), `queues.state` (paused, started by hand, used start time),
+`queues.held`. Database v6: `queue.queue_id`, `queue.start_at`, `queue.pinned`.
 
 ## Browser integration (Phase 7)
 
@@ -336,5 +373,5 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 
 ## State and versioning
 
-`PRAGMA user_version` tracks schema migrations (currently v4: request headers handed over by browsers). A database from a newer build is
+`PRAGMA user_version` tracks schema migrations (currently v6: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places). A database from a newer build is
 refused rather than corrupted.

@@ -208,6 +208,7 @@ impl DownloadManager {
                 let Some(inner) = weak.upgrade() else { return };
                 let mgr = DownloadManager { inner };
                 mgr.reconcile().await;
+                mgr.evaluate_queues().await;
                 mgr.update_keep_awake();
                 mgr.check_power().await;
             }

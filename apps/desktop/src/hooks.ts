@@ -44,14 +44,15 @@ export async function bootstrap(): Promise<() => void> {
   });
   const reload = async () => {
     try {
-      const [downloads, metrics, queue, pending, media] = await Promise.all([
+      const [downloads, metrics, queue, pending, media, queues] = await Promise.all([
         api.listDownloads(),
         api.getMetrics(),
         api.getQueueState().catch(() => null), // the queue panel degrades on its own; the list must not
         api.listPendingDownloads().catch(() => undefined),
         api.listMediaJobs().catch(() => undefined),
+        api.getQueues().catch(() => null),
       ]);
-      store.load(downloads, metrics, queue, pending, media);
+      store.load(downloads, metrics, queue, pending, media, queues);
     } catch (e) {
       store.toast("error", normalizeError(e).message);
     }

@@ -267,7 +267,10 @@ ${COLLECTOR}
   h.page = (expr) => evaluate(expr);
   h.invoke = (cmd, args = {}) => h.page(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)})`);
   h.exited = () => new Promise((r) => (h.app.exitCode !== null ? r(h.app.exitCode) : h.app.once("exit", (code) => r(code))));
-  h.closeWindow = () => closeWindowLikeAUser(h);
+  h.closeWindow = async () => {
+    await h.invoke("set_desktop_options", { request: { closeToTray: false } }).catch(() => {}); // see quitOnClose in harness.mjs
+    return closeWindowLikeAUser(h);
+  };
 
   const setSize = (width, height) => wd("POST", `/session/${h.session}/window/rect`, { width, height }).catch(() => {});
   h.screenshot = async (file, { width, height } = {}) => {

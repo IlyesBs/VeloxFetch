@@ -11,10 +11,12 @@ export interface UiPrefs {
   sideFolded: boolean;
   density: Density;
   sort: SortOrder;
+  /** The queue tab last open on the Queue page. */
+  queue: number;
 }
 
 const KEY = "velox.ui";
-const DEFAULTS: UiPrefs = { sideFolded: false, density: "cards", sort: "status" };
+const DEFAULTS: UiPrefs = { sideFolded: false, density: "cards", sort: "status", queue: 1 };
 const SORTS: SortOrder[] = ["status", "newest", "name", "size", "progress"];
 
 function load(): UiPrefs {
@@ -24,6 +26,7 @@ function load(): UiPrefs {
       sideFolded: v.sideFolded === true,
       density: v.density === "compact" ? "compact" : "cards",
       sort: SORTS.includes(v.sort as SortOrder) ? (v.sort as SortOrder) : "status",
+      queue: Number.isInteger(v.queue) && (v.queue as number) > 0 ? (v.queue as number) : 1,
     };
   } catch {
     return DEFAULTS;

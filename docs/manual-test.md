@@ -204,3 +204,25 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 8. Signed builds: Windows file properties > Digital signatures (app, helper, setup); macOS `spctl -a -vv VeloxFetch.app` says
    "Notarized Developer ID".
 
+## P. Smart Download Queue (once per OS)
+1. Queue page: the controls card is unchanged; one **Main queue** tab; downloads keep working as before (no rule, "Download later"
+   still waits for Start).
+2. **New queue > Night downloads**, set the window to start in a few minutes: the header says "Scheduled · starts …", the rules show as
+   chips, the timeline shows the window. Add a download to it (Add dialog > Queue): its row says *Scheduled*. When the window opens it
+   downloads; when it ends it pauses (row: *Scheduled*), and goes on at the next opening.
+3. **Start** on a closed queue runs it now until it is empty ("Started by hand"); **Pause** pauses its running downloads; Start brings them back.
+4. A row's ⋯ > **Start at…** > "In 1 hour": *Scheduled*, a dot on the timeline, the toast says when. ⋯ > **Start now**: it starts at once.
+5. Downloads at the same time = 1, three waiting downloads: the arrows move them; the one at the top gets the next slot. A **High**
+   download added while a Low one runs starts at once (one extra slot); a Normal one waits.
+6. **When I'm away** queue: its downloads wait ("Waiting until the computer is idle"); leave the mouse 2 minutes: they start; move it:
+   they pause about 30 s later. Where the system does not report idle time, the editor says the rule is not applied.
+7. **Wi-Fi only** queue on a cable: "Waiting for the right connection"; switch to Wi-Fi: it starts. Unplug the network: the header says
+   "Waiting for the network" and nothing new starts; plug it back: it goes on. (macOS: online / offline only.)
+8. **Light on the connection** queue: start a big download in a browser; after a few seconds the queue pauses ("Paused while the connection
+   is busy"), and carries on a little after the browser download ends.
+9. A queue with **Big files** over 100 MB: add a 1 GB file to the main queue: it moves to that queue once its size is known (and pauses if
+   the queue is closed). Move it back with ⋯ > Move to Main queue: it stays there.
+10. Smart Throttle on, browse: *Low* downloads wait ("Waiting while you use the connection"), nothing running stops.
+11. **Clear completed** removes the queue's finished downloads (the files stay). **Delete queue**: its downloads move to the main queue.
+12. Restart the app: queues, rules, order, start times and the open tab are kept. Switch to Arabic: the page is mirrored, the timeline
+    still runs left to right.

@@ -41,6 +41,16 @@ export interface Download {
   kind: FileKind;
   /** Queued but not running nor waiting for a slot (added with "Download later"): offer "Start". */
   idle: boolean;
+  /** The Smart Download Queue it is in (1 = the main queue). */
+  queueId: number;
+  /** Its place in the queue (lower runs first, after priority). */
+  position: number;
+  /** Local time `YYYY-MM-DDTHH:MM` at which it starts on its own. */
+  startAt: string | null;
+  /** Running, but every connection is waiting to try again after an error. */
+  retrying: boolean;
+  /** Paused by its queue's rules: resumes on its own when the queue opens again. */
+  held: boolean;
 }
 
 export type Needs = "signIn" | "proxySignIn" | "space" | "folder";
@@ -255,6 +265,7 @@ export interface Progress {
   speedBps: number;
   etaSecs: number | null;
   connections: number;
+  retrying: boolean;
 }
 
 export interface Tick {
@@ -405,6 +416,7 @@ export type ManagerEvent =
   | { type: "tick"; tick: Tick }
   | { type: "removed"; id: number }
   | { type: "queue"; queue: QueueState }
+  | { type: "queues"; queues: Queues }
   | { type: "pending"; pending: PendingDownload }
   | { type: "pendingRemoved"; token: number }
   | { type: "media"; job: MediaJob }
@@ -527,6 +539,88 @@ export interface NewDownload {
   userAgent?: string;
   username?: string;
   password?: string;
+  /** The Smart Download Queue to put it in (default: the main queue). */
+  queueId?: number;
+  /** Local `YYYY-MM-DDTHH:MM`: added without starting, starts on its own then. */
+  startAt?: string;
+}
+
+// ------------------------------------------------------------------ Smart Download Queue
+
+/** When a queue may download. `days[0]` is Monday. */
+export type QueueWhen =
+  | { kind: "anytime" }
+  | { kind: "between"; start: string; stop: string; days: boolean[] }
+  | { kind: "startAt"; time: string; days: boolean[] };
+
+export type ConnectionRule = "any" | "wifi" | "wired" | "notMobile";
+export type ConnectionKind = "wifi" | "wired" | "mobile" | "other";
+
+export interface QueueRules {
+  when: QueueWhen;
+  onlyWhenIdle: boolean;
+  connection: ConnectionRule;
+  /** Pause while other traffic is above this (bytes/s). */
+  pauseAboveBps: number | null;
+  /** Downloads bigger than this (bytes) move to this queue. */
+  largeFilesOver: number | null;
+}
+
+/** Why a queue starts nothing right now. */
+export type QueueGate = "open" | "paused" | "time" | "offline" | "connection" | "notIdle" | "busy";
+
+export interface QueueSpan {
+  from: string;
+  to: string;
+}
+
+export interface QueueInfo {
+  id: number;
+  /** Empty for the main queue (named in the UI's language). */
+  name: string;
+  rules: QueueRules;
+  paused: boolean;
+  gate: QueueGate;
+  opensAt: string | null;
+  /** "Start queue" was pressed: it runs until it is empty. */
+  forced: boolean;
+  /** When it may download in the next 24 hours. */
+  spans: QueueSpan[];
+}
+
+export interface Queues {
+  queues: QueueInfo[];
+  /** Smart Throttle is slowing downloads: Low-priority ones wait for a free line. */
+  givingWay: boolean;
+  idleKnown: boolean;
+  online: boolean | null;
+  connection: ConnectionKind | null;
+  /** Local `YYYY-MM-DDTHH:MM` these were worked out at. */
+  now: string;
+}
+
+export interface SaveQueue {
+  id: number | null;
+  name: string;
+  rules: QueueRules;
+}
+
+export type QueueAction =
+  | { kind: "start" }
+  | { kind: "pause" }
+  | { kind: "clearCompleted" }
+  | { kind: "moveUp" }
+  | { kind: "moveDown" }
+  | { kind: "priority"; priority: Priority };
+
+export type StartWhen = { kind: "now" } | { kind: "later" } | { kind: "at"; at: string };
+export type QueueStep = "up" | "down" | "top";
+
+export interface PlaceDownload {
+  id: number;
+  queueId?: number;
+  start?: StartWhen;
+  step?: QueueStep;
 }
 
 export type SpeedTarget =

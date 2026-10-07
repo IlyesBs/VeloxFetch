@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use downloader_core::{DownloadError, DownloadStatus, Priority, SegmentStatus};
 use scheduler::chrono::NaiveDateTime;
+pub use scheduler::queue_rules::{ConnectionRule, QueueRules, When as QueueWhen};
 pub use scheduler::Schedule;
 use serde::{Deserialize, Serialize};
 pub use system_integration::{DryRunSystem, NativeSystem, PowerAction, SystemIntegration};
@@ -41,6 +42,10 @@ pub struct NewDownload {
     /// HTTP authentication. Kept with the download sealed like cookies, never in the link or the logs.
     pub username: Option<String>,
     pub password: Option<String>,
+    /// The Smart Download Queue to put it in (`None`: the main queue, or a big-file queue once its size is known).
+    pub queue_id: Option<i64>,
+    /// Local time `YYYY-MM-DDTHH:MM` to start it at (it is added without starting, and starts on its own then).
+    pub start_at: Option<String>,
 }
 
 // Hand-written so that logging a request can never print a password typed into the link.
@@ -53,6 +58,8 @@ impl std::fmt::Debug for NewDownload {
             .field("priority", &self.priority)
             .field("category", &self.category)
             .field("start", &self.start)
+            .field("queue_id", &self.queue_id)
+            .field("start_at", &self.start_at)
             .field("folder_token", &self.folder_token)
             .field("referrer", &self.referrer.as_deref().map(secrets::redact_url))
             .field("cookies", &self.cookies.as_ref().map(|_| "***"))
@@ -143,6 +150,16 @@ pub struct DownloadDto {
     /// Queued but not running and not waiting for a slot (e.g. added with "Download later"):
     /// nothing will start it but the user (or the schedule), so the UI offers "Start".
     pub idle: bool,
+    /// The Smart Download Queue it is in (1 = the main queue).
+    pub queue_id: i64,
+    /// Its place in the queue (lower runs first, after priority).
+    pub position: i64,
+    /// Local time `YYYY-MM-DDTHH:MM` at which it starts on its own.
+    pub start_at: Option<String>,
+    /// Running, but every connection is waiting to try again after an error.
+    pub retrying: bool,
+    /// Paused by its queue's rules (a time window ended, the computer is in use...): resumes on its own.
+    pub held: bool,
 }
 
 /// One chunk of a download, for the segment monitor.
@@ -402,6 +419,8 @@ pub struct ProgressDto {
     pub speed_bps: u64,
     pub eta_secs: Option<u64>,
     pub connections: usize,
+    /// Every connection is waiting to try again after an error.
+    pub retrying: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -441,6 +460,10 @@ pub enum ManagerEvent {
     /// Queue, schedule or power-action state changed (rare; never sent for ordinary progress).
     Queue {
         queue: QueueStateDto,
+    },
+    /// The Smart Download Queues changed: a rule, an opening or closing, the network, the order.
+    Queues {
+        queues: QueuesDto,
     },
     /// A stream (HLS / DASH) job was added, made progress or ended.
     Media {
@@ -779,6 +802,125 @@ pub struct QueueStateDto {
     /// Local time of the next window boundary, `YYYY-MM-DDTHH:MM`.
     pub next_change: Option<String>,
     pub power: PowerStateDto,
+}
+
+/// Why a queue starts nothing right now (`open`: it does).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueGate {
+    Open,
+    /// The user paused it.
+    Paused,
+    /// Outside its time window or before its start time (`opens_at` says when it opens).
+    Time,
+    /// No network.
+    Offline,
+    /// Not the connection its rules want.
+    Connection,
+    /// Waiting for the computer to be idle.
+    NotIdle,
+    /// Other traffic is above its limit.
+    Busy,
+}
+
+/// An open stretch of time on the queue timeline (local `YYYY-MM-DDTHH:MM`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueSpanDto {
+    pub from: String,
+    pub to: String,
+}
+
+/// One Smart Download Queue.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueDto {
+    pub id: i64,
+    /// Empty for the main queue (the UI names it in the user's language).
+    pub name: String,
+    pub rules: QueueRules,
+    pub paused: bool,
+    pub gate: QueueGate,
+    /// When a queue closed by time opens next (local `YYYY-MM-DDTHH:MM`).
+    pub opens_at: Option<String>,
+    /// "Start queue" was pressed: it runs whatever its rules say until it is empty.
+    pub forced: bool,
+    /// When it may download in the next 24 hours (only for time rules).
+    pub spans: Vec<QueueSpanDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuesDto {
+    /// In the order the user gave (the first one goes first among equal priorities).
+    pub queues: Vec<QueueDto>,
+    /// Smart Throttle is slowing downloads right now: Low-priority downloads wait until the line is free.
+    pub giving_way: bool,
+    /// The computer says how long it has been idle (otherwise "only when idle" is not applied).
+    pub idle_known: bool,
+    pub online: Option<bool>,
+    pub connection: Option<system_integration::ConnectionKind>,
+    /// Local time these were worked out at (`YYYY-MM-DDTHH:MM`), the start of the timeline.
+    pub now: String,
+}
+
+/// Create (`id: None`) or change a queue.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveQueue {
+    pub id: Option<i64>,
+    pub name: String,
+    pub rules: QueueRules,
+}
+
+/// Something done to a whole queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum QueueAction {
+    /// Start everything in it now, whatever its rules say, until it is empty.
+    Start,
+    /// Start nothing new, and pause what runs (resumed by Start).
+    Pause,
+    /// Remove its finished downloads from the list (the files stay).
+    ClearCompleted,
+    /// Earlier / later in the order of queues.
+    MoveUp,
+    MoveDown,
+    /// Give every unfinished download in it this priority.
+    Priority {
+        priority: Priority,
+    },
+}
+
+/// When one download starts.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum StartWhen {
+    /// Now, whatever its queue's rules say.
+    Now,
+    /// Not until the user (or its queue) starts it.
+    Later,
+    /// At this local time, `YYYY-MM-DDTHH:MM`.
+    At { at: String },
+}
+
+/// One step in the queue order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum QueueStep {
+    Up,
+    Down,
+    Top,
+}
+
+/// Move a download to another queue, change when it starts, or move it up or down.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlaceDownload {
+    pub id: i64,
+    pub queue_id: Option<i64>,
+    pub start: Option<StartWhen>,
+    pub step: Option<QueueStep>,
 }
 
 /// Source of "now" (local time). Replaceable so scheduling is testable.

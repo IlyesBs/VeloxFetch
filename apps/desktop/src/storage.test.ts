@@ -31,11 +31,11 @@ describe("browser storage and secrets", () => {
     }
   });
 
-  it("the layout preferences keep only the three cosmetic choices", () => {
+  it("the layout preferences keep only the four cosmetic choices", () => {
     const text = readFileSync(join(here, "prefs.ts"), "utf8");
     expect(text.match(/setItem\(/g)?.length).toBe(1);
     expect(text).toMatch(/const KEY = "velox\.ui"/);
-    expect(text).toMatch(/interface UiPrefs \{[^}]*sideFolded: boolean;[^}]*density: Density;[^}]*sort: SortOrder;\s*\}/);
+    expect(text).toMatch(/interface UiPrefs \{[^}]*sideFolded: boolean;[^}]*density: Density;[^}]*sort: SortOrder;[^}]*queue: number;\s*\}/);
   });
 
   it("the theme module stores exactly one non-secret key", () => {
