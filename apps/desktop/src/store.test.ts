@@ -157,7 +157,7 @@ describe("store", () => {
   it("keeps browser downloads that wait for the user, updates them in place and drops them when answered", () => {
     const p = (token: number, over: Partial<PendingDownload> = {}): PendingDownload => ({
       token, url: "https://x.test/a.iso", host: "x.test", filename: "a.iso", size: null, contentType: null,
-      resumable: null, saveDir: "/dl", probing: true, incognito: false, createdAtMs: 0, media: null, ...over,
+      resumable: null, saveDir: "/dl", probing: true, incognito: false, createdAtMs: 0, media: null, analysis: null, ...over,
     });
     let s = initialState();
     s = reduce(s, { type: "pending", pending: p(1) });

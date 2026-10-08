@@ -226,3 +226,22 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 11. **Clear completed** removes the queue's finished downloads (the files stay). **Delete queue**: its downloads move to the main queue.
 12. Restart the app: queues, rules, order, start times and the open tab are kept. Switch to Arabic: the page is mirrored, the timeline
     still runs left to right.
+
+## Q. Download Intelligence (once per OS)
+1. Add dialog (options) > paste an `https` link to a big file > **Check link**. The panel shows the file, size,
+   *Supported*, *Parallel: starts with N connections…*, *Storage: OK (… free)* and *Secure connection (HTTPS)*.
+   Warnings show "None". Nothing appears in the list, and nothing appears in the download folder.
+2. "Why?" lists what the server did (one byte for one byte, version tag, size).
+3. An `http` link: a warning that it is not secure, health "Read the warnings".
+4. A link that needs a password (`401`): "The server asks for a user name and password", health "Likely to fail as it is".
+5. A link that is already in the list: "Already have: In your list: … · same link". The same file name from another
+   site: no "Already have".
+6. A signed cloud link (S3 / CloudFront with an expiry): "This link looks temporary and expires …". The address in
+   the browser confirmation dialog shows `[redacted]` instead of the signature.
+7. A file larger than the free space (or ≥ 4 GB to a FAT32 USB stick): the storage problem is shown, and Start still
+   works (the engine refuses it with its usual message).
+8. A server that does not answer: "The link could not be checked. You can still download it." Edit the link while
+   "Checking…" is shown: the check stops.
+9. From the browser: the confirmation dialog shows the panel under the usual rows. Answer before the check ends: the
+   dialog closes at once.
+10. Switch to French and Arabic: all texts are translated, and the panel is mirrored in Arabic.

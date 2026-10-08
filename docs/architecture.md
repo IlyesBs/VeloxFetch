@@ -181,6 +181,26 @@ Several queues with plain rules on top of the queue above (full description: `do
 Settings keys: `queues.list` (queues and rules), `queues.state` (paused, started by hand, used start time),
 `queues.held`. Database v6: `queue.queue_id`, `queue.start_at`, `queue.pinned`.
 
+## Download Intelligence
+
+The read-only check before a download (full description: `docs/download-intelligence.md`).
+
+* **`crates/download-manager/src/intelligence.rs`** holds the rules. They are pure: no I/O, the clock and the connection
+  plan are passed in. `assess(Observed) -> AnalysisDto`, `expiring(url)`, `display_url(url)` and
+  `find_duplicate(url, info, known)`.
+* **`manager/intelligence.rs`** gathers the inputs:
+  * `probe_quick` (`HEAD` + 1-byte range, no retry) under `ANALYSIS_TIMEOUT` = 20 s;
+  * `fs4::available_space` on the nearest existing parent of `predicted_dir`;
+  * `sysinfo::Disks` (`DiskRefreshKind::nothing()`, through `sysio::disk_for`), only for files ≥ 4 GiB;
+  * `store.list()` plus `store.history(500)`.
+* **`Downloader::connection_plan(size)`** is `planner::connection_limits` with the engine's current settings, so the
+  recommended start is the engine's own; the adaptive controller still tunes it while the download runs.
+* **Confirmation dialog:** `add_pending` spawns `analyze`, keeps its `AbortHandle` in the entry (`take_pending`
+  aborts it) and fills `PendingDto.analysis`. The old `size` / `contentType` / `resumable` / `filename` fields come
+  from the same answer.
+* **Add dialog:** `analyze_link({ url })` runs one check at a time (`LinkCheck` in `Inner`); `url: null` cancels.
+* **UI:** `components/IntelligencePanel.tsx` (rows, warnings, "Why?") and `src/intelligence.ts` (pure line building).
+
 ## Browser integration (Phase 7)
 
 ```

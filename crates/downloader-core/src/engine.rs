@@ -656,6 +656,12 @@ impl Downloader {
         self.max_connections.load(Ordering::Relaxed)
     }
 
+    /// `(start, ceiling)` connections a parallel download of `size` bytes would get now: the same rule the
+    /// download uses when it starts (the adaptive controller moves between the two while it runs).
+    pub fn connection_plan(&self, size: u64) -> (usize, usize) {
+        planner::connection_limits(size, self.max_connections(), self.cfg.min_segment_size)
+    }
+
     pub fn limits(&self) -> &Arc<RateLimits> {
         &self.limits
     }

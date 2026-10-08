@@ -366,6 +366,86 @@ export interface PendingDownload {
   createdAtMs: number;
   /** A video from the browser's "Download video" bar: chosen in the video dialog, not confirmed as a file. */
   media: "stream" | "site" | null;
+  /** Download Intelligence: what the check before the download found (null while it runs, and for videos). */
+  analysis: Analysis | null;
+}
+
+/** Download Intelligence (crates/download-manager/src/intelligence.rs): observations only, no score. */
+export type ResourceKind = "file" | "webPage" | "stream" | "videoPage" | "unknown";
+export type ResumeSupport = "supported" | "likelySupported" | "notSupported" | "unknown";
+export type DownloadStrategy = "parallel" | "single" | "conservative" | "stream";
+export type Access = "public" | "authRequired" | "browserSessionRequired" | "unknown";
+export type StorageCheck = "ok" | "low" | "insufficient" | "tooLargeForDrive" | "cannotVerify" | "unavailable";
+export type Health = "good" | "caution" | "problem" | "unknown";
+export type FindingLevel = "info" | "warning" | "problem";
+export type FindingCode =
+  | "insecure"
+  | "httpsDowngrade"
+  | "otherSite"
+  | "authRequired"
+  | "sessionRequired"
+  | "sessionSent"
+  | "accessRefused"
+  | "serverError"
+  | "unreachable"
+  | "slowServer"
+  | "temporaryLink"
+  | "expiredLink"
+  | "webPage"
+  | "noSpace"
+  | "tooLargeForDrive"
+  | "lowSpace"
+  | "storageUnverified"
+  | "noResume"
+  | "resumeUnverified"
+  | "unknownSize"
+  | "duplicate"
+  | "stream";
+
+export interface Finding {
+  code: FindingCode;
+  level: FindingLevel;
+  /** A host, an error code (`http_404`) or a file name, depending on the code. */
+  detail: string | null;
+  bytes: number | null;
+  free: number | null;
+  atMs: number | null;
+}
+
+export interface DuplicateMatch {
+  /** null: only in the history (downloaded before, removed from the list since). */
+  id: number | null;
+  status: DownloadStatus | null;
+  filename: string;
+  reason: "sameLink" | "sameFinalLink" | "sameFile";
+}
+
+export interface Analysis {
+  kind: ResourceKind;
+  filename: string;
+  size: number | null;
+  contentType: string | null;
+  https: boolean;
+  redirected: boolean;
+  /** Host the link finally led to (never the full address). */
+  finalHost: string | null;
+  rangeClaimed: boolean;
+  rangeVerified: boolean;
+  etag: boolean;
+  lastModified: boolean;
+  resume: ResumeSupport;
+  strategy: DownloadStrategy;
+  connections: number | null;
+  access: Access;
+  temporary: boolean;
+  expiresAtMs: number | null;
+  storage: StorageCheck;
+  freeBytes: number | null;
+  duplicate: DuplicateMatch | null;
+  health: Health;
+  /** Most serious first. */
+  findings: Finding[];
+  errorCode: string | null;
 }
 
 /** Batch downloads (a list of links, or a pattern like https://host/file_[001-100].zip). */

@@ -482,6 +482,34 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * Steady: smoothed readings, separate on / off thresholds, two readings to confirm before slowing, a calm period before
   speeding up (doubled when the network keeps changing), then steps of 1.5x.
 
+## Download Intelligence
+
+* **Read-only:** the analysis creates, writes, moves and deletes nothing, and changes no setting. The policy test
+  checks `manager/intelligence.rs` for any file-writing or settings call, and checks that the rules
+  (`intelligence.rs`) do no I/O.
+* **Bounded:** one `HEAD` and one `Range: bytes=0-0` request through the hardened client, with:
+  * no retries;
+  * a 20 s cap;
+  * a 1-byte body read only when ranges are verified; any other body is dropped unread.
+
+  Video pages and stream links make no request.
+* **No secrets out:**
+  * failures become a status or a stable code (never error text, which can contain the link);
+  * the result has the final host, not the address;
+  * the dialog's link goes through `display_url`, which hides the `user:pass@` password, secret-named query values
+    and the values of signed links;
+  * cookies and headers are used for the request only and are never in the result;
+  * nothing is logged.
+* **`analyze_link`:** main window only (`build.rs`, main-window capability, `authz.rs`). Its request is
+  `{ url: string | null }` with `deny_unknown_fields`, so it cannot carry headers or cookies. Only `http` / `https`
+  links are accepted (`validate::url`).
+* **No bypass:** only the credentials the user or browser already gave are sent. A sign-in requirement is reported,
+  never worked around.
+* **Not a scanner:** the findings are transport and link facts (HTTP, redirects, sign-in, temporary link, space).
+  The app makes no malware claims.
+* **Cancellable:** answering the dialog aborts its analysis. A new check, `url: null`, an edited link or closing the
+  dialog cancels the Add dialog's check.
+
 ## Smart Download Queue
 
 * **Five commands**, main window only: `get_queues`, `save_queue`, `delete_queue`, `queue_action`, `place_download`.

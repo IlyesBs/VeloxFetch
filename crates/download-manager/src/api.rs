@@ -675,6 +675,8 @@ pub struct PendingDto {
     /// Set for a video from the browser's "Download video" bar: the UI opens the video dialog
     /// (quality choice) instead of the file confirmation.
     pub media: Option<PendingMedia>,
+    /// Download Intelligence: what the check before the download found (`None` while it runs, and for videos).
+    pub analysis: Option<crate::intelligence::AnalysisDto>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

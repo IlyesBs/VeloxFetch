@@ -17,6 +17,7 @@ use crate::validate;
 mod desktop;
 mod diag;
 mod files;
+mod intelligence;
 mod media;
 mod network;
 mod pending;
@@ -104,6 +105,8 @@ struct Inner {
     /// The Smart Download Queues (`queues.rs`): several queues with rules, over the one slot scheduler.
     queues: Mutex<queues::Queues>,
     pending: Mutex<PendingList>,
+    /// The Add dialog's link check that is running (`intelligence.rs`).
+    link_check: Mutex<intelligence::LinkCheck>,
     media: Mutex<media::MediaState>,
     /// Smart throttle (`smart_throttle.rs`) and live preview (`preview.rs`): isolated features.
     smart: Mutex<smart_throttle::SmartState>,
@@ -255,6 +258,7 @@ impl DownloadManager {
             queue: Mutex::new(queue),
             queues: Mutex::new(queues),
             pending: Mutex::new(PendingList::default()),
+            link_check: Mutex::new(Default::default()),
             media: Mutex::new(Default::default()),
             smart: Mutex::new(smart),
             preview: Mutex::new(Default::default()),
