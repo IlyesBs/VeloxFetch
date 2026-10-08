@@ -28,6 +28,7 @@ const dl = (id: number, over: Partial<Download> = {}): Download => ({
   startAt: null,
   retrying: false,
   held: false,
+  doctor: null,
   ...over,
 });
 

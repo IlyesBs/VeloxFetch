@@ -482,6 +482,21 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * Steady: smoothed readings, separate on / off thresholds, two readings to confirm before slowing, a calm period before
   speeding up (doubled when the network keeps changing), then steps of 1.5x.
 
+## Download Doctor
+
+* **Diagnosis only:** the Doctor never retries, starts, writes, deletes or requests anything. The engine's retry
+  loop stays the only automatic recovery, so there is no second retry loop and no retry storm. The policy test checks
+  the glue module for any of those calls.
+* **No secrets:**
+  * a `Diagnosis` holds codes, classes, counts and byte numbers only, never free text (checked by the policy test);
+  * transport errors are read from their *causes*, never from the top message, which names the link;
+  * the one timeline line goes through the usual redaction;
+  * the Doctor logs nothing.
+* **Integrity is kept:** a checksum mismatch is `critical`. The engine already deletes the part and never completes
+  it; after a second identical mismatch the Doctor says retrying will not help.
+* **Fix:** a refused certificate, or a server that does not speak TLS, is no longer retried
+  (`http-client` `tls_will_fail_again`). Retrying it gave nothing but more connections to that server.
+
 ## Download Intelligence
 
 * **Read-only:** the analysis creates, writes, moves and deletes nothing, and changes no setting. The policy test

@@ -201,6 +201,25 @@ The read-only check before a download (full description: `docs/download-intellig
 * **Add dialog:** `analyze_link({ url })` runs one check at a time (`LinkCheck` in `Inner`); `url: null` cancels.
 * **UI:** `components/IntelligencePanel.tsx` (rows, warnings, "Why?") and `src/intelligence.ts` (pure line building).
 
+## Download Doctor
+
+The diagnosis of a failure (full description: `docs/download-doctor.md`).
+
+* **`crates/download-manager/src/doctor.rs`:** pure rules. `diagnose(&Evidence) -> Diagnosis`: category, source,
+  retry class, severity, factors, actions. `Failure::from_code` maps the codes of `explain::error_code`.
+* **`manager/doctor.rs`:**
+  * `failure_of(&DownloadError)` reads the structured error, and the transport source chain only;
+  * `failure_evidence` reads the run's events and retries, the record, the link (`intelligence::expiring`) and
+    `system.network()` (only after DNS / connect / timeout failures);
+  * `doctor_for` serves `DownloadDto.doctor` (the in-memory diagnosis, or one rebuilt from the error text after a
+    restart, or a live one while retrying).
+* **`manager/diag.rs` `note_end`:** diagnoses a failed run and saves the diagnosis in `DiagRecord.doctor`
+  (`last_failure` tells a repeat). It keeps a copy in `Inner.doctor` and writes one timeline line before the
+  failure line.
+* **Recovery** is unchanged: the engine's `retry::with_retry` and `check_resumable`. The one change is in
+  `http-client`: `is_retryable` refuses permanent TLS failures (`tls_will_fail_again`).
+* **UI:** `components/DoctorPanel.tsx` and `src/doctor.ts` (pure lines and buttons), in `views/DetailView.tsx`.
+
 ## Browser integration (Phase 7)
 
 ```

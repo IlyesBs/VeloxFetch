@@ -71,6 +71,15 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 - **Integrity:** an optional SHA-256 / SHA-512 checksum is checked at the end.
 - **Speed limits:** global, per kind of file (video, ISO…) and per download, all changeable while running.
 - **Clear errors:** each failure gets a plain sentence plus "what you can do" (sign in, free space, choose a folder).
+- **Download Doctor** (details in `docs/download-doctor.md`): when a download fails, the detail view says:
+  - what happened;
+  - where the problem is: the server, your connection, this computer, the link, the sign-in, or the content;
+  - whether retrying helps: yes / later (with the server's wait) / after you fix something / no / not sure;
+  - what else was seen: repeated retries, dropped connections, an expired session or link, the same failure again;
+  - what to do: Retry, Restart safely, Sign in, Open download folder, or advice.
+
+  While the app retries on its own, it says what it retries and when. Everything comes from what was observed;
+  the Doctor never retries or changes anything by itself.
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
 
 ### Before a download: Download Intelligence
@@ -403,6 +412,18 @@ More: `docs/architecture.md`.
 - **Secrets:** the shown link hides signatures and tokens; the result carries the final host only, error codes
   only, and is never logged.
 
+### 4.8 Download Doctor
+- **What it reads (read-only, only after a failure):**
+  - the engine's error (transport errors by their causes only, never the message that names the link);
+  - the run's events and retry count, and the saved diagnostics (earlier bytes, the previous failure);
+  - the record (session, resumable), the link (signed / expired), and the computer's network state.
+- **Rules** (`doctor.rs`, pure): category, where the problem is, 5 retry classes, severity, contributing factors,
+  and actions (only real buttons; the rest is advice).
+- **Where it shows:** `DownloadDto.doctor` (failed, or live while retrying), `DiagnosticsDto.doctor`, and one
+  timeline line.
+- **Recovery** stays the engine's: its retry loop with backoff and `Retry-After`, and safe resume / restart. One fix:
+  certificate failures are no longer retried.
+
 ---
 
 ## 5. Security model (always true)
@@ -444,6 +465,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 |---|---|
 | Downloads, segments, settings, history, diagnostics | SQLite file in the app data folder |
 | Download Intelligence | nothing: each check lives in memory only and is dropped when the dialog is answered or closed |
+| Download Doctor | the last diagnosis of each download, inside its saved diagnostics (SQLite `diagnostics` table, JSON); a copy in memory for the list |
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
@@ -516,7 +538,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings) |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
@@ -594,6 +616,8 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | **Capability** | Tauri's per-window list of the commands a window may call |
 | **Allowed roots** | The only folders VeloxFetch may write into |
 | **Video tools** | yt-dlp (video pages), Deno (needed by yt-dlp for some sites), ffmpeg (join / convert) |
+| **Download Doctor** | The diagnosis of a failed (or retrying) download: what happened, where the problem is, whether retrying helps, what to do |
+| **Retry class** | Download Doctor's answer to "will retrying help?": retryable, retryable after a wait, after a user action, not retryable, unknown |
 | **Probe** | The quick first look at a link (`HEAD`, then a 1-byte range request) that tells size, type and resume support |
 | **Pending download** | A link from the browser or clipboard waiting in the confirmation window; nothing is stored until it is accepted |
 | **Health label** | Download Intelligence's summary (good / caution / problem / unknown), taken from its findings, never a score |
@@ -615,5 +639,6 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
 | Download Intelligence | `docs/download-intelligence.md` |
+| Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |

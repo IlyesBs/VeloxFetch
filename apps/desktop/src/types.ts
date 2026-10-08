@@ -51,6 +51,42 @@ export interface Download {
   retrying: boolean;
   /** Paused by its queue's rules: resumes on its own when the queue opens again. */
   held: boolean;
+  /** Download Doctor: why it failed (or what the engine retries), where the problem is, what to do. */
+  doctor: Diagnosis | null;
+}
+
+/** Download Doctor (crates/download-manager/src/doctor.rs): every field comes from observed evidence. */
+export type DoctorCategory =
+  | "offline" | "dns" | "timeout" | "connectionReset" | "connectionFailed" | "tls" | "authRequired" | "proxyAuth"
+  | "accessDenied" | "sessionExpired" | "linkExpired" | "notFound" | "requestTimeout" | "conflict" | "rateLimited"
+  | "serverTemporary" | "serverError" | "httpOther" | "redirect" | "rangeFailure" | "diskFull" | "permission"
+  | "folderNotAllowed" | "writeFailed" | "fileExists" | "integrity" | "incomplete" | "persistence" | "webPage"
+  | "invalidResource" | "proxyInvalid" | "cancelled" | "unknown";
+export type DoctorSource = "server" | "network" | "thisComputer" | "link" | "account" | "content" | "unknown";
+export type RetryClass = "retryable" | "retryableWithDelay" | "retryAfterUserAction" | "notRetryable" | "unknown";
+export type DoctorSeverity = "info" | "warning" | "recoverable" | "blocking" | "critical";
+export type DoctorAction =
+  | "retry" | "retryLater" | "restartSafely" | "signIn" | "reauthInBrowser" | "newLink" | "freeSpace"
+  | "checkConnection" | "checkProxy" | "checkFolder" | "cancel";
+export type FactorCode =
+  | "repeatedRetries" | "unstableConnection" | "serverThrottled" | "workedBefore" | "sessionUsed" | "temporaryLink"
+  | "sameAsBefore" | "offline" | "startedOver" | "noResume";
+
+export interface Diagnosis {
+  category: DoctorCategory;
+  code: string;
+  source: DoctorSource;
+  httpStatus: number | null;
+  retry: RetryClass;
+  /** The wait the server asked for (Retry-After), in seconds. */
+  retryAfterSecs: number | null;
+  /** While the engine retries on its own: when the next try starts (Unix ms). */
+  retryAtMs: number | null;
+  severity: DoctorSeverity;
+  factors: { code: FactorCode; n: number | null }[];
+  actions: DoctorAction[];
+  neededBytes: number | null;
+  freeBytes: number | null;
 }
 
 export type Needs = "signIn" | "proxySignIn" | "space" | "folder";
@@ -84,6 +120,8 @@ export interface Diagnostics {
   activeSecs: number;
   transferred: number;
   events: DiagEvent[];
+  /** Download Doctor's diagnosis of the last failure, while it is failed. */
+  doctor: Diagnosis | null;
   /** Plain-text summary to paste in a bug report (already cleaned of secrets). */
   report: string;
 }

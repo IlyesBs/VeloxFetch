@@ -261,6 +261,23 @@ Described in `docs/smart-download-queue.md` (section 7 lists every suite):
 
 `desktop-ui.mjs` now picks *High* in a queue row (the queue page offers High / Normal / Low).
 
+## Download Doctor
+
+Described in `docs/download-doctor.md` (section 8):
+
+| Where | What |
+|---|---|
+| `crates/download-manager/src/doctor.rs` | 10 unit tests of the rules |
+| `crates/download-manager/src/explain.rs` | 6 more asserts for the new error codes |
+| `tests/integration/tests/doctor.rs` | 7 tests with real failures (500, 429, 401, a web page, reset, hang, a refused port, `.invalid` DNS, offline through `DryRunSystem::set_network`, TLS to a plain server, a disk full, a checksum mismatch twice, a recovery through Retry). It uses `serve_on(addr, data)`, a new helper in `tests/integration/src/lib.rs` |
+| `apps/desktop/src/doctor.test.ts` | 4 UI tests, including every key in en / fr / ar |
+| `tests/security/policy.test.mjs` | 1 ("Download Doctor"), 42 in total |
+| `tests/e2e/desktop-diagnostics.mjs` | 4 more checks (the Doctor panel on a 404, and the timeline line); screenshot `docs/screenshots/doctor.png` |
+
+**Defect found:** certificate failures were retried 5 times (6 connections for one check). It is fixed in
+`http-client` (`tls_will_fail_again`) and guarded by the TLS integration test, which fails on the old code with
+"6 connections".
+
 ## Download Intelligence
 
 Described in `docs/download-intelligence.md` (section 7):

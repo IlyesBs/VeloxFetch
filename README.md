@@ -100,6 +100,11 @@ for 23:00, Paused, Completed, Failed or Retrying. A "Next download" line and a 2
 Without rules nothing changes, and something the computer cannot tell never holds a download back. See
 [`docs/smart-download-queue.md`](docs/smart-download-queue.md).
 
+Download Doctor: when a download fails, its detail view says what happened, where the problem is (the server, your
+connection, this computer, the link or the sign-in), whether retrying helps (now, later, after you fix something, or
+not at all), and what to do. While the app retries on its own, it shows what it retries and when. See
+[`docs/download-doctor.md`](docs/download-doctor.md).
+
 Download Intelligence: before a download starts, the confirmation dialog (links from the browser or the clipboard)
 and the Add dialog's **Check link** show:
 - the file, its size and type;

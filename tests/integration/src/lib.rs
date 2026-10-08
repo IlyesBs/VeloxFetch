@@ -104,6 +104,11 @@ pub fn random_data(n: usize, seed: u64) -> Arc<Vec<u8>> {
 }
 
 pub async fn serve(data: Arc<Vec<u8>>) -> Server {
+    serve_on("127.0.0.1:0".parse().unwrap(), data).await
+}
+
+/// [`serve`] on a chosen address (e.g. one a test just saw refused, to show a recovery).
+pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
     let state = Arc::new(State {
         data: Mutex::new(data),
         etag: Mutex::new("\"v1\"".into()),
@@ -127,7 +132,7 @@ pub async fn serve(data: Arc<Vec<u8>>) -> Server {
         routes: Mutex::new(Default::default()),
         route_delay: Mutex::new(Duration::ZERO),
     });
-    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let l = TcpListener::bind(addr).await.unwrap();
     let addr = l.local_addr().unwrap();
     let st = state.clone();
     tokio::spawn(async move {
