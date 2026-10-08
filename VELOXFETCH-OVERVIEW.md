@@ -1,8 +1,22 @@
 # VeloxFetch: the whole app on one page
 
 > Read this first. It explains what VeloxFetch is, what it does, how it is built, how it is kept safe, where the
-> project stands (Phases 0 to 14 done) and what comes next (Phases 15 to 22). It does not require reading the
-> code. Details live in `docs/` (links at the end of each section).
+> project stands (Phases 0 to 18 done, plus extras) and what comes next (Phases 19 to 22). It does not require
+> reading the code. Details live in `docs/` (see the documentation map in §11).
+
+**Contents**
+
+1. [What it is](#1-what-it-is)
+2. [What a user can do](#2-what-a-user-can-do-features)
+3. [How it is built](#3-how-it-is-built-map)
+4. [How the key parts work](#4-how-the-key-parts-work)
+5. [Security model](#5-security-model-always-true)
+6. [Where data lives](#6-where-data-lives)
+7. [Build, test, release](#7-build-test-release)
+8. [Roadmap](#8-roadmap)
+9. [Rules for anyone changing the code](#9-rules-for-anyone-changing-the-code-people-and-ai)
+10. [Glossary](#10-glossary)
+11. [Documentation map](#11-documentation-map)
 
 ---
 
@@ -27,7 +41,15 @@ VeloxFetch is a **fast, secure download manager for Windows, Linux and macOS**, 
 **Rule number one: the UI is not the application.** The product is the Rust download core. The desktop window
 is just one client of it; the CLI and the tests are others. The UI can be replaced without touching the engine.
 
-**Version:** 0.1.0 (pre-release). There is no git repo. Named backups are kept in `C:/work/VeloxFetch-backups/`.
+**Version:** 0.1.0 (pre-release).
+
+**Source:** git, on GitHub (`IlyesBs/VeloxFetch`):
+- `main` holds what is finished;
+- each feature or enhancement gets its own branch and commit (for example `feat_smart_download_queue`,
+  `feat_download_intelligence`) and is merged through a pull request.
+
+**Backups:** a named archive is made next to the project folder before each work session, for example
+`VeloxFetch-backup-2026-10-08-before-download-intelligence.tar.gz`.
 
 ---
 
@@ -50,6 +72,35 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 - **Speed limits:** global, per kind of file (video, ISO…) and per download, all changeable while running.
 - **Clear errors:** each failure gets a plain sentence plus "what you can do" (sign in, free space, choose a folder).
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
+
+### Before a download: Download Intelligence
+Details: `docs/download-intelligence.md`.
+
+**Where it shows:**
+- the confirmation window for links from the browser or the clipboard;
+- the **Check link** button in the Add dialog.
+
+**What it shows:**
+
+| Row | Meaning |
+|---|---|
+| File, type, size | What the server says (an unknown size is shown as unknown, never guessed) |
+| Resume | Supported / Likely supported / Not supported / Unknown, from what the server actually did |
+| Download | How it will start: parallel with N connections, one connection, careful, or the video dialog |
+| Storage | Whether it fits on the drive (also the 4 GB limit of FAT32 drives) |
+| Security | HTTPS or HTTP |
+| Already have | The same link, the same final address, or the same file under another link (never by file name alone) |
+| Warnings | Sign-in needed, temporary or expired link, a web page instead of the file, server errors, not enough space |
+
+- **"Why?"** lists what was observed, so every label can be explained.
+- A health label sums it up: Looks good, Read the warnings, Likely to fail, or Could not be checked. It is a label,
+  not a score.
+
+**How it behaves:**
+- **Safe:** one quick look at the server (the same request the download makes first). Nothing is downloaded or
+  written, and secrets in the link are hidden.
+- **Cancellable:** answering the dialog, editing the link or closing the dialog stops the check.
+- **Never blocking:** if the check fails, the download is still possible.
 
 ### Files and folders
 - **Folders:**
@@ -91,16 +142,6 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
     - what the computer cannot tell never holds a download back.
   - **No change without rules:** the main queue has no rule until the user gives it one, so nothing changes for
     someone who never sets one.
-- **Download Intelligence** (details in `docs/download-intelligence.md`): before a download starts, the browser
-  confirmation dialog and the Add dialog's **Check link** show:
-  - file, type, size, and resume (supported / likely / not supported / unknown);
-  - how it will start (parallel with N connections, one connection, careful, or the video dialog);
-  - whether it fits on the drive (including the 4 GB limit of FAT32 drives);
-  - HTTPS or HTTP, and whether the app already has it (same link, same final address, or same file under another link);
-  - warnings: sign-in needed, temporary or expired link, a web page instead of the file, server errors.
-
-  "Why?" lists what was observed. Everything comes from one quick look at the server: nothing is downloaded or
-  written, it can be cancelled, and it never blocks the download.
 - **Schedule:** e.g. "start at 22:00, stop at 07:00, on weekdays".
 - **Power action:**
   - shut down, sleep or hibernate once *everything* has finished;
@@ -244,7 +285,7 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 | `crates/http-client` | Hardened HTTP: probes the file, verifies range support, pooling, DNS cache, safe redirects |
 | `crates/downloader-core` | **The engine**: segments, adaptive connections, retries, limits, resume, integrity, disk writer |
 | `crates/persistence` | SQLite (WAL, migrations, schema v6): downloads, segments, queue places, settings, history, diagnostics |
-| `crates/download-manager` | What the UI talks to: every action, validation, queue / schedule / power, events, metrics, videos, previews |
+| `crates/download-manager` | What the UI talks to: every action, validation, queue / schedule / power, events, metrics, videos, previews, Download Intelligence |
 | `crates/media-engine` | HLS / DASH parsers, segment downloads, yt-dlp runner, ffmpeg (arguments as arrays, never a shell) |
 | `crates/path-safety` | Safe file names, "is it really inside the download folder", no following of planted links |
 | `crates/secrets` | Seals cookies / passwords (ChaCha20-Poly1305) with a key held in the OS credential store |
@@ -258,7 +299,7 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 | `apps/native-host` | The helper program that browsers start |
 | `apps/browser-extension` | Manifest V3 extension, no dependencies |
 | `tests/integration` | Fault-injecting local servers and crash tests (real processes killed at exact points) |
-| `tests/e2e` | Drives the real app window (WebView2) |
+| `tests/e2e` | Drives the real app window (WebView2 on Windows, WebKitGTK on Linux) |
 | `tests/security` | Repository policy checks (CSP, capabilities, artifacts) |
 
 More: `docs/architecture.md`.
@@ -373,7 +414,7 @@ messages, downloaded files, update data and UI requests.
   - strict CSP: no inline scripts or styles in HTML, no remote origins, no `eval`;
   - the page cannot make network requests.
 - **IPC:**
-  - ~60 fixed commands, each its own permission;
+  - 76 fixed commands, each its own permission (most are main-window only);
   - **no generic** "run / read any file" command;
   - inputs are typed, and unknown fields are refused;
   - a per-window authorization in Rust mirrors the capability files (a test keeps them identical).
@@ -402,6 +443,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | What | Where |
 |---|---|
 | Downloads, segments, settings, history, diagnostics | SQLite file in the app data folder |
+| Download Intelligence | nothing: each check lives in memory only and is dropped when the dialog is answered or closed |
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
@@ -422,11 +464,12 @@ cargo test --workspace                    # engine, manager, integration and cra
 npm --prefix apps/desktop test            # UI unit tests (vitest)
 cd apps/desktop && npm run tauri dev      # run the app (dev)
 
-# end-to-end on the real app (Windows):
+# end-to-end on the real app (Windows: WebView2; Linux: WebKitWebDriver + Xvfb):
 npm --prefix apps/desktop run build
 cargo build -p velox-desktop --features velox-desktop/custom-protocol -p velox-native-host -p velox-integration-tests
 node tests/e2e/desktop-<suite>.mjs
-#   suites: ipc, ui, redesign, views, usability, queue, smart-queue, folders, batch, media, video, preview, diagnostics, browser
+#   suites: ipc, ui, redesign, views, usability, queue, smart-queue, intelligence, folders, batch, media, video,
+#           preview, diagnostics, browser   (ipc also needs `cargo build --bin velox`)
 
 # full release for the current OS (installer, portable zip, extension zips, SHA256SUMS, security gate):
 bash scripts/build-release.sh
@@ -510,8 +553,9 @@ More: `docs/testing.md`, `docs/release-process.md`.
    - `authz.rs`;
    - the policy test.
 5. **Keep in sync:**
-   - `apps/desktop/src/types.ts` ↔ `crates/download-manager/src/api.rs`;
-   - the EN / FR / AR keys in `i18n.ts`.
+   - `apps/desktop/src/types.ts` ↔ `crates/download-manager/src/api.rs` (and `intelligence.rs`);
+   - UI text lives in `apps/desktop/src/locales/{en,fr,ar}.json`, with the same keys in each.
+   - The UI and the installer never name tools or technologies (yt-dlp, ffmpeg…): they say "required dependencies".
 6. **Secrets never** go in plaintext, logs, URLs or error messages.
 7. **All three OSes** must keep building and working: Windows, Linux and macOS.
 8. **Tests:**
@@ -521,9 +565,14 @@ More: `docs/testing.md`, `docs/release-process.md`.
 9. **Test ids:**
    - existing ones stay;
    - no new test id may start with `download-`, which is reserved for cards.
-10. **Back up first:** before a work session, make a named backup to `C:/work/VeloxFetch-backups/`.
+10. **Back up first:** before a work session, make a named backup archive next to the project folder.
 11. **`scripts/build-release.sh`** is run by the owner, not by an assistant.
 12. **Never show invented numbers** in the UI. When a value is unknown, show "—".
+13. **One feature, one branch:** check first whether the feature exists. If it does, add only the enhancement; if
+    nothing new is asked, skip it. Commit on a branch named after the feature.
+14. **Document every task:** this overview, the README, `docs/architecture.md`, `docs/security.md`,
+    `docs/threat-model.md`, `docs/manual-test.md`, `docs/testing.md`, and the feature's own document.
+15. **Phase 19** starts only when the owner says so.
 
 ---
 
@@ -545,3 +594,26 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | **Capability** | Tauri's per-window list of the commands a window may call |
 | **Allowed roots** | The only folders VeloxFetch may write into |
 | **Video tools** | yt-dlp (video pages), Deno (needed by yt-dlp for some sites), ffmpeg (join / convert) |
+| **Probe** | The quick first look at a link (`HEAD`, then a 1-byte range request) that tells size, type and resume support |
+| **Pending download** | A link from the browser or clipboard waiting in the confirmation window; nothing is stored until it is accepted |
+| **Health label** | Download Intelligence's summary (good / caution / problem / unknown), taken from its findings, never a score |
+| **Finding** | One observation of Download Intelligence (for example "plain HTTP" or "not enough space"), with a level: info, warning or problem |
+
+---
+
+## 11. Documentation map
+
+| Topic | Document |
+|---|---|
+| How the code is organised | `docs/architecture.md` |
+| Security rules and what each feature does to stay safe | `docs/security.md` |
+| Threats and how each one is handled | `docs/threat-model.md` |
+| Privacy (what is read, nothing is sent) | `docs/PRIVACY.md` |
+| Automatic tests, how to run them, known results | `docs/testing.md` |
+| Checks done by hand on each OS | `docs/manual-test.md` |
+| Building and publishing a release | `docs/release-process.md`, `docs/store-publishing.md` |
+| Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
+| Smart Download Queue | `docs/smart-download-queue.md` |
+| Download Intelligence | `docs/download-intelligence.md` |
+| Design decisions over time | `docs/adr/` |
+| Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
