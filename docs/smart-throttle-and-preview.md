@@ -22,28 +22,56 @@ how segments are planned or how files are written; each one enters the engine th
 src-tauri/src/smart_throttle.rs   every 3 s (Skip on missed ticks), only while enabled:
     sysinfo: process NAMES only (ProcessRefreshKind::nothing(), ~2-6 ms), on a blocking thread, 2 s limit
     + automatic mode: SystemIntegration::user_idle()   (time since the last input only; ~1-2 ms)
-    -> manager.smart_throttle_observe_activity(names, idle)      timeout / panic -> observe(None) = full speed
+    -> manager.smart_throttle_observe_activity(names, idle)      (on the same blocking thread)
+                                                                  timeout / panic -> observe(None) = full speed
 download-manager/src/manager/smart_throttle.rs
-    other traffic = computer's download counter (sysio, refreshed here even with the window hidden) - VeloxFetch's own
-    listed program running?   yes -> cap = share of the best speed seen (at least the reserved minimum)
-    else automatic mode?      Controller::step(other, idle, peak, share, minimum) -> cap or full speed, and why
+    measure: the computer's received bytes (SysIo::net_received_total, read now) and VeloxFetch's received bytes
+             (session total + what running downloads received since their last tick), at the same moment;
+             other = (computer delta - VeloxFetch delta x 1.06 headers) / seconds since the previous observation
+             (signed; first reading, a gap over 30 s or counters that went back start over; two calls closer
+             than 1.5 s reuse the last window)
+    reference = what downloads got lately while nothing held them back (at most the best speed seen)
+    listed program running?   yes -> cap = mode share of the reference (at least the reserved minimum)
+    else automatic mode?      Controller::step_with(other, idle, mine, paced, peak, reference, share, minimum)
+                              -> cap or full speed, and why
     -> RateLimits::set_smart(cap)    (only when it changed; logged with the reason)
 ```
+
+### What was wrong, and the fixes (October 2026)
+
+Measured on a real line (~3 MB/s, real servers, a competing download started by hand):
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Slowed for nothing at start, then never lifted | "other traffic" = the dashboard's network reading of the *previous* second (refreshed in the background, read before it was done) minus VeloxFetch's speed of *now*: a speed change looked like 1.5 MB/s of someone else; then 24 KB/s was enough to stay slowed | both counters read at the same moment over the same window (`SmartState::measure`), headers allowed for, thresholds 96 KB/s on / 48 KB/s off |
+| "Never works": no visible effect | the cap was a share of the best speed ever seen (maybe another, faster server): often above what downloads got, so it changed nothing | the cap is a share of the **reference**: what downloads got lately while free (`recent_bps`), at most the best speed |
+| Stays slowed after the other traffic stopped | while capped, the system takes data in by bursts ahead of VeloxFetch reading it: each 3 s window is off by up to ±100 % of the speed, and clipping each window at 0 kept only the "+" | signed windows, the last two averaged, then smoothed (bounded below), and a larger noise allowance while any limit paces downloads (`paced`: 30 % of VeloxFetch's speed, 3 % otherwise) |
+| Stops, then returns, when switching modes | a new mode or minimum restarted the controller: full speed for a few readings, then slow again; with video jobs each step restarted yt-dlp | `Controller::retarget`: the cap moves at once and keeps its state; yt-dlp restarts only for a limit appearing / going or at least 2x off, seen on 2 checks in a row |
+| Bursts and pauses under a cap | engine side: see "Limits that change while downloads wait" and "Bytes count when written" in `architecture.md` | debt kept in time on a lower limit, forgiven on a higher one; buffers written before waiting |
+| Downloads on 1 connection | a 429 was counted twice (halved, then the retries halved again) | see "Steadiness" in `architecture.md` |
+
+Result on the real line: no false start, the competing download is seen within ~3 s and downloads drop to 50 %
+of their real speed (Balanced), the cap holds while it lasts, then eases back up and full speed returns about
+25 s after it stopped; 2 steady connections throughout; switching on / off and modes every 3 s never stops the
+download.
 
 ### Automatic mode (`Controller`)
 
 | Signal | Rule |
 |---|---|
-| Smoothing | each reading moves the smoothed traffic half way (`SMOOTHING` 0.5) |
-| Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > 48 KB/s (off below 24 KB/s) -> **browsing** |
+| Smoothing | the last two (signed) readings are averaged, then each reading moves the smoothed traffic half way (`SMOOTHING` 0.5); it may go below zero by at most max(96 KB/s, 10 % of VeloxFetch's speed) |
+| Noise | of VeloxFetch's own speed, 3 % (30 % while a limit paces downloads: `paced`) never counts as someone else |
+| Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > max(96 KB/s, noise) (off below half) -> **browsing** |
 | Network busy | other traffic > max(512 KB/s, 15 % of the best speed) (off below half) -> **busy** |
-| Slow down | after 2 readings in a row (`CONFIRM`): cap = best speed x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
-| Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the best speed |
+| Slow down | after 2 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the reference |
+| New mode / minimum | the cap follows at once (`retarget`), the controller keeps its state |
 | No counters | full speed, the controller starts over (`unknown`) |
 
 Status codes (`SmartThrottleDto.reason`): `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`;
-the UI turns them into the status line (`throttle.ts`, `thr.*` texts). The best speed is learned only while nothing
-caps downloads. Idle time per OS: Windows `GetLastInputInfo`, macOS `CGEventSourceSecondsSinceLastEventType`, Linux
+the UI turns them into the status line (`throttle.ts`, `thr.*` texts). The best speed and the reference
+(`SmartThrottleDto.referenceBps`) are learned only while nothing caps downloads (the reference also not while the
+controller is about to slow down). Idle time per OS: Windows `GetLastInputInfo`, macOS `CGEventSourceSecondsSinceLastEventType`, Linux
 GNOME `org.gnome.Mutter.IdleMonitor` -> `org.freedesktop.ScreenSaver.GetSessionIdleTime` -> logind `IdleHint` /
 `IdleSinceHint` (the way that answered is remembered).
 
@@ -57,6 +85,13 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 * Commands: `get_smart_throttle`, `set_smart_throttle(request)` (`enabled`, `auto`, `minBps`, `sharePercent`, `apps`).
   UI: Settings > Speed > Smart throttle (switches, mode, minimum, maximum, programs, live status line and bandwidth
   graph), the dashboard card and the status bar.
+* UI state: one copy for the whole window (`throttle.ts`, `throttleStore`), polled every 3 s; the card, Settings
+  and the status bar read it. Changes go through `throttleStore.save`: shown at once, sent one after the other in
+  order, no poll while one is on its way and a poll started before a change is dropped (the switch used to flick
+  back, then forward); a refused change shows why and the real state comes back. Choosing a mode on the card while
+  it is off turns it on in that mode. The gauge shows the cap against the reference ("25% now"; the mode's share
+  while no speed is known). The card's core keeps its place while downloads are slowed (a CSS rule used to move
+  it off the centre, its ring crossing the numbers); mode names shrink to fit a narrow card.
 * Turning it off lifts the cap immediately (not at the next scan). Nothing about other programs is stored, logged
   or sent; only the matched name of a *listed* program appears in the log.
 
@@ -94,8 +129,21 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 `manager/smart_throttle.rs` automatic mode (confirmation, no flapping between the thresholds, step-by-step recovery,
 unsteady network waits longer, idle / busy, minimum always kept, no counters = full speed), `system.rs` (idle time:
 dry run, and a by-hand test on the real desktop),
-`tests/integration/tests/smart_preview.rs` (5 tests through the real manager and engine; one slows a real download
-while browsing and recovers, checks the minimum, the switches and their persistence),
+`manager/smart_throttle.rs` measurement (same window for both counters, headers are not traffic, a speed change is
+not someone else, first reading / long gap / counters going back, the cap is a share of today's speed, new settings
+move the cap without lifting it, buffering swings cancel out, readings recorded on a real capped line are not
+browsing, noise at high speed), `adaptive.rs` (a dip never cuts a few connections, a throttling server is probed less
+and less often, useless probes back off, a 429 halves once), `limiter.rs` (a shared limit shows as waits, lowering a
+limit never stops downloads, raising one speeds up without a stop), `disk.rs` (a slow connection reports progress
+often), `media.rs` (only a real change of limit restarts a video job),
+`tests/integration/tests/smart_preview.rs` (6 tests through the real manager and engine; one slows a real download
+while browsing and recovers, checks the minimum, the switches and their persistence; one flips through the modes
+while capped: bytes every half second),
+`tests/e2e/desktop-throttle.mjs` (the real app: a mode chosen while off turns it on, five quick clicks end where the
+last one says and never flick back, the app's own process as "a game" caps a running download to the mode's share
+of its real speed, the gauge, the core stays centred while slowed, every mode name fits, modes switched while
+capped never stop the download, Settings and the card agree, off = full speed at once; screenshots
+`throttle-hud-limiting-dark.png`, `throttle-settings-dark.png`),
 `tests/e2e/desktop-preview.mjs` (real WebView2: a WAV plays while downloading through the protocol, seeking, CSP blocks
 scripts; the real process scan finds a listed program, the status line, a held-back download, full speed at once),
 policy tests "live preview: ..." and "smart throttle: ...".

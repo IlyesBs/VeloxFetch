@@ -56,6 +56,12 @@ impl TokenBucket {
         b.tokens = match (b.rate, rate) {
             (_, None) => 0.0,
             (None, Some(r)) => burst(r),
+            // Raised: the connections waiting under the old limit are let go now (see `take`), so what they owed is
+            // settled; kept, it would be paid twice (a burst, then everyone stopped).
+            (Some(old), Some(r)) if b.tokens < 0.0 && r > old => 0.0,
+            // Lowered: a debt owed to the old limit keeps its length in time: owed in bytes, a 0.2 s wait at a high
+            // limit would become seconds at a much lower one, and every connection would stop that long.
+            (Some(old), Some(r)) if b.tokens < 0.0 && old > 0 => b.tokens * r as f64 / old as f64,
             (Some(_), Some(r)) => b.tokens.min(burst(r)),
         };
         b.rate = rate;
@@ -84,11 +90,19 @@ impl TokenBucket {
 #[derive(Clone, Default)]
 pub struct Throttle {
     buckets: Vec<Arc<TokenBucket>>,
+    /// Times a chunk had to wait for a limit (shared by the clones: one download's connections).
+    waits: Arc<AtomicU64>,
 }
 
 impl Throttle {
     pub fn new(buckets: Vec<Arc<TokenBucket>>) -> Self {
-        Self { buckets }
+        Self { buckets, waits: Arc::default() }
+    }
+
+    /// How many times a limit made this download wait so far. A limit shared with other downloads (the global
+    /// one, Smart throttle's cap) holds each download well below its own value: waiting is the sure sign.
+    pub fn waits(&self) -> u64 {
+        self.waits.load(Ordering::Relaxed)
     }
 
     /// The tightest limit in force right now, if any.
@@ -104,14 +118,16 @@ impl Throttle {
 
     /// Wait until `n` bytes may be used. Every bucket is debited, and the *longest* wait applies
     /// (waits do not add up), so the most restrictive limit governs. Cancellation aborts the wait.
-    /// A limit changed while waiting (e.g. lifted) ends the wait at once: the debt was owed to the old limit,
-    /// and `set_rate` has already settled the bucket for the new one.
+    /// A limit lifted or raised while waiting ends the wait at once: the debt was owed to the old limit, and
+    /// `set_rate` has already settled the bucket for the new one. A limit lowered keeps the wait as it was (letting
+    /// every waiting connection go at once would be a burst, then a long stop for all of them).
     pub async fn take(&self, n: usize, cancel: &CancellationToken) -> Result<()> {
-        let seen: Vec<u64> = self.buckets.iter().map(|b| b.changes.load(Ordering::Relaxed)).collect();
+        let mut seen: Vec<(u64, Option<u64>)> = self.buckets.iter().map(|b| (b.changes.load(Ordering::Relaxed), b.rate())).collect();
         let wait = self.buckets.iter().map(|b| b.reserve(n)).max().unwrap_or(Duration::ZERO);
         if wait.is_zero() {
             return Ok(());
         }
+        self.waits.fetch_add(1, Ordering::Relaxed);
         let until = tokio::time::Instant::now() + wait;
         loop {
             let left = until.saturating_duration_since(tokio::time::Instant::now());
@@ -122,8 +138,21 @@ impl Throttle {
                 _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
                 _ = tokio::time::sleep(left.min(RECHECK)) => {}
             }
-            if self.buckets.iter().zip(&seen).any(|(b, s)| b.changes.load(Ordering::Relaxed) != *s) {
-                return Ok(());
+            for (b, s) in self.buckets.iter().zip(seen.iter_mut()) {
+                let changes = b.changes.load(Ordering::Relaxed);
+                if changes == s.0 {
+                    continue;
+                }
+                let now = b.rate();
+                let faster = match (s.1, now) {
+                    (_, None) => true,
+                    (Some(old), Some(new)) => new > old,
+                    (None, Some(_)) => false,
+                };
+                if faster {
+                    return Ok(());
+                }
+                *s = (changes, now);
             }
         }
     }
@@ -176,6 +205,11 @@ impl RateLimits {
         self.smart.rate()
     }
 
+    /// Some shared limit is set (the global one, Smart throttle's cap or a category's).
+    pub fn any_limit(&self) -> bool {
+        self.global.rate().is_some() || self.smart.rate().is_some() || self.categories.lock().unwrap().values().any(|b| b.rate().is_some())
+    }
+
     pub fn category(&self, name: &str) -> Option<u64> {
         self.categories.lock().unwrap().get(name).and_then(|b| b.rate())
     }
@@ -207,6 +241,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_shared_limit_shows_as_waits_even_far_below_its_value() {
+        // Two downloads share a 200 KB/s cap: each gets ~100 KB/s, far below 80 % of the cap, yet both are held by it.
+        let limits = RateLimits::new();
+        limits.set_smart(Some(200_000));
+        let (a, b) = (limits.throttle_for(None, TokenBucket::new(None)), limits.throttle_for(None, TokenBucket::new(None)));
+        let (da, db) = tokio::join!(drain(&a, 100_000, 10_000), drain(&b, 100_000, 10_000));
+        assert!(da.max(db) >= Duration::from_millis(600), "together paced by the cap: {da:?} {db:?}");
+        assert!(!a.is_holding(100_000.0), "the old test alone misses it");
+        assert!(a.waits() > 0 && b.waits() > 0, "both waited for the cap");
+        let free = Throttle::new(vec![TokenBucket::new(Some(1_000_000_000))]);
+        drain(&free, 1_000_000, 10_000).await;
+        assert_eq!(free.waits(), 0, "a limit far above the speed never makes it wait");
+    }
+
+    #[tokio::test]
     async fn lifting_a_limit_wakes_connections_that_are_waiting_under_it() {
         let limits = RateLimits::new();
         limits.set_smart(Some(100_000));
@@ -225,6 +274,103 @@ mod tests {
         limits.set_smart(None);
         let waited = waiter.await.unwrap();
         assert!(waited < Duration::from_millis(800), "the waiting connection noticed the lift: {waited:?}");
+    }
+
+    #[tokio::test]
+    async fn lowering_a_limit_never_stops_downloads_for_long() {
+        // 32 connections pace themselves under 4 MB/s; the cap drops to 256 KB/s. The debt they owed is owed in
+        // time, not bytes, and nobody is let go early: bytes keep coming, one connection after the other, at about
+        // the new speed (owed in bytes, the old debt stopped every connection for seconds at once).
+        let limits = RateLimits::new();
+        limits.set_smart(Some(4_000_000));
+        let t = limits.throttle_for(None, TokenBucket::new(None));
+        let c = CancellationToken::new();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let got = Arc::new(AtomicU64::new(0));
+        let start = Instant::now();
+        let last_ms = Arc::new(AtomicU64::new(0));
+        let gap_ms = Arc::new(AtomicU64::new(0));
+        let measure = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut tasks = Vec::new();
+        for _ in 0..32 {
+            let (t, c, stop, got, last_ms, gap_ms, measure) =
+                (t.clone(), c.clone(), stop.clone(), got.clone(), last_ms.clone(), gap_ms.clone(), measure.clone());
+            tasks.push(tokio::spawn(async move {
+                while !stop.load(Ordering::Relaxed) {
+                    t.take(16 * 1024, &c).await.unwrap();
+                    got.fetch_add(16 * 1024, Ordering::Relaxed);
+                    let now = start.elapsed().as_millis() as u64;
+                    let before = last_ms.swap(now, Ordering::Relaxed);
+                    if measure.load(Ordering::Relaxed) {
+                        gap_ms.fetch_max(now.saturating_sub(before), Ordering::Relaxed);
+                    }
+                }
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        limits.set_smart(Some(256 * 1024));
+        last_ms.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        measure.store(true, Ordering::Relaxed);
+        let at = got.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        let got_after = got.load(Ordering::Relaxed) - at;
+        stop.store(true, Ordering::Relaxed);
+        limits.set_smart(None);
+        for task in tasks {
+            task.await.unwrap();
+        }
+        let gap = gap_ms.load(Ordering::Relaxed);
+        assert!(gap < 700, "no bytes at all for {gap} ms after the cap went down");
+        // What was already granted under the old cap (32 x 16 KB) still arrives on time, then 256 KB/s.
+        let most = 32 * 16 * 1024 + 256 * 1024 * 5 / 2 + 64 * 1024;
+        assert!(got_after <= most && got_after >= 600 * 1024, "the new cap holds: {got_after} bytes in 2.5 s");
+    }
+
+    #[tokio::test]
+    async fn raising_a_limit_speeds_up_without_a_stop() {
+        // 32 connections wait under 256 KB/s; the cap goes up to 8 MB/s. The waiting ones go at once, and what they
+        // owed the old cap is not asked again: no burst followed by everyone stopped.
+        let limits = RateLimits::new();
+        limits.set_smart(Some(256 * 1024));
+        let t = limits.throttle_for(None, TokenBucket::new(None));
+        let c = CancellationToken::new();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let got = Arc::new(AtomicU64::new(0));
+        let start = Instant::now();
+        let last_ms = Arc::new(AtomicU64::new(0));
+        let gap_ms = Arc::new(AtomicU64::new(0));
+        let measure = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut tasks = Vec::new();
+        for _ in 0..32 {
+            let (t, c, stop, got, last_ms, gap_ms, measure) =
+                (t.clone(), c.clone(), stop.clone(), got.clone(), last_ms.clone(), gap_ms.clone(), measure.clone());
+            tasks.push(tokio::spawn(async move {
+                while !stop.load(Ordering::Relaxed) {
+                    t.take(32 * 1024, &c).await.unwrap();
+                    got.fetch_add(32 * 1024, Ordering::Relaxed);
+                    let now = start.elapsed().as_millis() as u64;
+                    let before = last_ms.swap(now, Ordering::Relaxed);
+                    if measure.load(Ordering::Relaxed) {
+                        gap_ms.fetch_max(now.saturating_sub(before), Ordering::Relaxed);
+                    }
+                }
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(1500)).await; // a few seconds of debt queued at 256 KB/s
+        limits.set_smart(Some(8 * 1024 * 1024));
+        last_ms.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        measure.store(true, Ordering::Relaxed);
+        let at = got.load(Ordering::Relaxed);
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        let got_after = got.load(Ordering::Relaxed) - at;
+        stop.store(true, Ordering::Relaxed);
+        limits.set_smart(None);
+        for task in tasks {
+            task.await.unwrap();
+        }
+        let gap = gap_ms.load(Ordering::Relaxed);
+        assert!(gap < 300, "no bytes for {gap} ms after the cap went up");
+        assert!(got_after >= 4 * 1024 * 1024, "the new speed is used at once: {got_after} bytes in 1 s");
     }
 
     #[tokio::test]
@@ -310,7 +456,12 @@ mod tests {
         // global + smart + category + the download's own; without a category: three.
         assert_eq!(l.throttle_for(Some("video"), per.clone()).buckets.len(), 4);
         assert_eq!(l.throttle_for(None, per).buckets.len(), 3);
+        assert!(l.any_limit());
         l.set_category("video", None);
         assert_eq!(l.category("video"), None);
+        l.set_global(None);
+        assert!(!l.any_limit(), "an emptied category is no limit");
+        l.set_smart(Some(1));
+        assert!(l.any_limit());
     }
 }

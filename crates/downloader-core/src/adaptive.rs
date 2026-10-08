@@ -6,6 +6,10 @@
 //!   collapses. New connections get a settling interval before they are judged (a fresh connection
 //!   is still handshaking and in TCP slow start), and a speed limit in force freezes the decisions:
 //!   a capped throughput says nothing about the network.
+//! * Steady once settled: a server that answered 429 / 503 is not probed again for a long while (the wait
+//!   doubles each time it says no again), a probe that brings nothing doubles the wait before the next one,
+//!   and a speed that merely dips (the network, a busy server) never cuts the connections below
+//!   [`COLLAPSE_FLOOR`]: with few connections, fewer only means slower. Only errors and explicit throttling go lower.
 //! * [`AdaptiveGate`]: a concurrency limit that can be raised and lowered while in flight.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -13,6 +17,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+
+/// A falling speed alone (no errors, no throttling answer) steps down only while more connections than this run.
+pub const COLLAPSE_FLOOR: usize = 4;
+/// The wait before probing upward again doubles at most this many times (15 s -> 8 min with the defaults).
+const MAX_BACKOFF: u32 = 5;
+/// While holding, the best speed seen fades by this much per interval, so one lucky burst does not stand as the
+/// reference for ever.
+const BEST_FADE: f64 = 0.995;
 
 #[derive(Debug, Clone)]
 pub struct AdaptiveConfig {
@@ -94,6 +106,10 @@ pub struct AdaptiveController {
     low_streak: u32,
     base_latency: Option<Duration>,
     last_throttle_drop: Option<Instant>,
+    /// Times the server said "too many connections" (429 / 503) during this run.
+    throttle_hits: u32,
+    /// Probes upward in a row that brought nothing.
+    probe_fails: u32,
 }
 
 impl AdaptiveController {
@@ -116,6 +132,8 @@ impl AdaptiveController {
             low_streak: 0,
             base_latency: None,
             last_throttle_drop: None,
+            throttle_hits: 0,
+            probe_fails: 0,
         }
     }
 
@@ -129,7 +147,9 @@ impl AdaptiveController {
 
     fn hold(&mut self) {
         self.phase = Phase::Holding;
-        self.cooldown = self.cfg.cooldown_intervals;
+        // Each "no" (a throttling server, a probe that brought nothing) doubles the wait before the next probe.
+        let backoff = (self.throttle_hits + self.probe_fails).min(MAX_BACKOFF);
+        self.cooldown = self.cfg.cooldown_intervals.saturating_mul(1 << backoff);
         self.raised = false;
         self.settle = 0;
         self.low_streak = 0;
@@ -165,6 +185,7 @@ impl AdaptiveController {
             return None;
         }
         self.last_throttle_drop = Some(now);
+        self.throttle_hits = self.throttle_hits.saturating_add(1);
         let new = self.step_down();
         let best = self.best_throughput;
         self.lower_to(new, best)
@@ -187,7 +208,12 @@ impl AdaptiveController {
         let collapsed = self.best_throughput > 0.0 && s.throughput < self.best_throughput * self.cfg.degrade_ratio;
 
         // 1. Errors, or congestion: back off immediately.
-        if (s.errors >= self.cfg.error_threshold || (slow && collapsed && !s.limited)) && self.limit > 1 {
+        let congested = slow && collapsed && !s.limited && self.limit > COLLAPSE_FLOOR;
+        // Retries right after a "too many connections" answer are those answers: `on_throttled` already halved the
+        // connections for them; counting them again here would halve twice (4 -> 2 -> 1 for a server allowing 2).
+        let throttled_now = self.last_throttle_drop.is_some_and(|t| t.elapsed() < self.cfg.interval * 2);
+        let failing = s.errors >= self.cfg.error_threshold && !throttled_now;
+        if (failing || congested) && self.limit > 1 {
             let new = self.step_down();
             return self.lower_to(new, s.throughput);
         }
@@ -205,12 +231,18 @@ impl AdaptiveController {
                 }
                 if self.raised && s.throughput < self.prev_throughput * (1.0 + self.cfg.min_gain) {
                     // The extra connections did not pay off: revert and settle at the plateau.
+                    if self.probed {
+                        self.probe_fails = self.probe_fails.saturating_add(1);
+                    }
                     let back = self.prev_limit;
                     self.limit = back;
                     self.soft_ceiling = back;
                     self.best_throughput = self.prev_throughput.max(s.throughput);
                     self.hold();
                     return Some(back);
+                }
+                if self.raised {
+                    self.probe_fails = 0; // it paid off
                 }
                 self.raised = false;
                 self.best_throughput = self.best_throughput.max(s.throughput);
@@ -228,9 +260,9 @@ impl AdaptiveController {
                     self.low_streak += 1;
                 } else {
                     self.low_streak = 0;
-                    self.best_throughput = self.best_throughput.max(s.throughput);
+                    self.best_throughput = (self.best_throughput * BEST_FADE).max(s.throughput);
                 }
-                if self.low_streak >= self.cfg.degrade_intervals && self.limit > 1 {
+                if self.low_streak >= self.cfg.degrade_intervals && self.limit > COLLAPSE_FLOOR {
                     let new = self.step_down();
                     return self.lower_to(new, s.throughput);
                 }
@@ -477,6 +509,77 @@ mod tests {
         assert_eq!(c.observe(s(40.0)), None);
         assert_eq!(c.observe(s(40.0)), None);
         assert_eq!(c.observe(s(40.0)), Some(8), "re-probe after the cooldown");
+    }
+
+    #[test]
+    fn a_throttling_answer_halves_once_not_twice() {
+        // The server allows 2: three of four connections get a 429 at once. on_throttled halves to 2; the
+        // sampler then sees those 3 retries as errors, which must not halve again to 1.
+        let mut c = AdaptiveController::new(cfg(), 4, 64);
+        assert_eq!(c.on_throttled(Instant::now()), Some(2));
+        let after = Sample { throughput: 100.0, errors: 3, latency: None, limited: false };
+        assert_eq!(c.observe(after), None);
+        assert_eq!(c.limit(), 2);
+        // Other failures (not throttling) still step down.
+        let mut d = AdaptiveController::new(cfg(), 4, 64);
+        assert_eq!(d.observe(after), Some(2));
+    }
+
+    #[test]
+    fn a_dipping_speed_never_cuts_a_few_connections() {
+        // 4 connections, then the line slows down for a long while (someone else uses it): fewer connections would
+        // only be slower, so they stay. Above the floor, a lasting collapse still steps down (to the floor).
+        let mut c = AdaptiveController::new(cfg(), 4, 4);
+        assert_eq!(c.observe(s(100.0)), None);
+        for _ in 0..20 {
+            assert_eq!(c.observe(s(20.0)), None, "a dip is not a reason to drop connections at the floor");
+        }
+        assert_eq!(c.limit(), COLLAPSE_FLOOR);
+        let mut big = AdaptiveController::new(cfg(), 16, 16);
+        assert_eq!(big.observe(s(100.0)), None);
+        assert_eq!(big.observe(s(20.0)), None);
+        assert_eq!(big.observe(s(20.0)), Some(8));
+    }
+
+    #[test]
+    fn a_throttling_server_is_probed_again_less_and_less_often() {
+        // The server allows 2 connections: every probe to 4 gets a 429. The waits between probes double.
+        let mut c = AdaptiveController::new(cfg(), 4, 64);
+        let mut t = Instant::now();
+        let mut gaps = Vec::new();
+        assert_eq!(c.on_throttled(t), Some(2));
+        let mut since = 0;
+        for _ in 0..200 {
+            since += 1;
+            if let Some(n) = c.observe(s(tp(c.limit(), 2))) {
+                if n > 2 {
+                    gaps.push(since);
+                    since = 0;
+                    t += Duration::from_secs(5);
+                    assert_eq!(c.on_throttled(t), Some(2), "the server says no again");
+                }
+            }
+        }
+        assert!(gaps.len() >= 3, "{gaps:?}");
+        assert!(gaps.windows(2).all(|w| w[1] >= w[0] * 2 - 1), "each wait doubles: {gaps:?}");
+    }
+
+    #[test]
+    fn useless_probes_back_off_and_a_useful_one_resets_the_wait() {
+        let mut c = AdaptiveController::new(cfg(), 4, 64);
+        // First climb: 4 -> 8 brings nothing (plateau at 4) -> back to 4.
+        assert_eq!(c.observe(s(40.0)), Some(8));
+        assert_eq!(c.observe(s(40.0)), Some(4));
+        let mut gaps = Vec::new();
+        let mut since = 0;
+        for _ in 0..60 {
+            since += 1;
+            if c.observe(s(40.0)) == Some(8) {
+                gaps.push(since);
+                since = 0;
+            }
+        }
+        assert!(gaps.len() >= 3 && gaps.windows(2).all(|w| w[1] > w[0]), "probes spread out: {gaps:?}");
     }
 
     #[tokio::test]

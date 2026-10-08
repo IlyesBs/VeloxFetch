@@ -598,9 +598,9 @@ a {
   color: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 32px -6px var(--accent);
 }
-.hud-live {
-  position: relative;
-}
+/* The core is absolutely placed inside the gauge: that already anchors the glow below. (A `position: relative`
+   here once won over the core's own placement while downloads were slowed: the core shrank to its text and left
+   the centre, its ring crossing the numbers.) */
 .hud-live::after {
   content: "";
   position: absolute;
@@ -1220,6 +1220,13 @@ dialog::backdrop {
 .mode-btn {
   @apply flex h-[58px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl border border-line px-0.5 text-[10.5px] font-medium text-dim transition-[color,border-color,background-color,box-shadow] duration-150 hover:text-fg;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
+}
+/* The label shrinks a little to fit a narrow card ("Conservative" was cut short in the sidebar). */
+.mode-btn {
+  container-type: inline-size;
+}
+.mode-label {
+  font-size: min(10.5px, 14.5cqi);
 }
 .mode-btn[aria-checked="true"] {
   color: var(--fg);

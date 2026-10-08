@@ -1,9 +1,9 @@
 import { useId } from "react";
-import { api } from "../api";
 import { formatSpeed } from "../format";
-import { act, useStore } from "../hooks";
+import { useStore } from "../hooks";
 import { useT } from "../i18n";
 import {
+  gaugeShare,
   keepWhileActive,
   THROTTLE_MODES as MODES,
   throttleStatus,
@@ -45,27 +45,29 @@ export function ThrottleHud({
   const on = !!s?.enabled;
   const limiting = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
-  // Live: the cap against the best speed seen (a cap below a speed never measured shows as a small share).
-  const shown = limiting
-    ? Math.min(
-        1,
-        Math.max(
-          0.04,
-          (s!.limitBps ?? 0) / Math.max(s!.peakBps ?? 0, s!.limitBps ?? 1),
-        ),
-      )
-    : 1;
+  // Live: the cap against the speed downloads usually get (the share they keep right now).
+  const shown = gaugeShare(s);
   const pct = Math.round(shown * 100);
 
-  const save = async (
-    patch: { enabled?: boolean; sharePercent?: number },
-    done?: string,
-  ) => {
-    const next = await act(() => api.setSmartThrottle(patch), done);
-    if (next) throttleStore.set(next);
-  };
   const toggle = () =>
-    s && void save({ enabled: !on }, on ? t("hud.offToast") : t("hud.on"));
+    s &&
+    void throttleStore.save(
+      { enabled: !on },
+      on ? t("hud.offToast") : t("hud.on"),
+    );
+  // Choosing a mode while it is off turns it on in that mode (what choosing one means).
+  const pick = (share: number, name: string) =>
+    s &&
+    (on
+      ? share !== s.sharePercent &&
+        void throttleStore.save(
+          { sharePercent: share },
+          t("hud.modeSet", { name }),
+        )
+      : void throttleStore.save(
+          { enabled: true, sharePercent: share },
+          t("hud.modeOn", { name }),
+        ));
 
   const status = throttleStatus(t, s);
 
@@ -180,10 +182,10 @@ export function ThrottleHud({
             })}
             disabled={!s}
             data-testid={`hud-mode-${m.share}`}
-            onClick={() => void save({ sharePercent: m.share })}
+            onClick={() => pick(m.share, name)}
           >
             <Icon name={m.icon} size={17} />
-            <span className="max-w-full truncate">{name}</span>
+            <span className="mode-label max-w-full truncate">{name}</span>
           </button>
         );
       })}

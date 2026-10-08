@@ -481,6 +481,9 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   default), so downloads never stop; it uses its own rate bucket, so the user's limits and the engine are untouched.
 * Steady: smoothed readings, separate on / off thresholds, two readings to confirm before slowing, a calm period before
   speeding up (doubled when the network keeps changing), then steps of 1.5x.
+* Measured from totals only (October 2026): the computer's received-bytes counter (`SysIo::net_received_total`, read on
+  the watcher's blocking thread) and VeloxFetch's own received bytes, over the same window. Still no per-program, per-site
+  or per-connection traffic (the policy test checks `sysio.rs`); nothing new is stored or sent.
 
 ## Download Doctor
 

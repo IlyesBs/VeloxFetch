@@ -1472,6 +1472,7 @@ fn spawn_sampler(
             let mut tick = tokio::time::interval(interval);
             tick.tick().await;
             let (mut last_at, mut last_bytes, mut last_errors) = (Instant::now(), progress.downloaded_now(), progress.total_retries());
+            let mut last_waits = throttle.waits();
             loop {
                 tick.tick().await;
                 let now = Instant::now();
@@ -1481,8 +1482,11 @@ fn spawn_sampler(
                     throughput: bytes.saturating_sub(last_bytes) as f64 / secs,
                     errors: errors.saturating_sub(last_errors),
                     latency: progress.take_latency(),
-                    limited: throttle.is_holding(bytes.saturating_sub(last_bytes) as f64 / secs),
+                    // A limit made a connection wait (a shared one holds each download far below its value), or
+                    // the speed runs at the tightest limit.
+                    limited: throttle.waits() > last_waits || throttle.is_holding(bytes.saturating_sub(last_bytes) as f64 / secs),
                 };
+                last_waits = throttle.waits();
                 (last_at, last_bytes, last_errors) = (now, bytes, errors);
                 let decision = ctl.lock().unwrap().observe(sample);
                 if let Some(n) = decision {

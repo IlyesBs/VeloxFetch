@@ -1,0 +1,137 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SetSmartThrottle, SmartThrottle } from "./types";
+
+// throttle.ts marks <html> while it is on: a bare stand-in is enough here (no browser in these tests).
+(globalThis as unknown as { document: unknown }).document = { documentElement: { dataset: {} }, visibilityState: "visible" };
+
+/** The app's side: answers set/get by hand, in whatever order a test wants. */
+const server = vi.hoisted(() => ({
+  state: null as unknown as SmartThrottle,
+  sets: [] as { patch: SetSmartThrottle; resolve: () => void; reject: (e: unknown) => void }[],
+  gets: [] as { resolve: () => void }[],
+  toasts: [] as string[],
+}));
+
+vi.mock("./api", () => ({
+  api: {
+    setSmartThrottle: (patch: SetSmartThrottle) =>
+      new Promise((resolve, reject) => {
+        server.sets.push({
+          patch,
+          resolve: () => {
+            server.state = { ...server.state, ...patch };
+            resolve(server.state);
+          },
+          reject,
+        });
+      }),
+    getSmartThrottle: () => new Promise((resolve) => server.gets.push({ resolve: () => resolve({ ...server.state }) })),
+  },
+  normalizeError: (e: unknown) => ({ message: String(e) }),
+}));
+vi.mock("./hooks", () => ({
+  store: { toast: (_k: string, m: string) => server.toasts.push(m), getState: () => ({ metrics: { speedBps: 0 } }) },
+}));
+
+const { throttleStore, gaugeShare } = await import("./throttle");
+
+const base: SmartThrottle = {
+  enabled: false,
+  apps: [],
+  sharePercent: 25,
+  activeApp: null,
+  limitBps: null,
+  scanOk: true,
+  auto: true,
+  minBps: 262144,
+  reason: "off",
+  otherBps: null,
+  userIdle: null,
+  peakBps: null,
+  referenceBps: null,
+};
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+beforeEach(async () => {
+  server.state = { ...base };
+  server.sets = [];
+  server.gets = [];
+  server.toasts = [];
+  throttleStore.set({ ...base });
+});
+
+describe("Smart throttle state in the window", () => {
+  it("a change shows at once, before the app answers", async () => {
+    void throttleStore.save({ enabled: true });
+    expect(throttleStore.get()?.enabled).toBe(true);
+    await tick();
+    server.sets[0]!.resolve();
+    await tick();
+    expect(throttleStore.get()?.enabled).toBe(true);
+  });
+
+  it("a poll answered after a change never brings the old state back (no flicker)", async () => {
+    const poll = throttleStore.refresh(); // asked before the click
+    await tick();
+    const saved = throttleStore.save({ enabled: true });
+    server.gets[0]!.resolve(); // the old answer arrives: enabled false
+    await poll;
+    expect(throttleStore.get()?.enabled).toBe(true);
+    await tick();
+    server.sets[0]!.resolve();
+    await saved;
+    expect(throttleStore.get()?.enabled).toBe(true);
+    // While a change is on its way, no poll is sent at all.
+    void throttleStore.save({ sharePercent: 10 });
+    await throttleStore.refresh();
+    expect(server.gets.length).toBe(1);
+    await tick();
+    server.sets[1]!.resolve();
+  });
+
+  it("quick clicks are sent in order and the last one wins", async () => {
+    const a = throttleStore.save({ enabled: true });
+    const b = throttleStore.save({ enabled: false });
+    const c = throttleStore.save({ enabled: true, sharePercent: 50 });
+    expect(throttleStore.get()).toMatchObject({ enabled: true, sharePercent: 50 });
+    for (let i = 0; i < 3; i++) {
+      await tick();
+      expect(server.sets.length).toBe(i + 1); // one at a time
+      server.sets[i]!.resolve();
+    }
+    await Promise.all([a, b, c]);
+    expect(server.sets.map((s) => s.patch.enabled)).toEqual([true, false, true]);
+    expect(throttleStore.get()).toMatchObject({ enabled: true, sharePercent: 50 });
+    expect(server.state).toMatchObject({ enabled: true, sharePercent: 50 });
+  });
+
+  it("turning it off shows full speed at once; a refused change brings the real state back", async () => {
+    throttleStore.set({ ...base, enabled: true, limitBps: 1_000_000, reason: "browsing" });
+    void throttleStore.save({ enabled: false });
+    expect(throttleStore.get()).toMatchObject({ enabled: false, limitBps: null, reason: "off" });
+    await tick();
+    server.sets[0]!.resolve();
+    await tick();
+
+    const bad = throttleStore.save({ minBps: 1 });
+    expect(throttleStore.get()?.minBps).toBe(1);
+    await tick();
+    server.sets[1]!.reject("the reserved minimum must be between 32 KB/s and 1 GB/s");
+    await bad;
+    await tick();
+    server.gets[0]!.resolve();
+    await tick();
+    expect(throttleStore.get()?.minBps).toBe(base.minBps);
+    expect(server.toasts.at(-1)).toMatch(/reserved minimum/);
+  });
+
+  it("the gauge shows the cap against the speed downloads usually get", () => {
+    expect(gaugeShare(null)).toBe(1);
+    expect(gaugeShare({ ...base, enabled: true })).toBe(1);
+    expect(gaugeShare({ ...base, enabled: true, limitBps: 500, referenceBps: 1000, peakBps: 100_000 })).toBe(0.5);
+    // No speed seen yet: never "100 % while limiting"; the share the mode keeps.
+    expect(gaugeShare({ ...base, enabled: true, limitBps: 500, reason: "app" })).toBe(0.25);
+    expect(gaugeShare({ ...base, enabled: true, limitBps: 500, reason: "browsing" })).toBe(0.5);
+    expect(gaugeShare({ ...base, enabled: true, limitBps: 10, referenceBps: 1_000_000 })).toBe(0.04);
+  });
+});

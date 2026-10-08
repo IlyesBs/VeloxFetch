@@ -348,7 +348,7 @@ async fn while_smart_throttle_slows_downloads_low_priority_ones_wait_and_running
         r.m.create_download(NewDownload { priority: Some(Priority::Low), ..slow(&srv, "/running.bin", 256 * 1024) }).await.unwrap();
     wait_status(&r.m, running.id, DownloadStatus::Downloading).await;
     // A call starts: downloads are slowed.
-    r.m.smart_throttle_observe_signals(Some(&call), ThrottleSignals { other_bps: None, idle: None });
+    r.m.smart_throttle_observe_signals(Some(&call), ThrottleSignals::default());
     assert!(r.m.smart_throttle().limit_bps.is_some());
     until("giving way", 10, || async { r.m.get_queues().await.unwrap().giving_way }).await;
     let low = r.m.create_download(NewDownload { priority: Some(Priority::Low), ..slow(&srv, "/low.bin", 8 * MB as u64) }).await.unwrap();
@@ -357,7 +357,7 @@ async fn while_smart_throttle_slows_downloads_low_priority_ones_wait_and_running
     assert_eq!(status(&r.m, low.id).await, DownloadStatus::Queued, "low priority waits for the line to be free");
     assert_eq!(status(&r.m, running.id).await, DownloadStatus::Downloading, "nothing running is stopped");
     // The call ends: it starts.
-    r.m.smart_throttle_observe_signals(Some(&[]), ThrottleSignals { other_bps: None, idle: None });
+    r.m.smart_throttle_observe_signals(Some(&[]), ThrottleSignals::default());
     wait_status(&r.m, low.id, DownloadStatus::Completed).await;
     r.m.cancel_download(running.id).await.unwrap();
 }

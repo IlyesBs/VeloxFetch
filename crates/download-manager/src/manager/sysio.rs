@@ -72,14 +72,19 @@ impl SysIo {
         });
     }
 
+    /// Bytes this computer received so far over its network adapters, read now (`None`: no adapter counted).
+    /// Cheap (a counter table, no waiting); Smart throttle measures its own windows with it, on a blocking thread.
+    pub(super) fn net_received_total(&self) -> Option<u64> {
+        let mut guard = self.counters.lock().unwrap_or_else(|p| p.into_inner());
+        let c = guard.get_or_insert_with(Counters::new);
+        c.nets.refresh(false);
+        let (rx, _, adapters) = net_totals(&c.nets);
+        (adapters > 0).then_some(rx)
+    }
+
     fn read(&self, root: &Path) -> IoRates {
         let mut guard = self.counters.lock().unwrap();
-        let c = guard.get_or_insert_with(|| Counters {
-            nets: Networks::new_with_refreshed_list(),
-            disks: Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_io_usage()),
-            listed: Instant::now(),
-            last: None,
-        });
+        let c = guard.get_or_insert_with(Counters::new);
         let now = Instant::now();
         if now.duration_since(c.listed) > RELIST {
             c.disks.refresh_specifics(true, DiskRefreshKind::nothing().with_io_usage());
@@ -90,16 +95,7 @@ impl SysIo {
             c.nets.refresh(false);
         }
 
-        let (mut rx, mut tx) = (0u64, 0u64);
-        let mut seen = HashSet::new();
-        for n in c.nets.values() {
-            let mac = n.mac_address();
-            if mac.is_unspecified() || !seen.insert(mac.0) {
-                continue;
-            }
-            rx = rx.saturating_add(n.total_received());
-            tx = tx.saturating_add(n.total_transmitted());
-        }
+        let (rx, tx, _) = net_totals(&c.nets);
         let disk = disk_for(&c.disks, root).map(|d| {
             let u = d.usage();
             (u.total_read_bytes, u.total_written_bytes)
@@ -121,6 +117,32 @@ impl SysIo {
         c.last = Some((now, rx, tx, disk));
         rates
     }
+}
+
+impl Counters {
+    fn new() -> Self {
+        Counters {
+            nets: Networks::new_with_refreshed_list(),
+            disks: Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_io_usage()),
+            listed: Instant::now(),
+            last: None,
+        }
+    }
+}
+
+/// Received and sent bytes over the real adapters, each counted once, and how many adapters were counted.
+fn net_totals(nets: &Networks) -> (u64, u64, usize) {
+    let (mut rx, mut tx) = (0u64, 0u64);
+    let mut seen = HashSet::new();
+    for n in nets.values() {
+        let mac = n.mac_address();
+        if mac.is_unspecified() || !seen.insert(mac.0) {
+            continue;
+        }
+        rx = rx.saturating_add(n.total_received());
+        tx = tx.saturating_add(n.total_transmitted());
+    }
+    (rx, tx, seen.len())
 }
 
 /// The disk holding `root`: the one whose mount point is the longest prefix of it (or of its nearest existing parent).

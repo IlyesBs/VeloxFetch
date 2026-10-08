@@ -293,3 +293,25 @@ Described in `docs/download-intelligence.md` (section 7):
 Building on this Linux machine: `. ~/.local/sysroot/env.sh` first (the dbus / WebKit development files are unpacked
 there). `desktop-ipc.mjs` also needs the command-line binary (`cargo build --bin velox`).
 
+
+## Smart throttle and download speed: steadiness fixes
+
+Found by measuring on a real line (a ~3 MB/s connection, public test servers, a competing download started by hand);
+every fix has a test that fails without it. Details in `docs/smart-throttle-and-preview.md` ("What was wrong") and
+`docs/architecture.md` (performance model).
+
+| Where | What |
+|---|---|
+| `crates/downloader-core/src/adaptive.rs` | a dip never cuts a few connections; a throttling server is probed less and less often; useless probes back off; a 429 halves once (4 new tests) |
+| `crates/downloader-core/src/limiter.rs` | a shared limit shows as waits; lowering a limit never stops downloads (no 0-byte gap over 700 ms; it was ~2 s); raising one speeds up without a stop (it was ~0.9 s); `any_limit` (3 new tests) |
+| `crates/downloader-core/src/disk.rs` | a slow connection reports progress at least every 0.5 s (it was every 1.8 s) |
+| `crates/download-manager/src/manager/smart_throttle.rs` | the measurement (same window, headers, speed changes, gaps), the cap is a share of today's speed, settings move the cap without lifting it, buffering swings cancel out, readings recorded on a real capped line are not browsing, noise at high speed (7 new tests) |
+| `crates/download-manager/src/manager/media.rs` | only a real change of limit restarts a video job |
+| `tests/integration/tests/smart_preview.rs` | modes flipped while capped: bytes every half second through the real engine (it stood still for 1.1 to 1.4 s after each change) |
+| `apps/desktop/src/throttle.test.ts` | the shared state: shown at once, a stale poll never brings the old state back, quick clicks in order and the last wins, off shows full speed at once, a refused change brings the real state back, the gauge (5 tests) |
+| `tests/e2e/desktop-throttle.mjs` | 23 checks in the real app (Linux and Windows): clicks, modes, the app's own process as "a game", a capped download that never stops, the gauge's core in place, mode names that fit, Settings and the card agree; screenshots `docs/screenshots/throttle-hud-limiting-dark.png`, `throttle-settings-dark.png` |
+| `tests/e2e/harness.mjs` | `startFileServer(...).rateBps`: one speed shared by every connection, like a real line |
+| `tests/security/policy.test.mjs` | the watcher's "full speed on any failure" in its new shape; the traffic is read from totals only (`sysio.rs`) |
+
+On Linux `desktop-preview.mjs` stops before its Smart throttle part (live preview does not play in WebKitGTK, see
+above); `desktop-throttle.mjs` covers that part.

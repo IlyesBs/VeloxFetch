@@ -713,7 +713,7 @@ test("smart throttle: process names only, nothing stored or sent, full speed on 
   const st = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "smart_throttle.rs"));
   assert.match(st, /ProcessRefreshKind::nothing\(\)/, "no CPU, memory, command line or environment of other programs");
   assert.ok(!/tracing::|println!|eprintln!|cmd\(\)|environ|\.exe\(\)/.test(st), "process details are never logged or read beyond the name");
-  assert.match(st, /_ => manager\.smart_throttle_observe\(None\)/, "a failed, slow or panicking scan means full speed");
+  assert.match(st, /if !matches!\(tokio::time::timeout\(SCAN_LIMIT, scan\)\.await, Ok\(Ok\(\(\)\)\)\) \{[\s\S]{0,120}manager\.smart_throttle_observe\(None\);/, "a failed, slow or panicking scan means full speed");
   const core = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
   assert.match(core, /enabled: get\(ENABLED_KEY\)\.as_deref\(\) == Some\("true"\)/, "off unless the user turned it on");
   // Automatic mode: of the keyboard and mouse only the idle time is known; traffic is a total, never per program
@@ -722,6 +722,11 @@ test("smart throttle: process names only, nothing stored or sent, full speed on 
   assert.match(sys, /fn user_idle\(&self\) -> Option<std::time::Duration>;/);
   assert.ok(!/SetWindowsHookEx|GetAsyncKeyState|CGEventTapCreate|XRecord|\/dev\/input/.test(sys), "no input is ever read, only the idle time");
   assert.match(core, /let Some\(raw\) = sig\.other_bps else \{[\s\S]{0,160}return \(None, Reason::Unknown\);/, "no counters: full speed");
-  assert.match(core, /let target = \(known \* keep\)\.max\(floor\);/, "the automatic cap respects the reserved minimum");
+  assert.match(core, /\(known \* keep\)\.max\(floor\)/, "the automatic cap respects the reserved minimum");
+  // The other traffic is measured from totals only (the computer's received bytes, VeloxFetch's own), never per
+  // program or per connection.
+  const io = withoutTestModules(read("crates", "download-manager", "src", "manager", "sysio.rs"));
+  assert.match(io, /pub\(super\) fn net_received_total\(&self\) -> Option<u64>/);
+  assert.ok(!/processes|ProcessRefreshKind|sockets|connections\(/.test(io), "no per-program or per-connection traffic");
   assert.match(core, /MIN_FLOOR_BPS: u64 = 32 \* 1024;/, "the reserved minimum can never be zero: downloads never stop");
 });

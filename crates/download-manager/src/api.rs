@@ -593,6 +593,9 @@ pub struct SmartThrottleDto {
     pub user_idle: Option<bool>,
     /// The best download speed seen on this connection.
     pub peak_bps: Option<u64>,
+    /// The speed the caps are a share of: what downloads got lately while nothing held them back, at most the
+    /// best speed seen (the gauge shows the cap against it).
+    pub reference_bps: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

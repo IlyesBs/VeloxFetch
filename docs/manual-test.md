@@ -179,7 +179,15 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    the browser: within ~6 s the status says "Reducing speed — active browsing detected" and the graph's dashed limit line
    appears; stop: a few seconds later "Bandwidth optimized — speeding back up", then "Full speed — network idle". Leave the
    computer alone for 2+ minutes: "Full speed — computer idle". The speed never drops below "Downloads always keep at least".
-   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the connection while browsing.
+   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the download's speed while browsing.
+4. Steadiness (the October 2026 fixes): with Smart throttle on and nothing else using the network, a large download stays
+   at full speed ("Full speed — nothing else is using the connection"), it is not slowed at start. Start a second download
+   in the browser: within ~6 s the speed visibly drops to about half; stop it: full speed again within about 30 s, the
+   status never sticks on "browsing". While capped, click Aggressive / Balanced / Conservative and the switch quickly
+   several times: the download never shows 0 B/s, the switch never flicks back, the gauge's centre stays in the middle and
+   "Conservative" is written in full. Choosing a mode while it is off turns it on.
+5. Speed without Smart throttle: a large download from a server that limits connections (many mirrors do) keeps a steady
+   speed and connection count, instead of swinging between full and nearly nothing every ~15 s.
 
 ## N. Fresh computer (once per release, on a PC without developer tools)
 1. Install on a Windows PC that never had Visual Studio or the "Visual C++ Redistributable". Connect Brave / Chrome in Settings >

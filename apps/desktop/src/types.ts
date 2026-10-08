@@ -176,6 +176,8 @@ export interface SmartThrottle {
   userIdle: boolean | null;
   /** The best download speed seen on this connection. */
   peakBps: number | null;
+  /** What the caps are a share of: what downloads got lately while free, at most the best speed seen. */
+  referenceBps: number | null;
 }
 
 export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";

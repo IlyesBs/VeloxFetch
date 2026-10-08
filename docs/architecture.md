@@ -96,10 +96,27 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   reverted when it does not pay off. Later probes (every ~15 s) double. It halves on errors, on
   throughput collapsing for 3 intervals in a row, or on a slow first byte *together with* collapsed
   throughput (a slower first byte alone is normal with many connections). While a speed limit holds the
-  download (it runs at ≥80 % of the tightest limit: global, category, per download or Smart throttle), the
-  controller changes nothing: a capped speed says nothing about the network. HTTP 429 / 503 reduce
-  connections *immediately* and have their own retry budget.
-* The speed shown for each download is smoothed over ~1 s, whatever the tick rate.
+  download (a connection had to wait for a limit during the interval, or it runs at ≥80 % of the tightest
+  limit: global, category, per download or Smart throttle), the controller changes nothing: a capped speed
+  says nothing about the network. HTTP 429 / 503 reduce connections *immediately* and have their own retry
+  budget.
+* Steadiness (the speed must not swing between full and nearly nothing): a falling speed alone never cuts the
+  connections below 4 (`COLLAPSE_FLOOR`; with few connections, fewer only means slower; errors still go lower);
+  the retries that follow a 429 / 503 are not counted again as errors (that halved twice: 4 → 2 → 1 on a
+  server allowing 2); every "no" (a throttling answer, a probe that brought nothing) doubles the wait before
+  the next probe (15 s → 30 s → … → 8 min), so a server that limits connections is not hit again every 15 s;
+  the best speed seen fades slowly so one lucky burst is not the reference for ever. Measured on a real
+  server that allows 2 connections: before, the count cycled 4 → 2 → 1 → 2 → 4 every ~17 s and the speed
+  between ~0.9 and ~2 MB/s; after, 2 connections for the whole run.
+* Limits that change while downloads wait: a limit lowered keeps the debt the connections owed *in time*
+  (owed in bytes, a 0.2 s wait at 5 MB/s became more than a second for every connection at 1 MB/s) and keeps
+  their waits; a limit raised or lifted lets the waiting connections go at once and forgives what they owed
+  the old limit (kept, it was paid twice: a burst, then every connection stopped for about a second).
+* Bytes count (progress, speed) when they are written. A partly filled write buffer is written after 200 ms
+  anyway, and under a speed limit what a connection holds is written before it waits: at a low limit shared
+  by many connections, a full 64 KB buffer took seconds, so the progress stood still and then jumped.
+* The speed shown for each download is smoothed over ~2 s, whatever the tick rate (the short pause between two
+  parts of a connection no longer shows as a dip).
 * The dashboard's Network and Disk panels show real system counters (`manager/sysio.rs`, through `sysinfo`):
   the whole computer's download and upload speed (interfaces without a hardware address, such as loopback,
   tunnels and capture filter drivers, are skipped; each adapter counts once) and the read / write speed of

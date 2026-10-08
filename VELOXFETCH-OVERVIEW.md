@@ -192,9 +192,16 @@ Details: `docs/download-intelligence.md`.
     less; when the network is free or the computer idle (no input for 2 minutes), full speed.
   - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), downloads keep only a
     share of the speed; full speed again when it closes.
-- **Steady, never stuck:** smoothed readings, separate on / off thresholds, two readings to confirm before slowing,
-  a calm period before speeding up (longer on an unsteady network), then steps of 1.5x. Downloads never go below the
-  reserved minimum, so they never stop.
+- **Measured right:** the other traffic is the computer's received bytes minus VeloxFetch's own, both counted over the
+  same seconds (with an allowance for packet headers, and a larger one while a limit paces downloads, when the
+  system receives data by bursts). It is never fooled by VeloxFetch's own speed changing.
+- **Always visible:** the cap is a share of the speed downloads really had just before (at most the best speed
+  seen), so it always slows them; a share of an old best speed could be above today's speed and change nothing.
+- **Steady, never stuck:** smoothed readings, separate on / off thresholds (96 / 48 KB/s), two readings to confirm
+  before slowing, a calm period before speeding up (longer on an unsteady network), then steps of 1.5x. A new mode
+  or minimum moves the cap at once without lifting it first. Downloads never go below the reserved minimum, so they
+  never stop. On a real line: a competing download is seen within ~3 s, downloads drop to half (Balanced), and full
+  speed is back ~25 s after it stops.
 - **Settings:** on / off, Automatic, the mode, "Downloads always keep at least" (default 256 KB/s), and the maximum
   download speed (the global speed limit).
 - **Modes:**
@@ -205,9 +212,12 @@ Details: `docs/download-intelligence.md`.
   | Balanced | ~50 % | 25 % |
   | Conservative | ~75 % | 50 % |
 
-- **Shows what it does:** a status line ("Full speed — network idle", "Reducing speed — active browsing detected",
-  "Bandwidth optimized — speeding back up"…) on the dashboard card, in Settings and in the status bar, and a graph
-  of the download speed with the current limit (Settings > Speed > Smart throttle).
+- **Shows what it does:** a status line ("Full speed — nothing else is using the connection", "Reducing speed —
+  active browsing detected", "Bandwidth optimized — speeding back up"…) on the dashboard card, in Settings and in the
+  status bar (one shared state: they always agree), the gauge ("25% now": the share of their usual speed downloads
+  keep), and a graph of the download speed with the current limit (Settings > Speed > Smart throttle).
+- **Clicks:** a switch or a mode changes on screen at once; quick clicks end where the last one says, never
+  flicking back; choosing a mode while it is off turns it on in that mode.
 - **Default and look:** off by default. While it is on, the accent colour turns amber.
 - **Privacy:** only program *names*, the computer's *total* traffic and the *time since the last input* are read;
   nothing is stored or sent.
@@ -335,10 +345,19 @@ More: `docs/architecture.md`.
     if the step did not help;
   - after that, probes upward every ~15 s, doubling.
 - **Backing off:**
-  - halves on errors, or when the speed collapses for 3 seconds in a row;
-  - reacts **at once** to HTTP 429 / 503 (the server says "too many connections").
-- **Speed limits:** when a limit holds the speed (≥80 % of it), the controller changes nothing. A capped speed
-  says nothing about the network.
+  - halves on errors, or when the speed collapses for 3 seconds in a row (never below 4 connections for a
+    falling speed alone: with few connections, fewer only means slower);
+  - reacts **at once** to HTTP 429 / 503 (the server says "too many connections"), once (the retries that follow
+    are not counted again).
+- **Steady speed:** every "no" (a server limiting connections, a probe that brought nothing) doubles the wait before
+  the next probe (15 s → 8 min), so the speed does not swing between full and nearly nothing. Measured on a real
+  server allowing 2 connections: before, 4 → 2 → 1 → 2 → 4 every ~17 s (0.9 to 2 MB/s); after, 2 steady connections.
+- **Speed limits:** when a limit holds the speed (a connection had to wait for it, or ≥80 % of it), the controller
+  changes nothing. A capped speed says nothing about the network.
+- **Limits changed while running:** a lower limit never stops downloads (what they owed is kept in time, not
+  bytes); a higher one speeds them up at once, without a burst followed by a stop. Bytes count when written, at
+  least every 200 ms, so the progress and the speed shown move smoothly even at a low limit; the shown speed is
+  smoothed over ~2 s.
 - **Limits are token buckets:**
 
   | Bucket | Set by |
@@ -539,6 +558,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
 | + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions) |
+| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
