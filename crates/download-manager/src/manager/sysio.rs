@@ -124,7 +124,7 @@ impl SysIo {
 }
 
 /// The disk holding `root`: the one whose mount point is the longest prefix of it (or of its nearest existing parent).
-fn disk_for<'a>(disks: &'a Disks, root: &Path) -> Option<&'a sysinfo::Disk> {
+pub(super) fn disk_for<'a>(disks: &'a Disks, root: &Path) -> Option<&'a sysinfo::Disk> {
     let root = root.ancestors().find_map(|p| std::fs::canonicalize(p).ok()).unwrap_or_else(|| root.to_path_buf());
     let root = strip_verbatim(&root);
     disks.list().iter().filter(|d| root.starts_with(strip_verbatim(d.mount_point()))).max_by_key(|d| d.mount_point().as_os_str().len())

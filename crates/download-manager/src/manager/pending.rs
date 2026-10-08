@@ -19,6 +19,8 @@ pub(super) struct PendingEntry {
     pub dto: PendingDto,
     req: NewDownload,
     headers: Vec<(String, String)>,
+    /// The analysis still running for it: stopped as soon as the user answers.
+    analysis: Option<tokio::task::AbortHandle>,
 }
 
 #[derive(Default)]
@@ -86,7 +88,8 @@ impl DownloadManager {
             token = list.next;
             dto = PendingDto {
                 token,
-                url: url.to_string(),
+                // Shown in the dialog: a signature or token in the link stays hidden.
+                url: crate::intelligence::display_url(&url),
                 host: url.host_str().unwrap_or("").to_string(),
                 filename: guess.clone(),
                 size: None,
@@ -97,32 +100,40 @@ impl DownloadManager {
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
                 media: None,
+                analysis: None,
             };
-            list.entries.push(PendingEntry { dto: dto.clone(), req, headers: headers.clone() });
+            list.entries.push(PendingEntry { dto: dto.clone(), req, headers: headers.clone(), analysis: None });
         }
         self.emit(ManagerEvent::Pending { pending: dto.clone() });
 
         let this = self.clone();
         let named = requested.is_some();
-        tokio::spawn(async move {
-            let probe = tokio::time::timeout(Duration::from_secs(20), this.inner.downloader.probe_quick(url.as_str(), &headers)).await;
+        // Download Intelligence: the one quick check (size, type, resume...) plus the drive and duplicates.
+        // Read-only; stopped if the user answers first (see `take_pending`).
+        let task = tokio::spawn(async move {
+            let (info, analysis) = this.analyze(&url, &headers, requested.as_deref()).await;
             let updated = {
                 let mut list = this.inner.pending.lock().unwrap();
                 let Some(e) = list.entries.iter_mut().find(|e| e.dto.token == token) else { return }; // already answered
                 e.dto.probing = false;
-                if let Ok(Ok(info)) = probe {
+                e.analysis = None;
+                if let Some(info) = info {
                     e.dto.size = info.content_length;
                     e.dto.resumable = Some(info.supports_parallel());
                     if !named {
-                        e.dto.filename = downloader_core::filename::choose_filename(&info, &url);
+                        e.dto.filename = analysis.filename.clone();
                     }
                     e.dto.content_type = info.content_type;
                 }
+                e.dto.analysis = Some(analysis);
                 e.dto.save_dir = this.predicted_dir(&e.dto.filename, e.dto.content_type.as_deref()).to_string_lossy().into_owned();
                 e.dto.clone()
             };
             this.emit(ManagerEvent::Pending { pending: updated });
         });
+        if let Some(e) = self.inner.pending.lock().unwrap().entries.iter_mut().find(|e| e.dto.token == token) {
+            e.analysis = Some(task.abort_handle());
+        }
         Ok(dto)
     }
 
@@ -161,9 +172,10 @@ impl DownloadManager {
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
                 media: Some(kind),
+                analysis: None,
             };
             let req = NewDownload { url: url.to_string(), ..Default::default() };
-            list.entries.push(PendingEntry { dto: dto.clone(), req, headers });
+            list.entries.push(PendingEntry { dto: dto.clone(), req, headers, analysis: None });
             dto
         };
         self.emit(ManagerEvent::Pending { pending: dto.clone() });
@@ -228,6 +240,9 @@ impl DownloadManager {
                 .ok_or_else(|| ManagerError::invalid("this request is no longer waiting"))?;
             list.entries.remove(i)
         };
+        if let Some(task) = &entry.analysis {
+            task.abort(); // answered: the analysis is not needed any more
+        }
         self.emit(ManagerEvent::PendingRemoved { token });
         Ok(entry)
     }

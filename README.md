@@ -100,6 +100,17 @@ for 23:00, Paused, Completed, Failed or Retrying. A "Next download" line and a 2
 Without rules nothing changes, and something the computer cannot tell never holds a download back. See
 [`docs/smart-download-queue.md`](docs/smart-download-queue.md).
 
+Download Intelligence: before a download starts, the confirmation dialog (links from the browser or the clipboard)
+and the Add dialog's **Check link** show:
+- the file, its size and type;
+- whether it can be resumed, and how it will start;
+- whether it fits on the drive, and whether the connection is secure;
+- whether you already have it;
+- any warnings: sign-in needed, temporary or expired link, a web page instead of the file, not enough space.
+
+"Why?" shows what the server actually did. The check downloads nothing, writes nothing and can be cancelled. If it
+fails, you can still download. See [`docs/download-intelligence.md`](docs/download-intelligence.md).
+
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
 
 Diagnostics stay on the computer: the app writes a small rotating log to `<app data>/logs/velox.log`

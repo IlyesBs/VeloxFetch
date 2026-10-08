@@ -45,6 +45,7 @@ pub enum Command {
     PreviewBatch,
     AddBatch,
     ReviewLink,
+    AnalyzeLink,
     GetClipboardWatch,
     SetClipboardWatch,
     AnalyzeMedia,
@@ -91,7 +92,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 75] = [
+    pub const ALL: [Command; 76] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -125,6 +126,7 @@ impl Command {
         Command::PreviewBatch,
         Command::AddBatch,
         Command::ReviewLink,
+        Command::AnalyzeLink,
         Command::GetClipboardWatch,
         Command::SetClipboardWatch,
         Command::AnalyzeMedia,
@@ -205,6 +207,7 @@ impl Command {
             Command::PreviewBatch => "preview_batch",
             Command::AddBatch => "add_batch",
             Command::ReviewLink => "review_link",
+            Command::AnalyzeLink => "analyze_link",
             Command::GetClipboardWatch => "get_clipboard_watch",
             Command::SetClipboardWatch => "set_clipboard_watch",
             Command::AnalyzeMedia => "analyze_media",
@@ -345,6 +348,7 @@ mod tests {
             Command::PreviewBatch,
             Command::AddBatch,
             Command::ReviewLink,
+            Command::AnalyzeLink,
             Command::GetClipboardWatch,
             Command::SetClipboardWatch,
             Command::AnalyzeMedia,

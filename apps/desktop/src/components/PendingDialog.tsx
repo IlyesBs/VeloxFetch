@@ -3,6 +3,7 @@ import { api } from "../api";
 import { formatBytes } from "../format";
 import { act, useStore } from "../hooks";
 import { useT } from "../i18n";
+import { IntelligencePanel } from "./IntelligencePanel";
 import { MediaDialog } from "./MediaDialog";
 import type { PendingDownload, PickedFolder } from "../types";
 import { Icon } from "../ui/icons";
@@ -78,7 +79,7 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
   }, [busy, p.token]);
 
   return (
-    <div className="card rise w-full max-w-lg p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="pending-title" data-testid="pending-dialog">
+    <div className="card rise max-h-[92vh] w-full max-w-lg overflow-y-auto p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="pending-title" data-testid="pending-dialog">
       <div className="flex items-center gap-3">
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
           <Icon name="download" size={19} />
@@ -124,7 +125,15 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
           {p.probing ? t("pend.checking") : (p.contentType ?? t("pend.unknown"))}
         </Row>
         <Row label={t("pend.resume")} testid="pending-resume">
-          {p.probing ? t("pend.checking") : p.resumable === null ? t("pend.unknown") : p.resumable ? t("pend.resumeYes") : t("pend.resumeNo")}
+          {p.probing
+            ? t("pend.checking")
+            : p.analysis
+              ? t(`intel.resume.${p.analysis.resume}`)
+              : p.resumable === null
+                ? t("pend.unknown")
+                : p.resumable
+                  ? t("pend.resumeYes")
+                  : t("pend.resumeNo")}
         </Row>
         <Row label={t("addd.saveIn")} testid="pending-dir">
           <div className="flex items-start gap-2">
@@ -142,6 +151,7 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
           </div>
         </Row>
       </dl>
+      {p.analysis && <IntelligencePanel a={p.analysis} />}
       {p.incognito && <p className="mt-2 text-xs text-dim">{t("pend.private")}</p>}
 
       <div className="mt-4 flex items-center justify-end gap-2">

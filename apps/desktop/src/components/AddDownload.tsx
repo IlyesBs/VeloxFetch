@@ -3,11 +3,12 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import { opensVideoDialog, parseRate } from "../format";
 import { act, store, useStore } from "../hooks";
-import { PRIORITIES, type Download, type NewDownload, type PickedFolder, type Priority } from "../types";
+import { PRIORITIES, type Analysis, type Download, type NewDownload, type PickedFolder, type Priority } from "../types";
 import { t as tr, useT, type Key } from "../i18n";
 import { Icon } from "../ui/icons";
 import { StatusChip } from "../ui/primitives";
 import { localStamp, MAIN_QUEUE, queueName } from "../smartQueue";
+import { IntelligencePanel } from "./IntelligencePanel";
 
 /** Put `url` in the link bar and focus it (paste / drop anywhere, Ctrl+L). An empty string only focuses. */
 export const FILL_LINK = "velox:fill-link";
@@ -93,6 +94,32 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
   // the list under the Add button's arrow (several links, a video, options)
   const [moreOpen, setMoreOpen] = useState(false);
   const more = useRef<HTMLDivElement>(null);
+  // Download Intelligence in the options dialog: "Check link" looks at the link without downloading it.
+  // A newer check, a changed link or closing the dialog drops (and cancels) the one running.
+  const [check, setCheck] = useState<{ s: "idle" } | { s: "checking" } | { s: "failed" } | { s: "done"; a: Analysis }>({ s: "idle" });
+  const checkSeq = useRef(0);
+  const checking = useRef(false);
+  const runCheck = async () => {
+    const link = url.trim();
+    if (!link) return;
+    const seq = ++checkSeq.current;
+    checking.current = true;
+    setCheck({ s: "checking" });
+    try {
+      const a = await api.analyzeLink(link);
+      if (seq === checkSeq.current) setCheck(a ? { s: "done", a } : { s: "idle" });
+    } catch {
+      if (seq === checkSeq.current) setCheck({ s: "failed" });
+    } finally {
+      if (seq === checkSeq.current) checking.current = false;
+    }
+  };
+  const stopCheck = () => {
+    checkSeq.current++;
+    if (checking.current) void api.analyzeLink(null).catch(() => {});
+    checking.current = false;
+    setCheck({ s: "idle" });
+  };
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -289,15 +316,41 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
         />
       )}
 
-      <dialog ref={dialog} className="card m-auto max-h-[92vh] w-[min(34rem,94vw)] p-0" aria-labelledby="add-title">
+      <dialog ref={dialog} className="card m-auto max-h-[92vh] w-[min(34rem,94vw)] p-0" aria-labelledby="add-title" onClose={stopCheck}>
         <form onSubmit={detailed} className="space-y-4 p-5">
           <h2 id="add-title" className="text-base font-semibold">
             {t("addd.title")}
           </h2>
           <label className="block space-y-1.5">
             <span className="label">{t("addd.url")}</span>
-            <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" required />
+            <input
+              className="input"
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                if (check.s !== "idle") stopCheck();
+              }}
+              placeholder="https://…"
+              required
+            />
           </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" className="btn h-8 px-3 text-xs" data-testid="add-check" disabled={!url.trim() || check.s === "checking"} onClick={() => void runCheck()} title={t("intel.checkTip")}>
+              <Icon name="shield" size={14} />
+              {t("intel.check")}
+            </button>
+            {check.s === "checking" && (
+              <span className="text-xs text-dim" role="status" data-testid="add-check-busy">
+                {t("intel.checking")}
+              </span>
+            )}
+            {check.s === "failed" && (
+              <span className="text-xs text-dim" role="status" data-testid="add-check-failed">
+                {t("intel.failed")}
+              </span>
+            )}
+          </div>
+          {check.s === "done" && <IntelligencePanel a={check.a} basics />}
           <div className="space-y-1.5" data-testid="add-folder">
             <span className="label">{t("addd.saveIn")}</span>
             <div className="flex items-center gap-2">

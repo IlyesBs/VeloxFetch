@@ -91,6 +91,16 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
     - what the computer cannot tell never holds a download back.
   - **No change without rules:** the main queue has no rule until the user gives it one, so nothing changes for
     someone who never sets one.
+- **Download Intelligence** (details in `docs/download-intelligence.md`): before a download starts, the browser
+  confirmation dialog and the Add dialog's **Check link** show:
+  - file, type, size, and resume (supported / likely / not supported / unknown);
+  - how it will start (parallel with N connections, one connection, careful, or the video dialog);
+  - whether it fits on the drive (including the 4 GB limit of FAT32 drives);
+  - HTTPS or HTTP, and whether the app already has it (same link, same final address, or same file under another link);
+  - warnings: sign-in needed, temporary or expired link, a web page instead of the file, server errors.
+
+  "Why?" lists what was observed. Everything comes from one quick look at the server: nothing is downloaded or
+  written, it can be cancelled, and it never blocks the download.
 - **Schedule:** e.g. "start at 22:00, stop at 07:00, on weekdays".
 - **Power action:**
   - shut down, sleep or hibernate once *everything* has finished;
@@ -338,6 +348,20 @@ More: `docs/architecture.md`.
   slot first.
 - **Database:** v6 adds the download's queue, place and start time to the `queue` table.
 
+### 4.7 Download Intelligence
+- **Gathering** (`manager/intelligence.rs`), read-only:
+  - the download's own first request (`probe_quick`: `HEAD` + `Range: bytes=0-0`, no retry, 20 s cap);
+  - the destination drive's free space (and, for files ≥ 4 GiB, its file system);
+  - the downloads and history already known.
+- **Rules** (`intelligence.rs`, pure): kind, resume (4 levels, a validator required for "supported"), strategy
+  (`Downloader::connection_plan`, the engine's own rule), sign-in, temporary links, storage, duplicates (never by
+  name alone), findings and a health label.
+- **Where it shows:** `PendingDto.analysis` (confirmation dialog), and the `analyze_link` command (Add dialog, main
+  window only).
+- **Cancelling:** answering the dialog, a new check, or `url: null` cancels the check.
+- **Secrets:** the shown link hides signatures and tokens; the result carries the final host only, error codes
+  only, and is never logged.
+
 ---
 
 ## 5. Security model (always true)
@@ -449,7 +473,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline) |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
@@ -512,6 +536,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | **Tick** | The batched progress update sent to the UI ~5 times a second |
 | **Gate / slot** | The queue's open / closed switch, and the number of downloads allowed at once |
 | **Smart Download Queue** | Several queues with rules (time, idle, connection, busy line, big files) over the one slot scheduler |
+| **Download Intelligence** | The read-only check before a download: what the link is and what to expect, each point from an observation |
 | **Express lane** | One extra slot for a High / Highest download that would only wait behind less urgent ones |
 | **Held** | Paused by a queue rule (or the global schedule): resumed on its own when it opens again |
 | **Token bucket** | A speed limiter |

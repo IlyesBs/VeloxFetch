@@ -261,3 +261,18 @@ Described in `docs/smart-download-queue.md` (section 7 lists every suite):
 
 `desktop-ui.mjs` now picks *High* in a queue row (the queue page offers High / Normal / Low).
 
+## Download Intelligence
+
+Described in `docs/download-intelligence.md` (section 7):
+
+| Where | What |
+|---|---|
+| `crates/download-manager/src/intelligence.rs` | 17 unit tests of the rules (no network) |
+| `tests/integration/tests/intelligence.rs` | 10 tests against the local test server (`/norange`, `/redir`, `/auth`, `/html`, `/e500`, `/huge`, `head_delay` for cancellation) |
+| `apps/desktop/src/intelligence.test.ts` | 5 UI line tests, including every key in en / fr / ar |
+| `tests/security/policy.test.mjs` | 1 ("Download Intelligence"), 41 in total |
+| `tests/e2e/desktop-intelligence.mjs` | 25 checks in the real app; screenshots `docs/screenshots/intelligence-{light,dark}.png` (and `add-advanced-dark.png` now shows the Check link button) |
+
+Building on this Linux machine: `. ~/.local/sysroot/env.sh` first (the dbus / WebKit development files are unpacked
+there). `desktop-ipc.mjs` also needs the command-line binary (`cargo build --bin velox`).
+

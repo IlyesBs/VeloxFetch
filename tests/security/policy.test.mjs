@@ -601,6 +601,35 @@ test("Smart Download Queue: main window only, ids and plain rules only, nothing 
   assert.ok(!/reqwest|TcpStream|UdpSocket|http_client|\.send\(/.test(net), "no socket and no request to find out the connection");
 });
 
+test("Download Intelligence: main window only, a link only, read-only, one quick check, no secret in the result", () => {
+  const rules = withoutTestModules(read("crates", "download-manager", "src", "intelligence.rs"));
+  const glue = withoutTestModules(read("crates", "download-manager", "src", "manager", "intelligence.rs"));
+  const pending = read("crates", "download-manager", "src", "manager", "pending.rs");
+  // The Add dialog's check is the main window's only.
+  assert.match(read("apps", "desktop", "src-tauri", "build.rs"), /"analyze_link"/);
+  assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), /"allow-analyze-link"/);
+  for (const other of ["download-window.json", "settings-window.json"]) {
+    assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes("allow-analyze-link"), `analyze_link not in ${other}`);
+  }
+  assert.match(read("apps", "desktop", "src-tauri", "src", "authz.rs"), /Command::AnalyzeLink,/);
+  // The request is a link, read strictly.
+  assert.match(rules, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct AnalyzeLink \{\s*pub url: Option<String>,\s*\}/);
+  // The rules do no I/O at all; the glue only reads: no file is created, written, moved or deleted.
+  assert.ok(!/std::fs|tokio::fs|reqwest|\.send\(|\.await|async fn/.test(rules), "the rules are pure");
+  assert.ok(!/OpenOptions|File::create|fs::write|remove_file|remove_dir|rename\(|create_dir|create_preallocated|set_setting|\.save\(/.test(glue), "the analysis changes nothing");
+  // One bounded quick check (HEAD + one byte), never the file itself.
+  assert.match(glue, /tokio::time::timeout\(ANALYSIS_TIMEOUT, self\.inner\.downloader\.probe_quick\(/);
+  assert.ok(!/get_with|get_patient|get_range|\.download\(/.test(glue), "nothing is downloaded to analyse it");
+  // No secret reaches the result or a log: failures become a status or a code, the shown link hides signatures.
+  assert.match(glue, /ProbeFailure::Other\(crate::explain::error_code\(&e\.to_string\(\)\)\)/);
+  assert.ok(!/tracing::/.test(glue) && !/tracing::/.test(rules), "the analysis logs nothing");
+  assert.match(rules, /pub final_host: Option<String>/, "only the host the link led to, not the address");
+  assert.ok(!/final_url: /.test(rules.slice(rules.indexOf("pub struct AnalysisDto"), rules.indexOf("pub enum ProbeFailure"))), "no full final address in the result");
+  assert.match(pending, /url: crate::intelligence::display_url\(&url\)/);
+  // Answering stops the analysis.
+  assert.match(pending, /task\.abort\(\); \/\/ answered/);
+});
+
 test("video tools are fetched only from fixed https sources, checked against the published checksum before use, one fixed entry out of an archive", () => {
   const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
   // The only sources are the official ones, compiled in (the UI can never name one).

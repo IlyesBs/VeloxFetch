@@ -10,6 +10,7 @@
 pub mod api;
 pub mod batch;
 pub mod explain;
+pub mod intelligence;
 pub mod links;
 mod manager;
 pub mod validate;
