@@ -173,9 +173,18 @@ async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<b
         }
         WindowAction::Close => window.close().map_err(failed)?,
         WindowAction::IsMaximized => {}
-        WindowAction::ThemeLight => window.set_theme(Some(tauri::Theme::Light)).map_err(failed)?,
-        WindowAction::ThemeDark => window.set_theme(Some(tauri::Theme::Dark)).map_err(failed)?,
-        WindowAction::ThemeSystem => window.set_theme(None).map_err(failed)?,
+        WindowAction::ThemeLight => {
+            paint_behind(&window, Some(tauri::Theme::Light));
+            window.set_theme(Some(tauri::Theme::Light)).map_err(failed)?
+        }
+        WindowAction::ThemeDark => {
+            paint_behind(&window, Some(tauri::Theme::Dark));
+            window.set_theme(Some(tauri::Theme::Dark)).map_err(failed)?
+        }
+        WindowAction::ThemeSystem => {
+            window.set_theme(None).map_err(failed)?;
+            paint_behind(&window, None);
+        }
     }
     Ok(window.is_maximized().unwrap_or(false))
 }
@@ -491,9 +500,28 @@ fn window_chrome<'a>(
     let (builder, platform, surface) = (builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true), "macos", "glass");
     #[cfg(not(any(windows, target_os = "macos")))]
     let (builder, platform, surface) = (builder.decorations(false), "linux", "solid");
+    let _ = SURFACE.set(surface);
     builder.initialization_script(format!(
         "Object.defineProperty(window,'__VELOX_CHROME__',{{value:Object.freeze({{platform:'{platform}',surface:'{surface}'}})}});"
     ))
+}
+
+/// The window surface chosen by [`window_chrome`] (`mica`, `glass` or `solid`).
+static SURFACE: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// The page's canvas colour in each theme (`--canvas` in styles.css, opaque surface).
+const CANVAS_DARK: tauri::webview::Color = tauri::webview::Color(7, 13, 29, 255);
+const CANVAS_LIGHT: tauri::webview::Color = tauri::webview::Color(244, 246, 249, 255);
+
+/// The colour behind the page, seen for a moment when the window appears before the web view's first frame: the
+/// app's canvas in the theme the UI uses, so there is no dark flash before a light interface (or the reverse).
+/// Mica stays see-through.
+fn paint_behind(window: &WebviewWindow, theme: Option<tauri::Theme>) {
+    if SURFACE.get() == Some(&"mica") {
+        return;
+    }
+    let dark = theme.or_else(|| window.theme().ok()).is_none_or(|t| t == tauri::Theme::Dark);
+    let _ = window.set_background_color(Some(if dark { CANVAS_DARK } else { CANVAS_LIGHT }));
 }
 
 /// Mica needs Windows 11 (build 22000 or later).

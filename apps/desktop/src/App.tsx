@@ -1,5 +1,5 @@
 import { getLang, subscribe as onLangChange, t } from "./i18n";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api, normalizeError } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
@@ -69,9 +69,11 @@ export default function App() {
     return onLangChange(sync);
   }, []);
 
+  // The first render is on the page: show the (hidden) window now, at commit, before the data arrives (a
+  // passive effect runs later, held back while the window is hidden; see showWindowWhenReady).
+  useLayoutEffect(() => showWindowWhenReady(), []);
+
   useEffect(() => {
-    // The first render is on the page: show the (hidden) window now, before the data arrives.
-    showWindowWhenReady();
     let cleanup: (() => void) | undefined;
     let cancelled = false;
     bootstrap()
