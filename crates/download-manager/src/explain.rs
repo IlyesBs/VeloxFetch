@@ -35,7 +35,7 @@ fn size(n: u64) -> String {
 }
 
 /// The two numbers of "not enough free disk space: N bytes needed, M available".
-fn space_numbers(raw: &str) -> Option<(u64, u64)> {
+pub(crate) fn space_numbers(raw: &str) -> Option<(u64, u64)> {
     let rest = raw.split("not enough free disk space: ").nth(1)?;
     let mut nums = rest.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).map(|s| s.parse::<u64>().ok());
     Some((nums.next()??, nums.next()??))
@@ -130,6 +130,29 @@ fn classify(raw: &str) -> (String, Option<Needs>, String) {
     if lower.contains("redirect") && lower.contains("refused") {
         return say("The link redirected to an address on this computer or network, which is not allowed.", None, "redirect_refused");
     }
+    if lower.contains("redirect") && (lower.contains("too many") || lower.contains("loop") || lower.contains("error following")) {
+        return say("The link keeps redirecting (too many redirects or a loop), so the file could not be reached.", None, "redirect_loop");
+    }
+    if lower.contains("did not honor range") {
+        return say(
+            "The server stopped sending parts of the file, so the saved part cannot be continued as it is. Retry checks the server again and starts over safely if needed.",
+            None,
+            "range_not_honored",
+        );
+    }
+    if lower.contains("state store error") {
+        return say(
+            "VeloxFetch could not save the download's progress on this computer. Retry; if it happens again, restart VeloxFetch.",
+            None,
+            "persistence",
+        );
+    }
+    if lower.contains("unsupported url scheme") || lower.contains("invalid url") {
+        return say("This link cannot be downloaded as it is (it is not a valid web address for a file).", None, "invalid_request");
+    }
+    if lower.contains("download cancelled") {
+        return say("The download was cancelled.", None, "cancelled");
+    }
     if lower.contains("dns") || lower.contains("resolve") || lower.contains("no such host") {
         return say("The server's address could not be found. Check the link and your internet connection.", None, "dns");
     }
@@ -141,9 +164,6 @@ fn classify(raw: &str) -> (String, Option<Needs>, String) {
     }
     if lower.contains("invalid proxy") {
         return say("The proxy address is not valid. Check Settings > Network.", Some(Needs::ProxySignIn), "proxy_invalid");
-    }
-    if lower.contains("did not honor range") {
-        return (raw.to_string(), None, "range_not_honored".into());
     }
     (raw.to_string(), None, "other".into())
 }
@@ -180,6 +200,12 @@ mod tests {
         assert_eq!(error_code("checksum mismatch: expected a, got b"), "checksum_mismatch");
         assert_eq!(error_code("the server sent a web page instead of the file `a.zip`"), "web_page");
         assert_eq!(error_code("something odd"), "other");
+        assert_eq!(error_code("request failed: error following redirect for url (https://x.test/): too many redirects"), "redirect_loop");
+        assert_eq!(error_code("server did not honor range request: expected 206, got 200 for bytes=5-9"), "range_not_honored");
+        assert_eq!(error_code("state store error: database is locked"), "persistence");
+        assert_eq!(error_code("unsupported URL scheme `ftp` (only http/https allowed)"), "invalid_request");
+        assert_eq!(error_code("download cancelled (partial data discarded)"), "cancelled");
+        assert!(explain("server did not honor range request: x").0.contains("starts over safely"));
         // Codes are safe to put anywhere: lowercase letters, digits and underscores only.
         for raw in ["HTTP status 404", "x", "", "HTTP status 99999999999"] {
             assert!(error_code(raw).bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'), "{raw}");

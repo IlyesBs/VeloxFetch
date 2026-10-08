@@ -4,15 +4,21 @@ import { useEffect, useState, type ReactNode } from "react";
 import { actions } from "../actions";
 import { PrimaryAction } from "../components/DownloadCard";
 import { DiagnosticsCard } from "../components/DiagnosticsCard";
+import { DoctorPanel } from "../components/DoctorPanel";
+import { buttons as doctorButtons, headline, retryLine, sourceLine } from "../doctor";
+import { api } from "../api";
 import { PreviewCard } from "../components/PreviewCard";
 import { FileIcon, kindLabel } from "../components/FileIcon";
 import { SignInDialog } from "../components/SignInDialog";
 import { SegmentMap, SegmentRows } from "../components/SegmentMonitor";
 import { formatBytes, formatEta, formatSpeed, fraction, parseRate, percent } from "../format";
 import { useDetail, useDownload } from "../hooks";
-import { PRIORITIES, type Priority } from "../types";
+import { PRIORITIES, type Diagnosis, type Priority } from "../types";
 import { Icon } from "../ui/icons";
 import { ProgressBar, Sparkline, StatusChip } from "../ui/primitives";
+
+/** No diagnosis (a download that failed before Download Doctor): the Retry button keeps its usual label. */
+const NO_DOCTOR: Diagnosis = { category: "unknown", code: "other", source: "unknown", httpStatus: null, retry: "unknown", retryAfterSecs: null, retryAtMs: null, severity: "recoverable", factors: [], actions: [], neededBytes: null, freeBytes: null };
 
 function Stat({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
   return (
@@ -116,6 +122,16 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
         )}
       </div>
 
+      {d.doctor && d.status === "downloading" && (
+        <section className="card flex items-start gap-3 border-warn/40 p-3 text-xs" role="status" data-testid="doctor-live">
+          <Icon name="retry" size={15} className="mt-0.5 shrink-0 text-warn" />
+          <p>
+            <span className="font-semibold">{t(headline(d.doctor).key, headline(d.doctor).vars)}</span> · {t(sourceLine(d.doctor).key)} ·{" "}
+            {t(retryLine(d.doctor, Date.now()).key, retryLine(d.doctor, Date.now()).vars)}
+          </p>
+        </section>
+      )}
+
       {d.error && (
         <section className="card flex items-start gap-3 border-bad/40 p-4" role="alert" data-testid="detail-error">
           <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-bad" />
@@ -128,6 +144,7 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
                 {d.errorCode && <p className="mt-1 font-mono" data-testid="detail-error-code">{t("det.errCode", { code: d.errorCode })}</p>}
               </details>
             )}
+            {d.doctor && d.status === "failed" && <DoctorPanel d={d.doctor} />}
           </div>
           {d.status === "failed" && (
             <div className="flex shrink-0 gap-2">
@@ -136,8 +153,13 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
                   <Icon name="lock" size={15} /> {t("det.signIn")}
                 </button>
               )}
+              {d.doctor && doctorButtons(d.doctor).some((b) => b.action === "openFolder") && (
+                <button className="btn" data-testid="doctor-open-folder" onClick={() => void api.openDownloadFolder().catch(() => {})}>
+                  <Icon name="folder" size={15} /> {t("doc.btn.openFolder")}
+                </button>
+              )}
               <button className="btn" onClick={() => void actions.retry(id)}>
-                <Icon name="retry" size={15} /> {t("mj.retry")}
+                <Icon name="retry" size={15} /> {t(doctorButtons(d.doctor ?? NO_DOCTOR).find((b) => b.action === "retry")?.label ?? "mj.retry")}
               </button>
             </div>
           )}

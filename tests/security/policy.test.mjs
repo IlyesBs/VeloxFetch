@@ -630,6 +630,23 @@ test("Download Intelligence: main window only, a link only, read-only, one quick
   assert.match(pending, /task\.abort\(\); \/\/ answered/);
 });
 
+test("Download Doctor: diagnoses only, never retries or writes by itself, no error text or secret kept", () => {
+  const rules = withoutTestModules(read("crates", "download-manager", "src", "doctor.rs"));
+  const glue = withoutTestModules(read("crates", "download-manager", "src", "manager", "doctor.rs"));
+  // The rules are pure.
+  assert.ok(!/std::fs|tokio::|reqwest|\.send\(|\.await|async fn/.test(rules), "the rules do no I/O");
+  // The glue only reads: no retry, start, write or request of its own (the engine's retry loop stays the only one).
+  assert.ok(!/retry_download|start_download|with_retry|probe|get_with|\.save\(|patch_saved|set_setting|remove_file|tokio::fs/.test(glue), "the Doctor changes nothing");
+  // Transport errors are read from their causes, never from the top message (it names the link); nothing is logged.
+  assert.match(glue, /let mut src = t\.source\(\);/);
+  assert.ok(!/tracing::/.test(glue), "the Doctor logs nothing");
+  // A diagnosis holds codes, classes, counts and byte numbers only: no free text that could carry a link or a token.
+  const dto = rules.slice(rules.indexOf("pub struct Diagnosis"), rules.indexOf("pub struct Evidence"));
+  assert.ok(!/: String,/.test(dto.replace("pub code: String,", "")), "no free text in a diagnosis");
+  // Certificate failures are not retried (they do not fix themselves).
+  assert.match(read("crates", "http-client", "src", "lib.rs"), /HttpError::Transport\(e\) => !\(e\.is_builder\(\) \|\| e\.is_redirect\(\) \|\| tls_will_fail_again\(e\)\)/);
+});
+
 test("video tools are fetched only from fixed https sources, checked against the published checksum before use, one fixed entry out of an archive", () => {
   const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
   // The only sources are the official ones, compiled in (the UI can never name one).

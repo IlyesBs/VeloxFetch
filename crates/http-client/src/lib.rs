@@ -6,6 +6,8 @@
 //! as hostile: schemes are restricted, headers are parsed defensively and range
 //! responses are validated against what was requested.
 
+/// The transport error inside [`HttpError::Transport`] (its source chain tells DNS, TLS and resets apart).
+pub use reqwest::Error as ReqwestError;
 /// A server's answer (see [`HttpClient::get_patient`]).
 pub use reqwest::Response;
 use std::collections::HashMap;
@@ -55,10 +57,15 @@ impl HttpError {
             HttpError::Status { status, .. } => matches!(status, 408 | 425 | 429 | 500 | 502 | 503 | 504),
             // Anything that went wrong on the wire is transient (timeouts, resets, truncated bodies —
             // the latter surfaces as a `Decode`-kind error). Local/config failures are not.
-            HttpError::Transport(e) => !(e.is_builder() || e.is_redirect()),
+            HttpError::Transport(e) => !(e.is_builder() || e.is_redirect() || tls_will_fail_again(e)),
             HttpError::Stalled => true,
             _ => false,
         }
+    }
+
+    /// The secure connection failed in a way that does not fix itself (see [`tls_will_fail_again`]).
+    pub fn is_tls_permanent(&self) -> bool {
+        matches!(self, HttpError::Transport(e) if tls_will_fail_again(e))
     }
 
     /// No answer within the time allowed.
@@ -68,6 +75,21 @@ impl HttpError {
 }
 
 pub type Result<T> = std::result::Result<T, HttpError>;
+
+/// A certificate the client refuses (unknown issuer, expired, wrong name...) or a server that does not speak TLS at
+/// all: asking again gives the same answer, so it is not retried. Read from the error's causes only (the top message
+/// names the link). Other handshake failures (an alert, a reset during the handshake) stay retryable.
+fn tls_will_fail_again(e: &reqwest::Error) -> bool {
+    let mut src = std::error::Error::source(e);
+    while let Some(s) = src {
+        let t = s.to_string().to_ascii_lowercase();
+        if t.contains("invalid peer certificate") || t.contains("certificate verify failed") || t.contains("invalidcontenttype") {
+            return true;
+        }
+        src = s.source();
+    }
+    false
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasicAuth {

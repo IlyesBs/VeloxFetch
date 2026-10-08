@@ -39,6 +39,7 @@ async function get(url, extra = {}) {
   await sleep(200); // the run's diagnostics are saved just after the final status
   return (await invoke("get_download", { id: d.id })).ok;
 }
+const attr = async (sel, a) => (await page(`document.querySelector(${JSON.stringify(sel)})?.getAttribute(${JSON.stringify(a)}) ?? null`)).ok;
 const openDetail = async (id) => {
   await click("[data-testid=nav-downloads]");
   await click(`[data-testid=download-${id}]`);
@@ -69,6 +70,12 @@ try {
   const timeline = await text("[data-testid=diag-events]");
   check("the timeline tells the start and the failure", /Started \(attempt 1\)/.test(timeline) && /Failed \(http_404\): HTTP status 404/.test(timeline), timeline);
   check("the error card keeps the error code with the technical details", await has("[data-testid=detail-error] [data-testid=detail-error-code]"));
+  // Download Doctor: what happened, where, whether retrying helps, what to do (all from the evidence).
+  check("Download Doctor diagnoses a missing file", (await attr("[data-testid=doctor]", "data-category")) === "notFound" && (await attr("[data-testid=doctor]", "data-retry")) === "notRetryable", `${await attr("[data-testid=doctor]", "data-category")} ${await attr("[data-testid=doctor]", "data-retry")}`);
+  check("it says the link is the problem and retrying will not help", (await text("[data-testid=doctor-source]"))?.includes("the link itself") && (await text("[data-testid=doctor-retry]"))?.includes("will not help"), await text("[data-testid=doctor]"));
+  check("it advises a fresh link", (await text("[data-testid=doctor-advice]"))?.includes("fresh link"));
+  check("the timeline names the diagnosis before the failure", /Doctor: http_404 - problem with: Link - retry: NotRetryable[\s\S]*Failed \(http_404\)/.test(timeline), timeline);
+  await h.screenshot(path.join(SHOTS, "doctor.png"), { width: 1100, height: 760 });
   await page(`(() => { document.querySelector('[data-testid=diagnostics-card]').scrollIntoView(); return true; })()`);
   await h.screenshot(path.join(SHOTS, "detail-diagnostics-failed.png"), { width: 1100, height: 760 });
 

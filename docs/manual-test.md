@@ -245,3 +245,23 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 9. From the browser: the confirmation dialog shows the panel under the usual rows. Answer before the check ends: the
    dialog closes at once.
 10. Switch to French and Arabic: all texts are translated, and the panel is mirrored in Arabic.
+
+## R. Download Doctor (once per OS)
+1. A link that answers 404: the detail view shows "The file is not on the server (HTTP 404)", *Needs you*, "The
+   problem is the link itself", "Retrying will not help", and "Get a fresh link…". The timeline shows a `Doctor:`
+   line before the failure.
+2. A server answering 503 (or 429 with `Retry-After`): while the app retries, an amber notice counts down
+   ("Retrying on its own in …"). Once it gives up: "Server temporarily unavailable", "on the server's side, not your
+   connection", "Retry later…", and a *Retry now* button.
+3. Unplug the network, start a download: "This computer is offline", "Check the internet connection…". Plug it back
+   in and press Retry: it completes, and the panel goes away.
+4. A download larger than the free space: "The destination disk is full", the needed and free sizes, "free about X",
+   and an **Open download folder** button.
+5. A wrong expected checksum: "The downloaded file is not the one expected", *Critical*, **Restart safely**. Retry
+   once more: "Retrying will not help" and "The previous attempt failed the same way". The file never shows as
+   completed.
+6. A site with an invalid certificate (e.g. `https://expired.badssl.com/`): "The secure connection could not be set
+   up". The diagnostics show 0 retries.
+7. A browser download whose session expires mid-way (sign out on the site, then Retry): "Your sign-in or session
+   has likely expired" and "Start the download again from the page…".
+8. French and Arabic: every line is translated, and the panel is mirrored in Arabic.

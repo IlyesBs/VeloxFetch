@@ -27,6 +27,10 @@ pub(super) struct DiagRecord {
     bytes: u64,
     error_code: Option<String>,
     events: Vec<DiagEventDto>,
+    /// Code of the last failure (kept across starts, unlike `error_code`): tells a repeat of the same failure.
+    last_failure: Option<String>,
+    /// Download Doctor's diagnosis of the last failure.
+    doctor: Option<crate::doctor::Diagnosis>,
 }
 
 impl DiagRecord {
@@ -152,6 +156,7 @@ impl DownloadManager {
 
     /// A run of `id` starts (first start, resume, retry, the queue starting it again).
     pub(super) async fn note_start(&self, id: i64, previous: DownloadStatus) {
+        self.remember_diagnosis(id, None);
         let d = self
             .update_diag(id, |d| {
                 d.attempts = d.attempts.saturating_add(1);
@@ -172,6 +177,12 @@ impl DownloadManager {
     /// (id, status, error code, retries, HTTP status, connections, average speed).
     pub(super) async fn note_end(&self, id: i64, progress: Option<&ProgressHandle>, tracker_peak: usize, res: &Result<(), DownloadError>) {
         let redactor = self.redactor();
+        // Download Doctor: the evidence of a failure is gathered first (it reads the record and the network).
+        let mut evidence = match res {
+            Err(e) if !matches!(e, DownloadError::Paused | DownloadError::Cancelled) => Some(self.failure_evidence(id, e, progress).await),
+            _ => None,
+        };
+        let mut diagnosis = None;
         let (mut run_bytes, mut run_ms) = (0u64, 0u64);
         let (status, d) = {
             let mut status = "completed";
@@ -183,9 +194,12 @@ impl DownloadManager {
                         d.add_run(p, tracker_peak, &redactor);
                     }
                     let now = ::diagnostics::now_ms();
+                    let prior_bytes = d.bytes;
                     match res {
                         Ok(()) => {
                             d.error_code = None;
+                            d.last_failure = None;
+                            d.doctor = None;
                             let speed =
                                 run_bytes.saturating_mul(1000).checked_div(run_ms).map_or_else(|| "-".into(), |v| human_bytes(v) + "/s");
                             d.push("info", format!("Finished: {} received at {speed}", human_bytes(run_bytes)), now);
@@ -205,7 +219,24 @@ impl DownloadManager {
                             }
                             let raw = e.to_string();
                             let code = crate::explain::error_code(&raw);
+                            if let Some(ev) = evidence.as_mut() {
+                                ev.same_as_before = d.last_failure.as_deref() == Some(code.as_str());
+                                ev.worked_before |= prior_bytes > 0;
+                                let dx = crate::doctor::diagnose(ev);
+                                d.push(
+                                    "info",
+                                    format!(
+                                        "Doctor: {} - problem with: {:?} - retry: {:?} - {:?}",
+                                        dx.code, dx.source, dx.retry, dx.severity
+                                    ),
+                                    now,
+                                );
+                                d.doctor = Some(dx.clone());
+                                diagnosis = Some(dx);
+                            }
+                            // The failure stays the timeline's last line (the Doctor's line just before it).
                             d.push("error", format!("Failed ({code}): {}", redactor.redact(&raw)), now);
+                            d.last_failure = Some(code.clone());
                             d.error_code = Some(code);
                         }
                     }
@@ -213,6 +244,9 @@ impl DownloadManager {
                 .await;
             (status, d)
         };
+        if diagnosis.is_some() {
+            self.remember_diagnosis(id, diagnosis);
+        }
         let run_speed = run_bytes.saturating_mul(1000).checked_div(run_ms).unwrap_or(0);
         let http = d.http_status.map_or_else(|| "-".to_string(), |s| s.to_string());
         let code = d.error_code.clone().unwrap_or_else(|| "-".into());
@@ -273,6 +307,7 @@ impl DownloadManager {
             avg_speed_bps: d.avg_speed(),
             active_secs: d.active_ms / 1000,
             transferred: d.bytes,
+            doctor: if rec.status == DownloadStatus::Failed { d.doctor.clone() } else { None },
             events: d.events,
             report: String::new(),
         };

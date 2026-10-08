@@ -16,6 +16,7 @@ use crate::validate;
 
 mod desktop;
 mod diag;
+mod doctor;
 mod files;
 mod intelligence;
 mod media;
@@ -107,6 +108,8 @@ struct Inner {
     pending: Mutex<PendingList>,
     /// The Add dialog's link check that is running (`intelligence.rs`).
     link_check: Mutex<intelligence::LinkCheck>,
+    /// Download Doctor: the newest diagnosis of each failed download (`doctor.rs`), in memory only.
+    doctor: Mutex<HashMap<i64, crate::doctor::Diagnosis>>,
     media: Mutex<media::MediaState>,
     /// Smart throttle (`smart_throttle.rs`) and live preview (`preview.rs`): isolated features.
     smart: Mutex<smart_throttle::SmartState>,
@@ -259,6 +262,7 @@ impl DownloadManager {
             queues: Mutex::new(queues),
             pending: Mutex::new(PendingList::default()),
             link_check: Mutex::new(Default::default()),
+            doctor: Mutex::new(HashMap::new()),
             media: Mutex::new(Default::default()),
             smart: Mutex::new(smart),
             preview: Mutex::new(Default::default()),
@@ -576,6 +580,7 @@ impl DownloadManager {
         let store = self.inner.store.clone();
         blocking(move || store.delete(id)).await?;
         self.inner.trackers.lock().unwrap().remove(&id);
+        self.remember_diagnosis(id, None);
         self.forget_placement(id);
         self.emit(ManagerEvent::Removed { id });
         Ok(())
@@ -831,11 +836,12 @@ impl DownloadManager {
     fn to_dto(&self, rec: &DownloadRecord) -> DownloadDto {
         let id = rec.id.unwrap_or_default();
         let explained = rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::explain);
-        let (live, running, retrying) = {
+        let (live, running, retrying, progress) = {
             let active = self.inner.active.lock().unwrap();
             let a = active.get(&id);
-            (a.map(|a| a.progress.snapshot()), a.is_some(), a.is_some_and(|a| is_retrying(&a.progress)))
+            (a.map(|a| a.progress.snapshot()), a.is_some(), a.is_some_and(|a| is_retrying(&a.progress)), a.map(|a| a.progress.clone()))
         };
+        let retrying = retrying && rec.status == DownloadStatus::Downloading;
         let place = self.placement_of(id);
         let speed = self.inner.trackers.lock().unwrap().get(&id).map_or(0.0, |t| t.speed);
         let (downloaded, total, connections) = match &live {
@@ -873,8 +879,9 @@ impl DownloadManager {
             queue_id: place.queue_id,
             position: place.position,
             start_at: place.start_at,
-            retrying: retrying && rec.status == DownloadStatus::Downloading,
+            retrying,
             held: rec.status == DownloadStatus::Paused && self.held_by_queue(id),
+            doctor: self.doctor_for(rec, progress.as_ref(), retrying),
         }
     }
 

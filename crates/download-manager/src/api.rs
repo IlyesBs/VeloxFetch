@@ -160,6 +160,9 @@ pub struct DownloadDto {
     pub retrying: bool,
     /// Paused by its queue's rules (a time window ended, the computer is in use...): resumes on its own.
     pub held: bool,
+    /// Download Doctor: why it failed (or what the engine is retrying), where the problem is, whether retrying
+    /// helps, and what the user can do. `None` when nothing is wrong.
+    pub doctor: Option<crate::doctor::Diagnosis>,
 }
 
 /// One chunk of a download, for the segment monitor.
@@ -346,6 +349,8 @@ pub struct DiagnosticsDto {
     /// Bytes received from the network over every attempt (a restart counts again).
     pub transferred: u64,
     pub events: Vec<DiagEventDto>,
+    /// Download Doctor's diagnosis of the last failure (with every piece of evidence the failure left), while it is failed.
+    pub doctor: Option<crate::doctor::Diagnosis>,
     /// Plain-text summary for a bug report.
     pub report: String,
 }

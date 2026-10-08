@@ -9,6 +9,7 @@
 
 pub mod api;
 pub mod batch;
+pub mod doctor;
 pub mod explain;
 pub mod intelligence;
 pub mod links;
