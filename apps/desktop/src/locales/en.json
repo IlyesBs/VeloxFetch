@@ -271,7 +271,7 @@
   "smart.on": "Smart throttle is on",
   "smart.off": "Smart throttle is off",
   "smart.enable": "Turn Smart throttle on",
-  "smart.apps": "Programs (one per line, as in the Task Manager, without .exe)",
+  "smart.apps": "Programs (one per line: the name as in the Task Manager, without .exe, or the program's full path)",
   "smart.saved": "Program list saved",
   "smart.save": "Save list",
   "smart.discord": "Discord and similar apps that stay open all day are not in the list on purpose: add them if you want.",

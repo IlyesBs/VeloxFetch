@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 /// A falling speed alone (no errors, no throttling answer) steps down only while more connections than this run.
 pub const COLLAPSE_FLOOR: usize = 4;
@@ -291,6 +291,9 @@ pub struct AdaptiveGate {
     pending_forget: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
+    /// The next first-connection turn allowed to queue (see [`AdaptiveGate::acquire_in_turn`]).
+    next_turn: AtomicUsize,
+    turn_taken: Notify,
 }
 
 pub struct GatePermit {
@@ -307,6 +310,8 @@ impl AdaptiveGate {
             pending_forget: AtomicUsize::new(0),
             active: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
+            next_turn: AtomicUsize::new(0),
+            turn_taken: Notify::new(),
         })
     }
 
@@ -321,6 +326,34 @@ impl AdaptiveGate {
 
     pub async fn acquire(self: &Arc<Self>) -> GatePermit {
         let permit = self.sem.clone().acquire_owned().await.expect("gate semaphore is never closed");
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        GatePermit { permit: Some(permit), gate: self.clone() }
+    }
+
+    /// A segment's first connection: queue for a slot in plan order (`turn` 0, 1, 2, ...), whatever order the tasks
+    /// happen to run in on the thread pool. The slots are first come, first served, so without this a loaded machine
+    /// could let a later segment take the place of an earlier one (in preview order: the end of a video, which a
+    /// player needs first, waiting behind the middle). Every turn from 0 must be taken once.
+    pub async fn acquire_in_turn(self: &Arc<Self>, turn: usize) -> GatePermit {
+        loop {
+            // Created before the check: a turn taken in between still wakes it.
+            let taken = self.turn_taken.notified();
+            if self.next_turn.load(Ordering::SeqCst) >= turn {
+                break;
+            }
+            taken.await;
+        }
+        let mut wait = std::pin::pin!(self.sem.clone().acquire_owned());
+        // The first poll takes the place in the semaphore's queue (or the permit); only then the next turn may queue.
+        let first = futures_util::poll!(wait.as_mut());
+        self.next_turn.fetch_max(turn + 1, Ordering::SeqCst);
+        self.turn_taken.notify_waiters();
+        let permit = match first {
+            std::task::Poll::Ready(p) => p,
+            std::task::Poll::Pending => wait.await,
+        }
+        .expect("gate semaphore is never closed");
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
         GatePermit { permit: Some(permit), gate: self.clone() }
@@ -365,6 +398,27 @@ impl Drop for GatePermit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn first_connections_get_their_slot_in_plan_order_whatever_order_the_tasks_run() {
+        for round in 0..20 {
+            let gate = AdaptiveGate::new(1);
+            let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let mut set = tokio::task::JoinSet::new();
+            // Spawned in reverse with staggered starts: the last turn's task runs first.
+            for turn in (0..6usize).rev() {
+                let (gate, order) = (gate.clone(), order.clone());
+                set.spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(((6 - turn) * 2) as u64)).await;
+                    let _p = gate.acquire_in_turn(turn).await;
+                    order.lock().unwrap().push(turn);
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                });
+            }
+            while set.join_next().await.is_some() {}
+            assert_eq!(*order.lock().unwrap(), (0..6).collect::<Vec<_>>(), "round {round}");
+        }
+    }
 
     fn cfg() -> AdaptiveConfig {
         AdaptiveConfig { cooldown_intervals: 3, settle_intervals: 0, degrade_intervals: 2, growth: 2, ..Default::default() }

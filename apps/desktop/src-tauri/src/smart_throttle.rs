@@ -7,7 +7,9 @@
 //! * Looking costs almost nothing: process *names* and executable file names only (no CPU, memory or command
 //!   lines; the executable is read once per process), once every 3 seconds, on a blocking thread, and not at all
 //!   while the feature is off. The executable's name counts too because a program may rename itself (its main
-//!   thread: Linux then shows "MainThread" or similar) and Linux cuts names to 15 characters.
+//!   thread: Linux then shows "MainThread" or similar) and Linux cuts names to 15 characters. Full executable paths
+//!   are passed on only when the user listed a path (to tell two programs with the same file name apart); like the
+//!   names, they are compared and dropped.
 //! * Never in the way: if listing fails, hangs (2 s limit) or panics, the manager is told "unknown": a gaming
 //!   policy in force stays a few seconds more (no burst of traffic over a game), then downloads run at full speed.
 //! * Nothing leaves the computer and nothing is stored: the names are compared and dropped; of the keyboard and
@@ -38,12 +40,14 @@ pub fn spawn(manager: DownloadManager) {
                 continue;
             }
             let sys = system.clone();
-            let auto = manager.smart_throttle().auto;
+            let st = manager.smart_throttle();
+            let auto = st.auto;
+            let paths = st.apps.iter().any(|a| download_manager::smart_throttle_is_app_path(a));
             let os = manager.system();
             let m = manager.clone();
             // The manager reads the network counters too: all of it on the blocking thread.
             let scan = tokio::task::spawn_blocking(move || {
-                let names = running_programs(&sys);
+                let names = running_programs(&sys, paths);
                 let idle = if auto { os.0.user_idle() } else { None };
                 m.smart_throttle_observe_activity(names.as_deref(), idle);
             });
@@ -55,9 +59,10 @@ pub fn spawn(manager: DownloadManager) {
     });
 }
 
-/// The names of the running programs (as the system shows them, and their executables' file names), or `None` if
-/// they cannot be listed. An executable the system will not show (another user's, a protected one) is skipped.
-fn running_programs(system: &Mutex<Option<System>>) -> Option<Vec<String>> {
+/// The names of the running programs (as the system shows them, and their executables' file names; with `paths`, the
+/// executables' full paths too), or `None` if they cannot be listed. An executable the system will not show (another
+/// user's, a protected one) is skipped.
+fn running_programs(system: &Mutex<Option<System>>, paths: bool) -> Option<Vec<String>> {
     let mut guard = system.lock().ok()?;
     let sys = guard.get_or_insert_with(System::new);
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet));
@@ -66,7 +71,8 @@ fn running_programs(system: &Mutex<Option<System>>) -> Option<Vec<String>> {
         .values()
         .flat_map(|p| {
             let exe = p.exe().and_then(|e| e.file_name()).map(|n| n.to_string_lossy().into_owned());
-            std::iter::once(p.name().to_string_lossy().into_owned()).chain(exe)
+            let path = p.exe().filter(|_| paths).map(|e| e.to_string_lossy().into_owned());
+            std::iter::once(p.name().to_string_lossy().into_owned()).chain(exe).chain(path)
         })
         .collect();
     names.sort_unstable();
@@ -83,7 +89,7 @@ mod tests {
         let sys = Mutex::new(None);
         for i in 0..3 {
             let t = std::time::Instant::now();
-            running_programs(&sys).unwrap();
+            running_programs(&sys, false).unwrap();
             eprintln!("scan {i}: {:?}", t.elapsed());
         }
     }
@@ -108,7 +114,7 @@ mod tests {
         let apps = vec!["VeloxScanTestGame".to_string()];
         let mut found = false;
         for _ in 0..40 {
-            let names = running_programs(&sys).unwrap();
+            let names = running_programs(&sys, false).unwrap();
             if download_manager::smart_throttle_find_running(&apps, &names).is_some() {
                 found = true;
                 break;
@@ -119,6 +125,22 @@ mod tests {
         let _ = child.wait();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(found, "the renamed program was not found by its executable's name");
+    }
+
+    #[test]
+    fn a_listed_path_finds_that_executable_and_paths_are_read_only_when_listed() {
+        let me = std::env::current_exe().unwrap();
+        // macOS reports the real path (no symbolic links); Windows' canonical form would add `\\?\`.
+        #[cfg(target_os = "macos")]
+        let me = std::fs::canonicalize(&me).unwrap();
+        let sys = Mutex::new(None);
+        let with = running_programs(&sys, true).unwrap();
+        let listed = vec![me.to_string_lossy().into_owned()];
+        assert!(download_manager::smart_throttle_find_running(&listed, &with).is_some(), "this test, by its full path");
+        let elsewhere = vec![me.with_file_name("other-folder").join(me.file_name().unwrap()).to_string_lossy().into_owned()];
+        assert!(download_manager::smart_throttle_find_running(&elsewhere, &with).is_none(), "same file name, other folder");
+        let without = running_programs(&sys, false).unwrap();
+        assert!(!without.contains(&listed[0]), "no full path is passed on unless a path is listed");
     }
 
     /// Not a test: the stand-in program of the test above (waits with a renamed main thread).
@@ -135,7 +157,7 @@ mod tests {
 
     #[test]
     fn this_test_process_is_listed() {
-        let names = running_programs(&Mutex::new(None)).expect("the process list can be read");
+        let names = running_programs(&Mutex::new(None), false).expect("the process list can be read");
         let me = std::env::current_exe().unwrap().file_name().unwrap().to_string_lossy().into_owned();
         assert!(names.iter().any(|n| n.eq_ignore_ascii_case(&me) || me.starts_with(n.as_str())), "{me} not among {} names", names.len());
     }

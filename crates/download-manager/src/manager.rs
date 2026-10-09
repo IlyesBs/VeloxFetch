@@ -36,8 +36,8 @@ pub use preview::{media_type as preview_media_type, PreviewResponse};
 use queue::QueueState;
 pub use queues::MAIN_QUEUE;
 pub use smart_throttle::{
-    find_running as smart_throttle_find_running, Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS,
-    IDLE_AFTER as THROTTLE_IDLE_AFTER,
+    find_running as smart_throttle_find_running, is_app_path as smart_throttle_is_app_path, Signals as ThrottleSignals,
+    DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER,
 };
 use storage::{Sorter, Storage};
 
@@ -45,6 +45,15 @@ use storage::{Sorter, Storage};
 /// a connection (a new request) and bursts of buffered data do not make the number jump, short enough that a
 /// real change shows within a few seconds.
 const SPEED_SMOOTHING_SECS: f64 = 2.0;
+
+/// The speed shown for a download after a tick: smoothed (segments finishing and starting make the raw speed jumpy),
+/// but never above a limit it is held to, so a limit just set shows at once instead of the number coming down over
+/// several seconds.
+fn shown_speed(prev: f64, inst: f64, dt: f64, cap: Option<u64>) -> f64 {
+    let w = 1.0 - (-dt / SPEED_SMOOTHING_SECS).exp();
+    let s = if prev == 0.0 { inst } else { prev + w * (inst - prev) };
+    cap.map_or(s, |c| s.min(c as f64))
+}
 
 /// Name of the database sealing key inside the credential store.
 pub const SECRET_KEY_NAME: &str = "database-key-v1";
@@ -921,14 +930,17 @@ impl DownloadManager {
     }
 
     async fn tick(&self) {
-        let running: Vec<(i64, ProgressHandle)> = {
+        let running: Vec<(i64, ProgressHandle, Option<u64>)> = {
             let active = self.inner.active.lock().unwrap();
-            active.iter().map(|(id, a)| (*id, a.progress.clone())).collect()
+            active.iter().map(|(id, a)| (*id, a.progress.clone(), a.control.speed_limit())).collect()
         };
+        // The tightest limit every download passes through (its own one is added below; a per-kind one is not known
+        // here, so it shows through the smoothing as before).
+        let shared_cap = [self.inner.limits.global(), self.inner.limits.smart()].into_iter().flatten().min();
         let mut downloads = Vec::new();
         let (mut speed_total, mut in_flight) = (0u64, 0u64);
         let mut newly_running = Vec::new();
-        for (id, progress) in running {
+        for (id, progress, own_limit) in running {
             if progress.download_id().is_none() {
                 continue; // still waiting for a run slot / being planned
             }
@@ -954,9 +966,8 @@ impl DownloadManager {
                 self.inner.session_bytes.fetch_add(received.saturating_sub(t.last_received), Ordering::Relaxed);
                 t.last_received = received;
                 let inst = delta as f64 / dt;
-                // Smoothed over ~1 s whatever the tick rate: segments finishing and starting make the raw speed jumpy.
-                let w = 1.0 - (-dt / SPEED_SMOOTHING_SECS).exp();
-                t.speed = if t.speed == 0.0 { inst } else { t.speed + w * (inst - t.speed) };
+                let cap = [own_limit, shared_cap].into_iter().flatten().min();
+                t.speed = shown_speed(t.speed, inst, dt, cap);
                 (t.last_bytes, t.last_at) = (snap.downloaded, now);
                 let first = !t.announced_running;
                 t.announced_running = true;
@@ -981,8 +992,16 @@ impl DownloadManager {
             });
         }
         for id in newly_running {
-            if let Ok(dto) = self.dto_for(id).await {
-                self.emit(ManagerEvent::Updated { download: dto });
+            match self.dto_for(id).await {
+                // The engine writes "downloading" a moment after the first bytes: until it has, the window would be
+                // told "queued" once and never again (a running download shown as waiting). Announced at a later tick.
+                Ok(dto) if dto.status == DownloadStatus::Queued => {
+                    if let Some(t) = self.inner.trackers.lock().unwrap().get_mut(&id) {
+                        t.announced_running = false;
+                    }
+                }
+                Ok(dto) => self.emit(ManagerEvent::Updated { download: dto }),
+                Err(_) => {}
             }
         }
         // Go quiet once nothing is running (no download, no video job), after two settling ticks (so the UI
@@ -1164,4 +1183,23 @@ fn _assert_send_sync() {
     fn is<T: Send + Sync>() {}
     is::<DownloadManager>();
     let _ = Path::new("");
+}
+
+#[cfg(test)]
+mod speed_tests {
+    use super::shown_speed;
+
+    #[test]
+    fn a_limit_shows_at_once_and_the_rest_stays_smooth() {
+        let mb = 1024.0 * 1024.0;
+        // Running at 6 MB/s, then held to 512 KB/s: shown at the limit on the next tick, not seconds later.
+        assert_eq!(shown_speed(6.0 * mb, 512.0 * 1024.0, 0.25, Some(512 * 1024)), 512.0 * 1024.0);
+        // Without a limit a sudden drop still eases (a pause between two requests does not make it jump).
+        let eased = shown_speed(6.0 * mb, 0.0, 0.25, None);
+        assert!(eased > 5.0 * mb && eased < 6.0 * mb, "{eased}");
+        // A limit above the speed changes nothing.
+        assert_eq!(shown_speed(2.0 * mb, 2.0 * mb, 0.25, Some(100 * 1024 * 1024)), 2.0 * mb);
+        // The first reading is taken as it is.
+        assert_eq!(shown_speed(0.0, 3.0 * mb, 0.25, None), 3.0 * mb);
+    }
 }

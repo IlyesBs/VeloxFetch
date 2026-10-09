@@ -62,7 +62,10 @@ over 2 s or panicked) keeps a policy in force for `SCAN_FAIL_GRACE` = 15 s, then
 failed scan finds none. Matching is on whole names, without case or `.exe` (a 15-byte Linux name may match a longer
 listed name it starts); launchers, helpers and look-alikes (`steam`, `cs2-helper`, `GTA5Launcher`, `teamviewer` for
 `Teams`) never match. The executable's file name counts because a program may rename its main thread (Linux then
-shows e.g. `MainThread`) and is not cut at 15 bytes; its folder is never kept.
+shows e.g. `MainThread`) and is not cut at 15 bytes; its folder is never kept. A listed entry may also be a full
+path (`C:\Games\Riot\Game.exe`, `/opt/game/run`; absolute, no wildcards, up to 260 characters, `is_app_path`):
+it matches that executable only, so two programs with the same file name are told apart. Executable paths are read
+from the system only while such an entry is listed, compared and dropped (`/` and `\` and case do not matter).
 
 **Precedence** (highest first):
 
@@ -79,7 +82,9 @@ shows e.g. `MainThread`) and is not cut at 15 bytes; its folder is never kept.
 so a game that closes while its downloads are still pausing is let go right after; idempotent (a repeated scan
 changes nothing). Holding uses the queue's existing `hold_running` (pause, wait, remember in `held`, saved) also
 when the user had already closed the gate without pausing running downloads; letting go uses the existing
-`release_held` (only what is still paused, at the front of the queue). The hold itself is in memory only: after a
+`release_held` (only what is still paused, at the front of the queue). Video jobs (streams, video pages) are paused
+the same way (`hold_media_for_game`, remembered in memory) and resumed when the game closes
+(`release_media_for_game`, only those still paused; one the user resumed during the game is theirs). The hold itself is in memory only: after a
 restart nothing is held, the remembered downloads resume at launch, and a game still running is seen again within
 3 s. A download the user pauses during the game is taken off `held` (`forget_held`) and stays paused; one the user
 starts during the game waits for the gate; one added during the game starts after it.
@@ -88,9 +93,9 @@ starts during the game waits for the gate; one added during the game starts afte
 "{app} is running · downloads paused until it closes" (pause), only while a program is really detected; the Queue view
 says "Paused while a game or call runs · N will resume when it closes". No notification.
 
-**Limits**: names only, no full executable paths in the list; launchers whose game runs under another name need
-that name in the list; in pause, video jobs are not paused but held to the reserved minimum; another user's or a
-protected process shows its name only (its executable is not readable), which is enough for matching.
+**Limits**: launchers whose game runs under another name need that name in the list; a video job the user starts
+during the game (pause policy) runs at the reserved minimum; another user's or a protected process shows its name
+only (its executable is not readable), which is enough for name matching, not for path matching.
 
 ### What was wrong, and the fixes (October 2026)
 
@@ -153,7 +158,8 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 ## Live preview
 
 ```text
-<video src="http://velox-preview.localhost/12">            (velox-preview://localhost/12 on macOS / Linux)
+<video src="http://velox-preview.localhost/12">            (velox-preview://localhost/12 on macOS;
+                                                            http://127.0.0.1:<port>/<secret>/12 on Linux, below)
   -> src-tauri/src/preview_server.rs   main window only, GET / HEAD only, path = a download id only
   -> manager.read_preview(12, Range)   audio / video only; .part while downloading, the saved file once done;
                                        inside a download folder (AllowedRoots); only written bytes
@@ -174,6 +180,27 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 * What a player can show depends on the file: MP4 with its index at the start, WebM, MP3 and WAV play from the first
   megabytes; an MP4 with its index at the end plays as soon as the end arrived (fetched second in preview mode);
   codecs the web view cannot decode (e.g. some MKV / AVI) do not play, though the download is unaffected.
+
+### Linux: the private preview address (October 2026)
+
+WebKitGTK's media player refuses every custom scheme (`GStreamerCommon.cpp isProtocolAllowed`: only http(s), file,
+blob, data; the page got `FormatError` and nothing played). On Linux the same answers come from
+`preview_server::loopback`:
+
+* `reserve()` before the app is built: a free port on 127.0.0.1 and a 64-hex secret from `/dev/urandom`; that exact
+  origin (`http://127.0.0.1:<port>`) is added to the CSP's `media-src` (`allow_in_csp`, production and dev policy;
+  no wildcard, `connect-src` unchanged). `start()` serves it; `get_preview_base` (main window only) gives the page
+  `http://127.0.0.1:<port>/<secret>/`, which `preview.ts` accepts only in exactly that shape.
+* Rule 12.2 in full: 127.0.0.1 only; the secret in every path (else 404); `Host` must be that address (DNS rebinding:
+  403); an `Origin` other than the app's is refused (403; a media element sends none); GET / HEAD only; ids only
+  (`target_from_path`, as the custom protocol); request head at most 8 KB, read within 10 s; at most 16 connections
+  and 40 new requests a second (429); no CORS headers; the same `read_preview` / `read_media_preview`.
+* Answered like a web server serving a file still being written (`stream`): the full length the player asked for
+  up front (`Content-Length`, `Content-Range bytes a-b/total`), then the bytes as the download writes them;
+  answering only what was written made WebKit take that for the whole file (a 60 s song showed as 3.7 s and
+  stopped). A video job whose size is not known yet is sent from the start without a length until it ends. A quick
+  "not written yet" (nothing downloads it any more) or 120 s without progress ends the answer; the player asks again.
+* Windows (WebView2) and macOS keep the custom protocol, unchanged.
 
 ## Tests
 
@@ -198,7 +225,12 @@ several games, failed scans kept 15 s then lifted; each policy's cap is never ze
 only what it paused resumes and finishes intact, the user's pauses before and during the game stay; the user's
 queue pause and a limit changed during the game outlast it; a restart during a game leaves nothing held; low holds
 the chosen speed, flicker never lifts it, switching policy mid-game holds / lets go at once, off lifts everything,
-bad limits refused), `smart_queue.rs` (Low priority waits during a call), `throttle.test.ts` (status lines, saving
+bad limits refused), `media.rs` (the pause policy pauses a running video and resumes it intact after the game; fails
+without it), `smart_throttle.rs` (a listed path matches that executable only, bad paths refused), `src-tauri`
+(a listed path finds this test by its full path and not one in another folder; paths are read only when listed;
+the private preview address: secret, Host, Origin, methods, ids, rate limit, CSP origin added exactly, size parsing),
+`preview.test.ts` (the address the player uses, only a well-formed private one),
+`smart_queue.rs` (Low priority waits during a call), `throttle.test.ts` (status lines, saving
 the policy), `tests/e2e/desktop-gaming.mjs` (17 checks, the real app with a stand-in game process),
 `tests/integration/tests/smart_preview.rs` (10 tests through the real manager and engine; one slows a real download
 while browsing and recovers, checks the minimum, the switches and their persistence; one flips through the modes

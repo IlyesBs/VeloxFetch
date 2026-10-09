@@ -196,6 +196,11 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
      change your own maximum speed meanwhile: it is still set after the program closes.
    * *Give way by the chosen mode* (default): the same as step 1.
    * Close and reopen the program quickly: the policy does not flip off in between.
+   * *Pause* with a video page or stream downloading: it pauses with the game and resumes after it.
+   * List a program by its full path (e.g. `C:\Games\x\game.exe`, `/opt/game/run`): only that program triggers it,
+     not another one with the same file name elsewhere.
+   * Linux: open the details of a downloading MP4 / MP3 and press **Watch while downloading**: it plays (it did not
+     before October 2026), seeking ahead waits for the data.
 5. Speed without Smart throttle: a large download from a server that limits connections (many mirrors do) keeps a steady
    speed and connection count, instead of swinging between full and nearly nothing every ~15 s.
 

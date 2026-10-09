@@ -20,8 +20,13 @@ const q = (sel) => page(`!!document.querySelector(${JSON.stringify(sel)})`).then
 const count = (sel) => page(`document.querySelectorAll(${JSON.stringify(sel)}).length`).then((r) => r.ok);
 const text = async (sel) => (await page(`document.querySelector(${JSON.stringify(sel)})?.innerText ?? null`)).ok;
 const attr = async (sel, a) => (await page(`document.querySelector(${JSON.stringify(sel)})?.getAttribute(${JSON.stringify(a)}) ?? null`)).ok;
-const click = (sel) =>
-  page(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error('no element ' + ${JSON.stringify(sel)}); e.click(); return true; })()`);
+/** Click an element once it is there (the window follows the app a moment later); a miss fails the test. */
+const click = async (sel) => {
+  await waitFor(() => q(sel), `the element ${sel}`, 10000);
+  const r = await page(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error('no element ' + ${JSON.stringify(sel)}); e.click(); return true; })()`);
+  if (!r.ok) throw new Error(`could not click ${sel}: ${JSON.stringify(r)}`);
+  return r;
+};
 const disabled = async (sel) => (await page(`document.querySelector(${JSON.stringify(sel)})?.disabled ?? null`)).ok;
 const fill = (sel, v) =>
   page(`(() => {
@@ -31,10 +36,14 @@ const fill = (sel, v) =>
     el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); return true; })()`);
 /** Open the ... menu of a row and pick the item whose text starts with `label`. */
 const rowMenu = async (id, label) => {
-  await click(`[data-testid=queue-${id}] button[aria-label^="More actions"]`);
-  await sleep(150);
+  const btn = `[data-testid=queue-${id}] button[aria-label^="More actions"]`;
+  // Open this row's menu (and only it), then pick the item inside that menu.
+  await waitFor(async () => (await count("[role=menu]")) === 0, "no other menu open", 5000);
+  await click(btn);
+  await waitFor(async () => (await attr(btn, "aria-expanded")) === "true" && (await count("[role=menu]")) === 1, "the row's menu", 5000);
   return page(`(() => {
-    const it = [...document.querySelectorAll('[role=menuitem]')].find((b) => b.innerText.trim().startsWith(${JSON.stringify(label)}));
+    const menu = document.querySelector('[role=menu]');
+    const it = [...menu.querySelectorAll('[role=menuitem]')].find((b) => b.innerText.trim().startsWith(${JSON.stringify(label)}));
     if (!it) throw new Error('no menu item ' + ${JSON.stringify(label)});
     it.click(); return true; })()`);
 };
@@ -46,7 +55,10 @@ const theme = (t) => page(`(document.documentElement.setAttribute('data-theme', 
 const queues = async () => (await invoke("get_queues")).ok;
 const dl = async (id) => (await invoke("get_download", { id })).ok;
 const status = async (id) => (await dl(id))?.status;
-const untilStatus = (id, s, ms = 30000) => waitFor(async () => (await status(id)) === s, `download ${id} -> ${s}`, ms);
+const untilStatus = (id, s, ms = 30000) => waitFor(async () => (await status(id)) === s, `download ${id} -> ${s}`, ms).catch(async (e) => {
+  const d = await dl(id); const qs = await invoke("get_queues"); const qst = await invoke("get_queue_state");
+  console.log("      state when it timed out:", JSON.stringify({ d: { status: d.status, queueId: d.queueId, startAt: d.startAt, held: d.held, downloaded: d.downloaded }, queues: qs.ok?.queues?.map((x) => ({ id: x.id, gate: x.gate, started: x.started, running: x.running })), qst: qst.ok && { gateOpen: qst.ok.gateOpen, paused: qst.ok.paused, running: qst.ok.running, waiting: qst.ok.waiting, held: qst.ok.held, max: qst.ok.maxActive } }));
+  throw e; });
 const rowState = (id) => attr(`[data-testid=queue-${id}]`, "data-state");
 const untilRowState = (id, s, ms = 15000) => waitFor(async () => (await rowState(id)) === s, `row ${id} shows ${s}`, ms);
 const hhmm = (offsetMin) => {
@@ -152,6 +164,7 @@ try {
   await invoke("pause_download", { id: a.id });
   const c1 = (await invoke("create_download", { request: { url: `${srv.base}/c1.bin` } })).ok;
   await untilStatus(c1.id, "downloading");
+  await untilRowState(c1.id, "downloading"); // the window follows at the next progress tick
   const ws = [];
   for (const n of ["w1", "w2", "w3"]) ws.push((await invoke("create_download", { request: { url: `${srv.base}/${n}.bin` } })).ok);
   await waitFor(async () => (await count("[data-testid=queue-list] li")) >= 5, "rows");

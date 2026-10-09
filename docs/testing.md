@@ -313,8 +313,8 @@ every fix has a test that fails without it. Details in `docs/smart-throttle-and-
 | `tests/e2e/harness.mjs` | `startFileServer(...).rateBps`: one speed shared by every connection, like a real line |
 | `tests/security/policy.test.mjs` | the watcher's "full speed on any failure" in its new shape; the traffic is read from totals only (`sysio.rs`) |
 
-On Linux `desktop-preview.mjs` stops before its Smart throttle part (live preview does not play in WebKitGTK, see
-above); `desktop-throttle.mjs` covers that part.
+On Linux `desktop-preview.mjs` runs in full since the private preview address (October 2026); see "Fixes: all known
+issues" below.
 
 ## Interface smoothness and start-up
 
@@ -343,3 +343,24 @@ Results (2026-10-09, Linux): Rust 669 passed (workspace); frontend 91; policy 42
 views, redesign pass; `desktop-queue.mjs` stops at its last dry-run power step as before this change. Once, under the
 full parallel run, `smart_preview.rs`'s preview-order check (a timing bound, no gaming code) failed and passed 3/3
 when rerun.
+
+## Fixes: all known issues (October 2026)
+
+| Issue | Cause | Fix | Test |
+|---|---|---|---|
+| `desktop-queue.mjs` failed at its last step on every run | the dry-run power line had become `[dry-run] Power(Sleep)` (Phase 15), the test reads `[dry-run] power action Sleep` | the readable line is printed again (`dry_run_line`) | `system.rs` `a_dry_run_power_action_prints_the_line_the_end_to_end_tests_read`; the suite passes |
+| Preview order could lose the end of a video under load | segments queued for a connection slot in the order their tasks happened to run, not the planned order | `AdaptiveGate::acquire_in_turn`: first connections queue in plan order | `adaptive.rs` `first_connections_get_their_slot_in_plan_order_whatever_order_the_tasks_run` (fails without) |
+| Live preview did not play on Linux | WebKitGTK's player refuses custom schemes | private 127.0.0.1 address (12.2), streamed like a file being written | `preview_server` tests, `preview.test.ts`, `desktop-preview.mjs`, `desktop-video.mjs` |
+| Gaming pause only slowed video jobs | they are not in the download queue | paused / resumed through their own controls | `media.rs` `the_pause_gaming_policy_pauses_running_videos_and_resumes_them_after_the_game` (fails without) |
+| No full executable paths in the program list | names only | absolute paths accepted and matched exactly | `smart_throttle.rs`, `src-tauri` path test, `smart_preview.rs` |
+| A limit just set showed only after ~5 s (`desktop-ui.mjs` failed) | the 2 s speed smoothing | the speed shown never exceeds the global / Smart / own limit (`shown_speed`) | `manager.rs` `a_limit_shows_at_once_and_the_rest_stays_smooth`; the suite passes 3/3 |
+| Settings side menu highlight ran through the sections (flaky check) | smooth scroll fired the scroll-spy on the way | the clicked section stays until the scroll stops or the user scrolls (`spyLock.ts`) | `spyLock.test.ts`; `desktop-usability.mjs` |
+| A running download could be announced to the window as "queued" | the run was announced before the engine stored "downloading" | announced at a later tick | `desktop-smart-queue.mjs` |
+| `desktop-smart-queue.mjs` failed now and then | its click helper failed silently and clicked before the window switched buttons; its menu helper looked in every menu | wait for the element, fail loudly; pick the item in the menu just opened | 10 runs in a row |
+| `desktop-browser.mjs` could not run on Linux | Windows-only pipe, registry and attach | temp-folder socket, scratch home for manifests (`VELOX_NMH_SCRATCH_HOME`, debug only), cold start checked in the database, then relaunched | passes on Linux |
+
+Results (2026-10-09, Linux): Rust 676 passed; frontend 98; policy 42/42; e2e all pass: preview, video, media, gaming,
+queue, throttle, ipc, views, redesign, usability, perf, ui, smart-queue, intelligence, diagnostics, batch, browser,
+folders. `desktop-preview.mjs` skips "it plays while downloading" when this computer's sound server takes no stream
+(it checks with `paplay`; on the development machine the PulseAudio layer of PipeWire hangs every client, `paplay`
+included); everything else in it, bytes arriving while downloading included, is checked.

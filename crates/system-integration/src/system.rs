@@ -984,8 +984,16 @@ impl DryRunSystem {
     }
 
     fn record(&self, c: SystemCall) {
-        eprintln!("[dry-run] {c:?}");
+        eprintln!("{}", dry_run_line(&c));
         self.calls.lock().unwrap_or_else(|p| p.into_inner()).push(c);
+    }
+}
+
+/// The line a dry run prints (the end-to-end tests read it from the app's output).
+fn dry_run_line(c: &SystemCall) -> String {
+    match c {
+        SystemCall::Power(a) => format!("[dry-run] power action {a:?} would run now"),
+        other => format!("[dry-run] {other:?}"),
     }
 }
 
@@ -1077,6 +1085,11 @@ impl SystemIntegration for DryRunSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dry_run_power_action_prints_the_line_the_end_to_end_tests_read() {
+        assert_eq!(dry_run_line(&SystemCall::Power(PowerAction::Sleep)), "[dry-run] power action Sleep would run now");
+    }
 
     #[test]
     fn notification_text_is_cleaned_and_bounded() {

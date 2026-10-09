@@ -40,13 +40,31 @@ const lockedCrates = () => [...lock().matchAll(/^name = "([^"]+)"$/gm)].map((m) 
 // ---------------------------------------------------------------------------------------------
 // 12.2 Localhost security: there is no local network service to attack
 
-test("no shipped code opens a TCP or UDP listening socket", () => {
+test("no shipped code opens a TCP or UDP listening socket, except the Linux preview address built to 12.2", () => {
   const bad = [];
+  const PREVIEW = path.join("apps", "desktop", "src-tauri", "src", "preview_server.rs");
   for (const f of shippedRust()) {
     const text = withoutTestModules(fs.readFileSync(f, "utf8"));
-    if (/\b(TcpListener|UdpSocket)\b/.test(text)) bad.push(path.relative(ROOT, f));
+    if (/\b(TcpListener|UdpSocket)\b/.test(text) && path.relative(ROOT, f) !== PREVIEW) bad.push(path.relative(ROOT, f));
   }
   assert.deepEqual(bad, [], "a local HTTP/TCP API needs the 12.2 design (127.0.0.1 + token + Origin + schemas + rate limits) first");
+  // The one exception (WebKitGTK's player cannot read a custom protocol): 12.2 in full, Linux only, read-only.
+  const pv = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "preview_server.rs"));
+  const lb = pv.slice(pv.indexOf("pub mod loopback"));
+  assert.match(pv, /#\[cfg\(target_os = "linux"\)\]\s*pub mod loopback/, "Linux only");
+  assert.ok(!/UdpSocket/.test(lb) && (lb.match(/bind\(/g) ?? []).length === 1, "one listener");
+  assert.match(lb, /TcpListener::bind\(\("127\.0\.0\.1", 0\)\)/, "this computer only, a free port");
+  assert.match(lb, /read_exact\(&mut b\)/, "a random secret from the system (32 bytes)");
+  assert.match(lb, /strip_prefix\(secret\)\)\.ok_or\(StatusCode::NOT_FOUND\)/, "nothing without the secret");
+  assert.match(lb, /"host" => host_ok = v\.trim\(\) == host/, "Host checked (DNS rebinding)");
+  assert.match(lb, /"origin" => origin_ok = v\.trim\(\) == APP_ORIGIN/, "Origin checked");
+  assert.match(lb, /"GET" => false,\s*"HEAD" => true,\s*_ => return Err\(StatusCode::METHOD_NOT_ALLOWED\)/, "read-only methods");
+  assert.match(lb, /target_from_path\(rest\)/, "ids only, the same schema as the custom protocol");
+  assert.match(lb, /const MAX_HEAD: usize = /, "request size limit");
+  assert.match(lb, /const MAX_OPEN: usize = \d+;\s*const MAX_PER_SECOND: u32 = \d+;/, "rate limits");
+  assert.match(lb, /StatusCode::TOO_MANY_REQUESTS/);
+  assert.ok(!/access-control-allow-origin/i.test(pv), "no CORS at all");
+  assert.match(lb, /manager\.read_preview\(id, Some\(&range\)\)/, "the same reader: only written audio / video bytes");
 });
 
 test("the browser link is a named pipe / unix socket, never a TCP port", () => {
@@ -707,13 +725,14 @@ test("live preview: main window only, a download id only, media types only, nosn
   assert.ok(!/text\/html|application\/|image\/svg/.test(pv.slice(pv.indexOf("pub fn media_type"), pv.indexOf("pub fn available_runs"))), "only audio / video types");
 });
 
-test("smart throttle: process and executable names only, nothing stored or sent, full speed soon after any failure", () => {
+test("smart throttle: process and executable names only (paths only when listed), nothing stored or sent, full speed soon after any failure", () => {
   const cargo = read("apps", "desktop", "src-tauri", "Cargo.toml");
   assert.match(cargo, /sysinfo = \{ version = "[^"]+", default-features = false, features = \["system"\] \}/);
   const st = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "smart_throttle.rs"));
   assert.match(st, /ProcessRefreshKind::nothing\(\)\.with_exe\(UpdateKind::OnlyIfNotSet\)/, "no CPU, memory, command line or environment of other programs; the executable read once");
   assert.ok(!/tracing::|println!|eprintln!|cmd\(\)|environ|\.cwd\(\)|\.root\(\)|\.user_id\(\)/.test(st), "process details are never logged or read beyond names");
-  assert.match(st, /p\.exe\(\)\.and_then\(\|e\| e\.file_name\(\)\)/, "of the executable only its file name is kept (never its folder)");
+  assert.match(st, /p\.exe\(\)\.and_then\(\|e\| e\.file_name\(\)\)/, "the executable's file name");
+  assert.match(st, /let path = p\.exe\(\)\.filter\(\|_\| paths\)/, "full paths only when the user listed a path");
   assert.match(st, /if !matches!\(tokio::time::timeout\(SCAN_LIMIT, scan\)\.await, Ok\(Ok\(\(\)\)\)\) \{[\s\S]{0,120}manager\.smart_throttle_observe\(None\);/, "a failed, slow or panicking scan means full speed");
   const core = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
   assert.match(core, /enabled: get\(ENABLED_KEY\)\.as_deref\(\) == Some\("true"\)/, "off unless the user turned it on");

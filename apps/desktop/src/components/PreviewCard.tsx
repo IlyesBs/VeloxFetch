@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { api, normalizeError } from "../api";
 import { act } from "../hooks";
 import { formatBytes } from "../format";
 import { useT } from "../i18n";
 import type { DownloadStatus, PreviewInfo } from "../types";
 import { Icon } from "../ui/icons";
+import { loadPreviewBase, previewSrc } from "../preview";
 
-/** The address the player reads from: the app's own preview protocol, by download id (never a path). */
+/** The address the player reads from, by download id (never a path); see `preview.ts`. */
 export function previewUrl(id: number): string {
-  return convertFileSrc(String(id), "velox-preview");
+  return previewSrc(String(id));
 }
 
 const PLAYABLE: DownloadStatus[] = ["downloading", "queued", "paused", "completed"];
@@ -42,6 +42,7 @@ export function PreviewCard({ id, status }: { id: number; status: DownloadStatus
   }, [open, id]);
 
   const start = async () => {
+    await loadPreviewBase();
     const i = await act(() => api.setPreviewMode(id, true));
     if (i) {
       setInfo(i);

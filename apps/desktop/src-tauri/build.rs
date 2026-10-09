@@ -72,6 +72,7 @@ const COMMANDS: &[&str] = &[
     "set_smart_throttle",
     "set_preview_mode",
     "get_preview_info",
+    "get_preview_base",
     "get_video_tools",
     "fetch_video_tools",
     "set_video_bar",

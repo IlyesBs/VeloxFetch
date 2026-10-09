@@ -64,6 +64,8 @@ struct Job {
 pub(super) struct MediaState {
     next: u64,
     jobs: Vec<Job>,
+    /// Video jobs Smart throttle's pause policy paused (a game runs), to resume when it closes. In memory, like the jobs.
+    game_held: Vec<u64>,
 }
 
 pub(super) fn client(cfg: &http_client::ClientConfig) -> Result<HttpClient, ManagerError> {
@@ -759,8 +761,53 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// Resume a paused video job, or try a failed one again, from what is already downloaded.
+    /// Smart throttle's pause policy (a game starts): pause the running video jobs and remember them. Waits until they
+    /// have stopped (at most 15 s each), so letting go right after finds them paused.
+    pub(super) async fn hold_media_for_game(&self) {
+        let ids: Vec<u64> = self.inner.media.lock().unwrap().jobs.iter().filter(|j| j.dto.status.is_active()).map(|j| j.dto.id).collect();
+        let mut paused = Vec::new();
+        for id in ids {
+            if self.pause_media(id).await.is_ok() {
+                paused.push(id);
+            }
+        }
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_secs(15) && self.media_statuses(&paused).iter().any(|s| s.is_some_and(MediaStatus::is_active)) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let mut m = self.inner.media.lock().unwrap();
+        for id in paused {
+            if !m.game_held.contains(&id) {
+                m.game_held.push(id);
+            }
+        }
+    }
+
+    /// The game closed: resume the video jobs the pause policy paused (only those still paused).
+    pub(super) async fn release_media_for_game(&self) {
+        let ids = std::mem::take(&mut self.inner.media.lock().unwrap().game_held);
+        for (id, status) in ids.iter().zip(self.media_statuses(&ids)) {
+            if status == Some(MediaStatus::Paused) {
+                if let Err(e) = self.resume_media_inner(*id).await {
+                    tracing::warn!(id, error = %e, "could not resume a video download after the game");
+                }
+            }
+        }
+    }
+
+    fn media_statuses(&self, ids: &[u64]) -> Vec<Option<MediaStatus>> {
+        let m = self.inner.media.lock().unwrap();
+        ids.iter().map(|id| m.jobs.iter().find(|j| j.dto.id == *id).map(|j| j.dto.status)).collect()
+    }
+
+    /// Resume a paused video job, or try a failed one again, from what is already downloaded. The user's choice: a
+    /// job the pause policy paused is theirs from now on.
     pub async fn resume_media(&self, id: u64) -> Result<MediaJobDto, ManagerError> {
+        self.inner.media.lock().unwrap().game_held.retain(|h| *h != id);
+        self.resume_media_inner(id).await
+    }
+
+    async fn resume_media_inner(&self, id: u64) -> Result<MediaJobDto, ManagerError> {
         let cancel = CancellationToken::new();
         let dto = {
             let mut m = self.inner.media.lock().unwrap();

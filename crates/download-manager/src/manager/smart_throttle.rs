@@ -80,6 +80,8 @@ pub const DEFAULT_APPS: &[&str] = &[
 const DEFAULT_SHARE: u8 = 25;
 const MAX_APPS: usize = 64;
 const MAX_APP_NAME: usize = 64;
+/// A listed program may also be a full path to its executable (one game among several with the same file name).
+const MAX_APP_PATH: usize = 260;
 /// Never slower than this, so downloads keep moving (and resume quickly when the cap lifts). The user can
 /// reserve more (or a little less, down to [`MIN_FLOOR_BPS`]).
 const FLOOR_BPS: u64 = 256 * 1024;
@@ -191,11 +193,21 @@ impl SmartState {
     }
 }
 
-/// A program name as compared: no `.exe`, no surrounding spaces, lower case.
+/// A program name (or executable path) as compared: no `.exe`, no surrounding spaces, lower case, `/` between folders.
 pub fn normalize_app(name: &str) -> String {
     let n = name.trim();
-    let n = if n.len() > 4 && n[n.len() - 4..].eq_ignore_ascii_case(".exe") { &n[..n.len() - 4] } else { n };
-    n.to_lowercase()
+    let n =
+        if n.len() > 4 && n.is_char_boundary(n.len() - 4) && n[n.len() - 4..].eq_ignore_ascii_case(".exe") { &n[..n.len() - 4] } else { n };
+    n.replace('\\', "/").to_lowercase()
+}
+
+/// A listed entry that is a full path to an executable (`C:\Games\x.exe`, `/opt/game/x`, `\\server\x.exe`), not a name.
+pub fn is_app_path(entry: &str) -> bool {
+    let e = entry.trim();
+    let b = e.as_bytes();
+    e.starts_with('/')
+        || e.starts_with("\\\\")
+        || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
 }
 
 /// The first configured program that is running, by its configured name. A running name of exactly 15
@@ -266,7 +278,14 @@ fn clean_apps(apps: &[String]) -> Result<Vec<String>, ManagerError> {
         if a.is_empty() {
             continue;
         }
-        if a.chars().count() > MAX_APP_NAME
+        if is_app_path(a) {
+            // A full path: no wildcards or characters no path can have, and a file at the end.
+            let bad_char = a.chars().any(|c| c.is_control() || matches!(c, '*' | '?' | '"' | '<' | '>' | '|'));
+            let colon_misplaced = a.char_indices().any(|(i, c)| c == ':' && i != 1);
+            if a.chars().count() > MAX_APP_PATH || bad_char || colon_misplaced || a.ends_with(['/', '\\']) {
+                return Err(ManagerError::invalid("a program path is too long or is not a path to a program"));
+            }
+        } else if a.chars().count() > MAX_APP_NAME
             || a.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
         {
             return Err(ManagerError::invalid("a program name is too long or has characters a program name cannot have"));
@@ -788,6 +807,20 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_listed_path_matches_that_executable_only() {
+        let apps = v(&["C:\\Games\\Riot\\Game.exe", "/opt/steam/game/run"]);
+        assert!(clean_apps(&apps).is_ok());
+        assert_eq!(find_running(&apps, &v(&["Game.exe", "c:/games/riot/GAME.EXE"])), Some("C:\\Games\\Riot\\Game.exe"));
+        assert_eq!(find_running(&apps, &v(&["Game.exe", "D:\\Other\\Game.exe"])), None, "same name, another program");
+        assert_eq!(find_running(&apps, &v(&["run", "/usr/bin/run"])), None);
+        assert_eq!(find_running(&apps, &v(&["/opt/steam/game/run"])), Some("/opt/steam/game/run"));
+        for bad in ["C:\\Games\\*.exe", "C:\\Games\\", "Games\\x.exe", "C:\\a:b.exe", "/opt/x\u{1}"] {
+            assert!(clean_apps(&v(&[bad])).is_err(), "{bad}");
+        }
+        assert!(clean_apps(&v(&[&format!("/{}", "a".repeat(300))])).is_err(), "too long");
     }
 
     #[test]

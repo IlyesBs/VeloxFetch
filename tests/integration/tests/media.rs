@@ -799,3 +799,53 @@ async fn real_ffmpeg_joins_real_streams() {
     assert!(info.contains("video") && !info.contains("audio"), "{info}");
     let _ = std::fs::remove_dir_all(&fixtures);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_pause_gaming_policy_pauses_running_videos_and_resumes_them_after_the_game() {
+    let site = Site::start().await;
+    let (high, _, _) = hls_site(&site);
+    for (i, b) in high.iter().enumerate() {
+        site.put_route(&format!("/hls/high/s{i}.ts"), b.clone(), 0, 400);
+    }
+    let e = env("game", None).await;
+    e.m.set_smart_throttle(download_manager::SetSmartThrottle {
+        enabled: Some(true),
+        auto: Some(false),
+        apps: Some(vec!["VeloxTestGame".into()]),
+        game_policy: Some(download_manager::GamePolicy::Pause),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let job = e.m.start_media(MediaRequest { audio: Some("none".into()), ..req(site.url("/hls/master.m3u8")) }).await.unwrap();
+    let status = |m: &DownloadManager| m.list_media().into_iter().find(|j| j.id == job.id).unwrap().status;
+    let t = Instant::now();
+    while site.hits("/hls/high/s0.ts") == 0 {
+        assert!(t.elapsed() < Duration::from_secs(10));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // The game starts: the video pauses (not only slowed).
+    e.m.smart_throttle_observe(Some(&["VeloxTestGame".to_string()]));
+    let t = Instant::now();
+    while status(&e.m) != MediaStatus::Paused {
+        assert!(t.elapsed() < Duration::from_secs(15), "still {:?}", status(&e.m));
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let before = site.hits("/hls/high/s4.ts");
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(status(&e.m), MediaStatus::Paused, "stays paused during the game");
+    assert_eq!(site.hits("/hls/high/s4.ts"), before, "nothing fetched during the game");
+
+    // The game closes: it resumes and finishes, every byte right.
+    e.m.smart_throttle_observe(Some(&[]));
+    e.m.smart_throttle_observe(Some(&[]));
+    let t = Instant::now();
+    while status(&e.m) == MediaStatus::Paused {
+        assert!(t.elapsed() < Duration::from_secs(15), "never resumed");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let done = finish(&e.m, job.id).await;
+    assert_eq!(done.status, MediaStatus::Completed, "{done:?}");
+    assert_eq!(read(&e.root, "master.ts"), concat(&high), "every segment, in order, once");
+}
