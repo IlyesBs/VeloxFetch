@@ -435,7 +435,10 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
   queue's `hold_running` / `release_held`, so only what the game paused resumes. Gate = not user-paused and in the
   schedule window and not held for a game. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
   asynchronous custom protocol (`velox-preview`); `DownloadControl::set_preview` makes the engine start the last
-  segment second.
+  segment second, and `AdaptiveGate::acquire_in_turn` makes first connections take their slots in that order. On
+  Linux (WebKitGTK cannot play from a custom protocol) the same reader is served on a private 127.0.0.1 address
+  (`preview_server::loopback`, rule 12.2), whose exact origin joins `media-src` at start-up. The speed shown per
+  download is smoothed but never above the limits it is held to (`shown_speed`).
 
 ## State and versioning
 

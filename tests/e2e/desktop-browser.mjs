@@ -19,7 +19,9 @@ const SHOTS = path.resolve("docs/screenshots");
 const MB = 1024 * 1024;
 const CHROME_ORIGIN = "chrome-extension://gbcanjaaelioalfdggkhbbnbinmfgdbc/";
 const EVIL_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/";
-const PIPE = String.raw`\\.\pipe\velox-e2e-${process.pid}`;
+const WIN = process.platform === "win32";
+// The app's local link: a named pipe on Windows, a socket in the temp folder elsewhere.
+const PIPE = WIN ? String.raw`\\.\pipe\velox-e2e-${process.pid}` : path.join(os.tmpdir(), `velox-e2e-${process.pid}.sock`);
 const SCRATCH = String.raw`Software\VeloxFetchE2E-${process.pid}`;
 const REAL_KEYS = [
   String.raw`HKCU\Software\Google\Chrome\NativeMessagingHosts\app.velox.fetch`,
@@ -27,6 +29,13 @@ const REAL_KEYS = [
   String.raw`HKCU\Software\Chromium\NativeMessagingHosts\app.velox.fetch`,
   String.raw`HKCU\Software\Mozilla\NativeMessagingHosts\app.velox.fetch`,
 ];
+// Linux / macOS: "Connect" writes the browsers' manifests under this scratch home, never the real one (debug builds).
+const SCRATCH_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "velox-nmh-home-"));
+const NM_DIRS =
+  process.platform === "darwin"
+    ? { chrome: "Library/Application Support/Google/Chrome/NativeMessagingHosts", edge: "Library/Application Support/Microsoft Edge/NativeMessagingHosts", brave: "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts", firefox: "Library/Application Support/Mozilla/NativeMessagingHosts" }
+    : { chrome: ".config/google-chrome/NativeMessagingHosts", edge: ".config/microsoft-edge/NativeMessagingHosts", brave: ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts", firefox: ".mozilla/native-messaging-hosts" };
+const nmFile = (home, browser) => path.join(home, NM_DIRS[browser], "app.velox.fetch.json");
 const startedAt = Date.now();
 // The extension the "Install extension" button copies: a scratch copy of the built dist (chromium + firefox).
 const EXT_SRC = fs.mkdtempSync(path.join(os.tmpdir(), "velox-extsrc-"));
@@ -42,7 +51,7 @@ const srv = await startFileServer(6 * MB);
 const h = createHarness({
   port: 9338,
   appPath: APP,
-  env: { VELOX_BRIDGE_ENDPOINT: PIPE, VELOX_NMH_SCRATCH_KEY: SCRATCH, VELOX_EXTENSION_SRC: EXT_SRC, VELOX_NO_LAUNCH: "1" },
+  env: { VELOX_BRIDGE_ENDPOINT: PIPE, VELOX_NMH_SCRATCH_KEY: SCRATCH, VELOX_EXTENSION_SRC: EXT_SRC, VELOX_NO_LAUNCH: "1", ...(WIN ? {} : { VELOX_NMH_SCRATCH_HOME: SCRATCH_HOME }) },
 });
 const { page, invoke } = h;
 
@@ -97,6 +106,16 @@ const storedHeaders = (id) => {
     db.close();
   }
 };
+/** Where "Connect" registered a browser (the manifest's path), or null: the scratch registry key on Windows, the
+ *  manifest file under the scratch home elsewhere. */
+const registered = (browser) => {
+  if (WIN) return /REG_SZ\s+(.+)\s*$/m.exec(regQuery(scratchKey(browser)) ?? "")?.[1]?.trim() ?? null;
+  const f = nmFile(SCRATCH_HOME, browser);
+  return fs.existsSync(f) ? f : null;
+};
+/** The real registrations (only read, to prove they are left exactly as they were). */
+const realState = () =>
+  WIN ? REAL_KEYS.map((k) => regQuery(k)) : Object.keys(NM_DIRS).map((b) => { const f = nmFile(os.homedir(), b); return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null; });
 const regQuery = (key) => {
   try {
     return execFileSync("reg", ["query", key, "/ve"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -117,7 +136,7 @@ try {
   console.log(`app:  ${APP}\nhost: ${HOST}\npipe: ${PIPE}\n`);
   // The machine may legitimately have real registrations (the user connected a browser): the test only
   // proves it leaves them exactly as they were.
-  const realBefore = REAL_KEYS.map((k) => regQuery(k));
+  const realBefore = realState();
 
   await h.launch();
   await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "UI to render");
@@ -243,16 +262,64 @@ try {
   h.app = null;
   await sleep(500);
 
-  const cold = startHost([CHROME_ORIGIN], { VELOX_E2E_DEBUG_PORT: "9338", VELOX_DOWNLOAD_ROOT: h.root, WEBVIEW2_USER_DATA_FOLDER: h.profile, VELOX_NMH_SCRATCH_KEY: SCRATCH, VELOX_EXTENSION_SRC: EXT_SRC, VELOX_NO_LAUNCH: "1" });
+  // The app the helper starts gets the test's own folders (and, on Linux, the test's virtual display): never the user's.
+  const coldEnv = WIN
+    ? { VELOX_E2E_DEBUG_PORT: "9338", WEBVIEW2_USER_DATA_FOLDER: h.profile }
+    : {
+        DISPLAY: h.display,
+        WAYLAND_DISPLAY: "",
+        GDK_BACKEND: "x11",
+        XDG_DATA_HOME: path.join(h.profile, "data"),
+        XDG_CONFIG_HOME: path.join(h.profile, "config"),
+        XDG_CACHE_HOME: path.join(h.profile, "cache"),
+        VELOX_NMH_SCRATCH_HOME: SCRATCH_HOME,
+        VELOX_ORGANIZE: "0",
+        VELOX_DRY_RUN_SHELL: "1",
+      };
+  const cold = startHost([CHROME_ORIGIN], { ...coldEnv, VELOX_DOWNLOAD_ROOT: h.root, VELOX_NMH_SCRATCH_KEY: SCRATCH, VELOX_EXTENSION_SRC: EXT_SRC, VELOX_NO_LAUNCH: "1" });
   const cp = await cold.ask({ command: "ping" });
   check("a ping never starts the app", cp.ok === false && cp.error?.code === "app_not_running", JSON.stringify(cp));
   const launched = await cold.ask(dl("cold.bin"), 60000);
   check("a download request starts the app and is then accepted", launched.ok === true, JSON.stringify(launched));
-  await h.attach();
-  await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "UI after the cold start");
-  await watchPage();
-  await waitFor(async () => (await invoke("get_download", { id: launched.result.id })).ok?.status === "completed", "cold-start download", 30000);
-  check("and it completes", true);
+  if (WIN) {
+    await h.attach();
+    await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "UI after the cold start");
+    await watchPage();
+    await waitFor(async () => (await invoke("get_download", { id: launched.result.id })).ok?.status === "completed", "cold-start download", 30000);
+    check("and it completes", true);
+  } else {
+    // The Linux test driver can only control an app it started: the download is checked in the app's database, then
+    // that app (found by its own data folder, nothing else) is closed and started again under the driver.
+    const statusInDb = () => {
+      const db = new DatabaseSync(path.join(h.dataDir, "velox.db"), { readOnly: true });
+      try {
+        return db.prepare("SELECT status FROM downloads WHERE id = ?").get(launched.result.id)?.status ?? null;
+      } finally {
+        db.close();
+      }
+    };
+    await waitFor(async () => String(statusInDb()).toLowerCase() === "completed", "cold-start download", 30000);
+    check("and it completes", true);
+    const coldApps = fs
+      .readdirSync("/proc")
+      .filter((p) => /^\d+$/.test(p))
+      .filter((p) => {
+        try {
+          return fs.readFileSync(`/proc/${p}/environ`, "utf8").split("\0").includes(`VELOX_DATA_DIR=${h.dataDir}`) && /velox-desktop$/.test(fs.readlinkSync(`/proc/${p}/exe`));
+        } catch {
+          return false;
+        }
+      })
+      .map(Number);
+    check("the app the helper started is this test's own", coldApps.length === 1, JSON.stringify(coldApps));
+    for (const pid of coldApps) process.kill(pid, "SIGTERM");
+    // Gone, or exited and waiting for the helper that started it to collect it (state Z).
+    const exited = (pid) => { try { return /^State:\s+Z/m.test(fs.readFileSync(`/proc/${pid}/status`, "utf8")); } catch { return true; } };
+    await waitFor(async () => coldApps.every(exited), "the cold-started app to quit", 20000);
+    await h.launch();
+    await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "UI after the restart");
+    await watchPage();
+  }
   cold.close();
 
   // ---- 7. registering the host with browsers (from the UI; scratch registry only) ---------------------------------------
@@ -262,9 +329,8 @@ try {
     (await Promise.all(["chrome", "edge", "brave", "firefox"].map((b) => text(`[data-testid=browser-${b}-status]`)))).every((t) => t === "Not connected"));
   await click("[data-testid=browser-chrome-toggle]");
   await waitFor(async () => (await text("[data-testid=browser-chrome-status]")) === "Connected", "Chrome to show as connected");
-  const key = regQuery(scratchKey("chrome"));
-  check("Connect wrote the registration (scratch key)", !!key && key.includes("app.velox.fetch.chrome.json"), String(key));
-  const manifestPath = /REG_SZ\s+(.+)\s*$/m.exec(key ?? "")?.[1]?.trim();
+  const manifestPath = registered("chrome");
+  check("Connect wrote the registration (scratch only)", !!manifestPath && (!WIN || manifestPath.includes("app.velox.fetch.chrome.json")), String(manifestPath));
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   check("the manifest allows exactly our extension and points at the host next to the app",
     JSON.stringify(manifest.allowed_origins) === JSON.stringify([CHROME_ORIGIN]) && manifest.type === "stdio" && manifest.name === "app.velox.fetch" && path.resolve(manifest.path).toLowerCase() === HOST.toLowerCase(), JSON.stringify(manifest));
@@ -273,12 +339,12 @@ try {
   await h.screenshot(path.join(SHOTS, "settings-browser-dark.png"), { width: 1100, height: 1500 });
   await click("[data-testid=browser-chrome-toggle]");
   await waitFor(async () => (await text("[data-testid=browser-chrome-status]")) === "Not connected", "Chrome to disconnect");
-  check("Disconnect removed the registration and the manifest", regQuery(scratchKey("chrome")) === null && !fs.existsSync(manifestPath));
+  check("Disconnect removed the registration and the manifest", registered("chrome") === null && !fs.existsSync(manifestPath));
   const badBrowser = await invoke("set_browser_integration", { request: { browser: "netscape", enabled: true } });
   check("an unknown browser name is rejected at the IPC boundary", !!badBrowser.err);
   const extraField = await invoke("set_browser_integration", { request: { browser: "chrome", enabled: true, path: "C:\\evil.exe" } });
   check("an extra field (a path) is rejected at the IPC boundary", !!extraField.err);
-  check("the rejected requests registered nothing", regQuery(scratchKey("chrome")) === null);
+  check("the rejected requests registered nothing", registered("chrome") === null);
 
   // ---- 9. the confirmation popup -----------------------------------------------------------------------------------
   await click("[data-testid=browser-confirm-toggle]");
@@ -362,7 +428,7 @@ try {
   const pathExt = await invoke("install_browser_extension", { request: { browser: "chrome", folder: "C:\evil" } });
   check("an extra field (a path or URL) is rejected", !!pathExt.err);
 
-  REAL_KEYS.forEach((k, i) => check(`after: real browser key untouched (${k.split("\\")[2]})`, regQuery(k) === realBefore[i]));
+  realState().forEach((v, i) => check(`after: real browser registration untouched (${WIN ? REAL_KEYS[i].split("\\")[2] : Object.keys(NM_DIRS)[i]})`, v === realBefore[i]));
   const csp = (await page("window.__csp")).ok, errs = (await page("window.__errs")).ok;
   check("no CSP violations or script errors", csp.length === 0 && errs.length === 0, JSON.stringify({ csp, errs }));
 } catch (e) {
@@ -376,6 +442,8 @@ try {
     execFileSync("powershell", ["-NoProfile", "-Command",
       `Get-Process velox-desktop -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt [DateTime]::Now.AddMilliseconds(-${Date.now() - startedAt + 2000}) } | Stop-Process -Force`], { stdio: "ignore" });
   } catch {}
+  try { fs.rmSync(SCRATCH_HOME, { recursive: true, force: true }); } catch {}
+  if (!WIN) try { fs.rmSync(PIPE, { force: true }); } catch {}
   srv.close();
   await h.cleanup();
 }

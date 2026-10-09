@@ -568,3 +568,23 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   connection, and unmeasured traffic. A rule can therefore not be turned into a way to stop downloads by hiding
   information.
 
+## Fixes after Phase 18: Linux live preview, gaming policy additions (October 2026)
+
+* **Linux private preview address** (`src-tauri/src/preview_server.rs`, `loopback`): WebKitGTK's player cannot read
+  the `velox-preview` protocol, so on Linux the same bytes are served on `127.0.0.1:<random port>`, built to rule 12.2:
+  a 64-hex secret from `/dev/urandom` in every path (new each launch, never logged or stored), the `Host` checked
+  (DNS rebinding), an `Origin` other than `tauri://localhost` refused, GET / HEAD only, ids only, the same reader as
+  the protocol (only written audio / video bytes inside download folders), request heads of at most 8 KB read within
+  10 s, at most 16 connections and 40 new requests a second (429), no CORS headers. The CSP gets that exact origin in
+  `media-src` at start-up (no wildcard; the static `tauri.conf.json` is unchanged and `csp_is_strict` still holds);
+  `connect-src` is unchanged, so scripts cannot read it (checked in `desktop-preview.mjs`). New command
+  `get_preview_base` (main window only; no arguments; `None` on Windows / macOS). Threat 32; policy test
+  "no shipped code opens a TCP or UDP listening socket, except the Linux preview address built to 12.2".
+* **Program list paths**: an entry may be an absolute executable path (no wildcards, at most 260 characters). The
+  scan reads executables' full paths only while such an entry is listed; they are compared and dropped, never
+  stored, logged or sent (policy test "smart throttle").
+* **Gaming pause also pauses video jobs** through their own pause / resume; in memory only, so a restart never leaves
+  one held.
+* **Browser registration in tests on Linux / macOS**: `VELOX_NMH_SCRATCH_HOME` (debug builds only, like
+  `VELOX_NMH_SCRATCH_KEY` on Windows) puts the browsers' manifest folders under a scratch home; release builds never
+  read it.

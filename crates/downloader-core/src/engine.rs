@@ -1229,8 +1229,10 @@ impl Downloader {
         let mut set = JoinSet::new();
         let pending: Vec<Segment> = progress.snapshot().segments.into_iter().filter(|s| !s.is_complete()).collect();
         // Segments take connection slots in the order they are spawned (the gate is first come, first served).
-        for seg in if preview { planner::preview_order(pending) } else { pending } {
+        // Each segment's first connection queues in this order (`acquire_in_turn`); retries queue behind.
+        for (turn, seg) in (if preview { planner::preview_order(pending) } else { pending }).into_iter().enumerate() {
             let id = seg.id;
+            let first_try = std::sync::atomic::AtomicBool::new(true);
             let (client, url, part, group, progress, validator, policy, gate, throttle, controller, extras) = (
                 self.client(),
                 url.clone(),
@@ -1270,6 +1272,7 @@ impl Downloader {
                         |_| {
                             let (client, url, part, group, progress, validator, throttle, gate, extras) =
                                 (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras);
+                            let in_turn = first_try.swap(false, std::sync::atomic::Ordering::Relaxed);
                             async move {
                                 // A connection slot is held only while a request is actually in flight, never
                                 // while backing off between retries: otherwise throttled segments would keep
@@ -1277,7 +1280,7 @@ impl Downloader {
                                 // (Segments start in order; the gate size adapts live.)
                                 let _permit = tokio::select! {
                                     _ = group.cancelled() => return Err(DownloadError::Cancelled),
-                                    p = gate.acquire() => p,
+                                    p = async { if in_turn { gate.acquire_in_turn(turn).await } else { gate.acquire().await } } => p,
                                 };
                                 // Always continue from what is actually on disk for this segment.
                                 let cur = progress.segment(id).ok_or_else(|| DownloadError::Internal("missing segment".into()))?;

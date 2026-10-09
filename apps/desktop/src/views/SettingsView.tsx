@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createSpyLock } from "../spyLock";
 import { LANGS, setLang, useLang, useT, type Key } from "../i18n";
 import { getThemePref, setThemePref, subscribeThemePref, type ThemePref } from "../theme";
 import { Icon, type IconName } from "../ui/icons";
@@ -62,6 +63,7 @@ export function SettingsView() {
   const theme = useSyncExternalStore(subscribeThemePref, getThemePref);
   const [current, setCurrent] = useState(SECTIONS[0]!.id);
   const content = useRef<HTMLDivElement>(null);
+  const lock = useRef(createSpyLock());
 
   // Highlight the section being read: the last one whose top has scrolled past the top of the view
   // (the page scrolls inside <main>; at the very bottom, the last section).
@@ -69,6 +71,7 @@ export function SettingsView() {
     const root = document.querySelector<HTMLElement>("[data-testid=main]");
     if (!root) return;
     const onScroll = () => {
+      if (lock.current.scrolled()) return; // scrolling to the section the user chose
       const top = root.getBoundingClientRect().top + 96;
       const sections = [...(content.current?.querySelectorAll<HTMLElement>("[data-section]") ?? [])];
       const atEnd = root.scrollTop + root.clientHeight >= root.scrollHeight - 4;
@@ -77,12 +80,18 @@ export function SettingsView() {
       if (pick) setCurrent(pick.id);
     };
     onScroll();
+    const byHand = () => lock.current.release();
     root.addEventListener("scroll", onScroll, { passive: true });
-    return () => root.removeEventListener("scroll", onScroll);
+    for (const e of ["wheel", "touchstart", "keydown"] as const) root.addEventListener(e, byHand, { passive: true });
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      for (const e of ["wheel", "touchstart", "keydown"] as const) root.removeEventListener(e, byHand);
+    };
   }, []);
 
   const jump = (id: string) => {
     setCurrent(id);
+    lock.current.pin(id);
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 

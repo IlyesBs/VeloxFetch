@@ -1,4 +1,4 @@
-// End-to-end test of Smart throttle and Live preview in the real desktop app (WebView2):
+// End-to-end test of Smart throttle and Live preview in the real desktop app (WebView2, WebKitGTK):
 //  * preview: a real, playable audio file (WAV) served slowly; the details' Preview card plays it through
 //    the app's own `velox-preview` protocol (Range requests, 206) while it is still downloading;
 //    a page script cannot read the protocol (CSP);
@@ -8,6 +8,8 @@
 //   node tests/e2e/desktop-preview.mjs [path-to-debug-velox-desktop.exe]
 
 import http from "node:http";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { check, createHarness, exe, fail, finish, fs, path, sleep, waitFor } from "./harness.mjs";
 
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
@@ -35,6 +37,17 @@ function wav(seconds) {
   return b;
 }
 const SONG = wav(60);
+
+/** Linux: can this computer's sound server take a stream at all? (A stuck PulseAudio layer makes every player wait
+ *  forever, browsers included; then playback cannot advance in any app, and that check is skipped, said out loud.) */
+function soundWorks() {
+  if (process.platform !== "linux") return true;
+  const f = path.join(os.tmpdir(), `velox-e2e-silence-${process.pid}.wav`);
+  fs.writeFileSync(f, wav(0.2).fill(0, 44));
+  const r = spawnSync("paplay", [f], { timeout: 5000 });
+  fs.rmSync(f, { force: true });
+  return r.error?.code === "ENOENT" || (!r.error && r.status === 0); // stopped by the timeout: it hung
+}
 const BIG = Buffer.alloc(24 * MB, 3);
 let chunkDelay = 40; // ms per 64 KB per connection: slow enough to watch while it downloads
 const site = http.createServer(async (req, res) => {
@@ -85,18 +98,41 @@ try {
   check("the details of an audio / video download offer a preview", true);
   await waitFor(() => has("[data-testid=preview-video]"), "the player");
   const src = await ev(`document.querySelector('[data-testid=preview-video]').src`);
-  // Tauri's address for a custom protocol: http://<name>.localhost/ on Windows, <name>://localhost/ elsewhere.
-  const previewUrl = process.platform === "win32" ? `http://velox-preview.localhost/${song.id}` : `velox-preview://localhost/${song.id}`;
-  check("the player reads from the app's own protocol, by id", src === previewUrl, src);
+  // Tauri's address for a custom protocol: http://<name>.localhost/ on Windows, <name>://localhost/ on macOS. Linux's
+  // web view cannot play from a custom protocol: the app's private address there (this computer only, a 64-hex secret).
+  const previewUrl =
+    process.platform === "win32" ? `http://velox-preview.localhost/${song.id}` : process.platform === "darwin" ? `velox-preview://localhost/${song.id}` : null;
+  const ok = previewUrl ? src === previewUrl : new RegExp(`^http://127\\.0\\.0\\.1:\\d+/[0-9a-f]{64}/${song.id}$`).test(src);
+  check("the player reads from the app's own address, by id", ok, src);
+  if (!previewUrl) {
+    const port = new URL(src).port;
+    const wrong = await new Promise((res) =>
+      http.get({ host: "127.0.0.1", port, path: `/${"0".repeat(64)}/${song.id}` }, (r) => (r.resume(), res(r.statusCode))).on("error", () => res(0)),
+    );
+    check("Linux: without the secret the private address gives nothing", wrong === 404, String(wrong));
+    const rebound = await new Promise((res) =>
+      http.get({ host: "127.0.0.1", port, path: new URL(src).pathname, headers: { Host: `evil.example:${port}` } }, (r) => (r.resume(), res(r.statusCode))).on("error", () => res(0)),
+    );
+    check("Linux: another host name for it is refused (DNS rebinding)", rebound === 403, String(rebound));
+  }
   await waitFor(async () => (await ev(`document.querySelector('[data-testid=preview-video]').readyState`)) >= 1, "the player to read the file's header", 20000);
   const duration = await ev(`document.querySelector('[data-testid=preview-video]').duration`);
   check("the player knows the whole length from the first bytes (60 s)", Math.abs(duration - 60) < 1, String(duration));
   const before = await dl(song.id);
   check("...while the file is still downloading", before.status === "downloading" && before.downloaded < before.totalSize, `${before.downloaded}/${before.totalSize}`);
-  await page(`(() => { const v = document.querySelector('[data-testid=preview-video]'); v.muted = true; return v.play().then(() => true, (e) => String(e)); })()`);
-  await waitFor(async () => (await ev(`document.querySelector('[data-testid=preview-video]').currentTime`)) > 1.5, "playback to advance", 20000);
-  const during = await dl(song.id);
-  check("it plays while downloading", during.status === "downloading" && during.downloaded < during.totalSize, `${during.status} ${during.downloaded}/${during.totalSize}`);
+  await page(`(() => { const v = document.querySelector('[data-testid=preview-video]'); v.volume = 0; v.scrollIntoView({ block: "center" }); return v.play().then(() => true, (e) => String(e)); })()`);
+  // The bytes keep coming as the download writes them (one long answer, not just what was there at first).
+  const buffered = () => ev(`(() => { const b = document.querySelector('[data-testid=preview-video]').buffered; return b.length ? b.end(b.length - 1) : 0; })()`);
+  const b1 = await buffered();
+  await waitFor(async () => (await buffered()) > b1 + 2, "the player to receive more as the download goes on", 20000);
+  check("the player keeps receiving bytes while the file downloads", true);
+  if (soundWorks()) {
+    await waitFor(async () => (await ev(`document.querySelector('[data-testid=preview-video]').currentTime`)) > 1.5, "playback to advance", 20000);
+    const during = await dl(song.id);
+    check("it plays while downloading", during.status === "downloading" && during.downloaded < during.totalSize, `${during.status} ${during.downloaded}/${during.totalSize}`);
+  } else {
+    console.log("SKIP  it plays while downloading: this computer's sound server takes no stream (paplay hangs too)");
+  }
   const err = await ev(`document.querySelector('[data-testid=preview-video]').error?.code ?? 0`);
   check("the player reports no error (no corrupt or missing bytes)", err === 0, String(err));
   await h.page("document.documentElement.setAttribute('data-theme','dark')");
@@ -107,6 +143,11 @@ try {
 
   const sneaky = await ev(`fetch("http://velox-preview.localhost/${song.id}").then(() => "read", () => "blocked")`);
   check("a page script cannot read the preview protocol (CSP connect-src)", sneaky === "blocked", sneaky);
+  if (process.platform === "linux") {
+    const src2 = await ev(`document.querySelector('[data-testid=preview-video]').src`);
+    const sneaky2 = await ev(`fetch(${JSON.stringify("SRC")}.replace("SRC", document.querySelector('[data-testid=preview-video]').src)).then(() => "read", () => "blocked")`);
+    check("nor the private address (Linux)", sneaky2 === "blocked", `${sneaky2} ${src2}`);
+  }
   check("a seek far ahead does not break the player", await ev(`(async () => { const v = document.querySelector('[data-testid=preview-video]'); v.currentTime = 50; await new Promise((r) => setTimeout(r, 1500)); return !v.error; })()`));
   await invoke("set_speed_limit", { request: { target: { kind: "global" }, bytesPerSec: null } });
   chunkDelay = 0;

@@ -271,7 +271,7 @@
   "smart.on": "La limitation intelligente est activée",
   "smart.off": "La limitation intelligente est désactivée",
   "smart.enable": "Activer la limitation intelligente",
-  "smart.apps": "Programmes (un par ligne, comme dans le Gestionnaire des tâches, sans .exe)",
+  "smart.apps": "Programmes (un par ligne : le nom comme dans le Gestionnaire des tâches, sans .exe, ou le chemin complet du programme)",
   "smart.saved": "Liste des programmes enregistrée",
   "smart.save": "Enregistrer la liste",
   "smart.discord": "Discord et les applications similaires ouvertes toute la journée ne sont pas dans la liste exprès : ajoutez-les si vous voulez.",

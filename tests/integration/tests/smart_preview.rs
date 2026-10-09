@@ -111,10 +111,17 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_wh
     let m = manager(&b).await;
     let s = m.smart_throttle();
     assert!(!s.enabled && s.apps == names(&["VeloxTestGame"]) && s.share_percent == 25 && s.limit_bps.is_none(), "{s:?}");
+    // A full path is a valid entry (one program among several with the same file name).
+    assert!(m
+        .set_smart_throttle(SetSmartThrottle { apps: Some(names(&["C:\\Games\\x.exe", "VeloxTestGame"])), ..Default::default() })
+        .await
+        .is_ok());
+    m.set_smart_throttle(SetSmartThrottle { apps: Some(names(&["VeloxTestGame"])), ..Default::default() }).await.unwrap();
     for bad in [
         SetSmartThrottle { share_percent: Some(0), ..Default::default() },
         SetSmartThrottle { share_percent: Some(95), ..Default::default() },
-        SetSmartThrottle { apps: Some(names(&["C:\\Games\\x.exe"])), ..Default::default() },
+        SetSmartThrottle { apps: Some(names(&["C:\\Games\\*.exe"])), ..Default::default() },
+        SetSmartThrottle { apps: Some(names(&["Games\\x.exe"])), ..Default::default() },
         SetSmartThrottle { min_bps: Some(1024), ..Default::default() },
         SetSmartThrottle { min_bps: Some(2 * 1024 * 1024 * 1024), ..Default::default() },
     ] {

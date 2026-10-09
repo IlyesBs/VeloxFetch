@@ -283,6 +283,9 @@ impl DownloadManager {
             if want {
                 // Also when the gate was already closed (the user paused the queue but let running downloads run).
                 self.hold_running().await;
+                self.hold_media_for_game().await;
+            } else {
+                self.release_media_for_game().await;
             }
             self.emit_queue();
         }

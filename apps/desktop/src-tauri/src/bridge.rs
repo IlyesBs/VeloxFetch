@@ -251,12 +251,15 @@ impl Bridge {
         };
         let home = std::env::var_os("HOME").map(PathBuf::from);
         let scratch = dev_var("VELOX_NMH_SCRATCH_KEY");
+        // Tests on Linux / macOS: the browsers' folders under a scratch home instead of the real one (debug builds).
+        let scratch_home = dev_var("VELOX_NMH_SCRATCH_HOME").map(PathBuf::from);
         let targets = Browser::ALL
             .into_iter()
             .map(|b| {
-                let t = match &scratch {
-                    Some(key) => Some(Target::Registry { subkey: format!(r"{key}\{}\{HOST_NAME}", b.as_str()) }),
-                    None => nm::default_target(b, Platform::current(), HOST_NAME, home.as_deref()),
+                let t = match (&scratch_home, &scratch) {
+                    (Some(h), _) => nm::default_target(b, Platform::current(), HOST_NAME, Some(h)),
+                    (None, Some(key)) => Some(Target::Registry { subkey: format!(r"{key}\{}\{HOST_NAME}", b.as_str()) }),
+                    (None, None) => nm::default_target(b, Platform::current(), HOST_NAME, home.as_deref()),
                 };
                 (b, t)
             })

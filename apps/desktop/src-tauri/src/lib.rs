@@ -304,6 +304,14 @@ command!(get_smart_throttle, GetSmartThrottle, () -> SmartThrottleDto, |m| async
 command!(set_smart_throttle, SetSmartThrottle, (request: SetSmartThrottle) -> SmartThrottleDto, |m| m.set_smart_throttle(request));
 command!(set_preview_mode, SetPreviewMode, (id: i64, enabled: bool) -> PreviewDto, |m| m.set_preview_mode(id, enabled));
 command!(get_preview_info, GetPreviewInfo, (id: i64) -> PreviewDto, |m| m.preview_info(id));
+// Where the player reads previews from, when not the custom protocol (Linux: see `preview_server::loopback`).
+command!(get_preview_base, GetPreviewBase, () -> Option<String>, |_m| async {
+    #[cfg(target_os = "linux")]
+    let base = preview_server::loopback::base();
+    #[cfg(not(target_os = "linux"))]
+    let base = None;
+    Ok::<_, download_manager::ManagerError>(base)
+});
 command!(get_video_tools, GetVideoTools, () -> VideoToolsDto, |m| async { Ok::<_, download_manager::ManagerError>(m.video_tools()) });
 command!(fetch_video_tools, FetchVideoTools, () -> VideoToolsDto, |m| async {
     Ok::<_, download_manager::ManagerError>(m.fetch_video_tools().await)
@@ -692,6 +700,13 @@ pub fn run() {
         std::process::exit(install_video_tools_cli());
     }
     let shutting_down = std::sync::Arc::new(AtomicBool::new(false));
+    #[allow(unused_mut)] // changed on Linux only
+    let mut context = tauri::generate_context!();
+    // Linux: previews are read from a private local address (see preview_server.rs); its exact origin joins media-src.
+    #[cfg(target_os = "linux")]
+    if let Some(origin) = preview_server::loopback::reserve() {
+        preview_server::loopback::allow_in_csp(context.config_mut(), &origin);
+    }
 
     let app = tauri::Builder::default()
         // Live preview of downloading videos (Tauri v2 asynchronous custom protocol, see preview_server.rs).
@@ -775,6 +790,8 @@ pub fn run() {
             let test_source = dev_only("VELOX_CLIPBOARD_FILE").is_some();
             let clipboard = clipboard::ClipboardWatch::start(app.handle().clone(), manager.clone(), source, test_source);
             smart_throttle::spawn(manager.clone());
+            #[cfg(target_os = "linux")]
+            tauri::async_runtime::spawn(preview_server::loopback::start(manager.clone()));
             if fetch_tools {
                 // Whatever the installer could not get (no internet then, a source down) is fetched right after
                 // start-up, and continued from where it stopped if the app was closed in the middle.
@@ -892,12 +909,13 @@ pub fn run() {
             set_smart_throttle,
             set_preview_mode,
             get_preview_info,
+            get_preview_base,
             get_video_tools,
             fetch_video_tools,
             get_desktop_options,
             set_desktop_options,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the VeloxFetch application");
 
     app.run(move |handle, event| {

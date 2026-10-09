@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { loadPreviewBase, previewSrc } from "../preview";
 import { actions } from "../actions";
 import { api } from "../api";
 import { formatBytes, formatEta, formatSpeed } from "../format";
@@ -47,9 +47,9 @@ const TONE: Record<MediaStatus, "accent" | "ok" | "bad" | "warn"> = {
   paused: "warn",
 };
 
-/** The player's address: the app's own preview protocol, by job id (never a path). */
+/** The player's address, by job id (never a path); see `preview.ts`. */
 export function mediaPreviewUrl(id: number): string {
-  return convertFileSrc(`m${id}`, "velox-preview");
+  return previewSrc(`m${id}`);
 }
 
 const Row = memo(function Row({ job }: { job: MediaJob }) {
@@ -98,7 +98,7 @@ const Row = memo(function Row({ job }: { job: MediaJob }) {
         </p>
         <span className="flex flex-wrap items-center gap-1.5">
           {(job.playable || watching) && (
-            <button className="btn h-8 px-2.5 text-xs" data-testid="media-play" onClick={() => setWatching(!watching)} aria-pressed={watching}>
+            <button className="btn h-8 px-2.5 text-xs" data-testid="media-play" onClick={() => void loadPreviewBase().then(() => setWatching(!watching))} aria-pressed={watching}>
               <Icon name="play" size={13} /> {watching ? t("mj.hidePlayer") : done ? t("prev.play") : t("mj.watchNow")}
             </button>
           )}

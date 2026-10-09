@@ -79,6 +79,7 @@ pub enum Command {
     SetSmartThrottle,
     SetPreviewMode,
     GetPreviewInfo,
+    GetPreviewBase,
     GetVideoTools,
     FetchVideoTools,
     SetVideoBar,
@@ -92,7 +93,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 76] = [
+    pub const ALL: [Command; 77] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -160,6 +161,7 @@ impl Command {
         Command::SetSmartThrottle,
         Command::SetPreviewMode,
         Command::GetPreviewInfo,
+        Command::GetPreviewBase,
         Command::GetVideoTools,
         Command::FetchVideoTools,
         Command::SetVideoBar,
@@ -241,6 +243,7 @@ impl Command {
             Command::SetSmartThrottle => "set_smart_throttle",
             Command::SetPreviewMode => "set_preview_mode",
             Command::GetPreviewInfo => "get_preview_info",
+            Command::GetPreviewBase => "get_preview_base",
             Command::GetVideoTools => "get_video_tools",
             Command::FetchVideoTools => "fetch_video_tools",
             Command::SetVideoBar => "set_video_bar",
@@ -382,6 +385,7 @@ mod tests {
             Command::SetSmartThrottle,
             Command::SetPreviewMode,
             Command::GetPreviewInfo,
+            Command::GetPreviewBase,
             Command::GetVideoTools,
             Command::FetchVideoTools,
             Command::SetVideoBar,

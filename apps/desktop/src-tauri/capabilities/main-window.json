@@ -78,6 +78,7 @@
     "allow-set-smart-throttle",
     "allow-set-preview-mode",
     "allow-get-preview-info",
+    "allow-get-preview-base",
     "allow-get-video-tools",
     "allow-fetch-video-tools",
     "allow-set-video-bar",

@@ -156,7 +156,9 @@ try {
   await click(`${card} [data-testid=media-play]`);
   await waitFor(() => has(`${card} [data-testid=media-player]`), "the player");
   const src = await ev(`document.querySelector('${card} [data-testid=media-player]').src`);
-  check("the player reads the job through the app's own preview protocol, by id", /velox-preview[^/]*\/+m\d+$/.test(src) || /velox-preview\.localhost\/m\d+$/.test(src) || /^velox-preview:\/\/localhost\/m\d+$/.test(src), src);
+  // Linux: WebKitGTK cannot play from a custom protocol, so the app's private local address (this computer only, a secret).
+  const viaApp = process.platform === "linux" ? /^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{64}\/m\d+$/.test(src) : /velox-preview[^/]*\/+m\d+$/.test(src);
+  check("the player reads the job through the app's own preview address, by id", viaApp, src);
   await click(`${card} [data-testid=media-pause]`);
   await waitFor(async () => (await ev(`document.querySelector('${card}')?.dataset.status`)) === "paused", "the video to pause");
   check("a paused video offers Resume and Cancel", (await has(`${card} [data-testid=media-resume]`)) && (await has(`${card} [data-testid=media-cancel-job]`)));

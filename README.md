@@ -83,7 +83,7 @@ downloaded, and VeloxFetch says so.
 Smart throttle (Settings > Speed) lets downloads give way while you browse, watch or play (automatic mode, or while a
 listed game / call runs: give way, a low speed limit or pause, lifted when it closes) and gives them the whole connection when the network or the computer is idle, smoothly and never
 below the reserved minimum; a status line and a speed graph show what it does. The details of a video or audio download
-can **preview** it while it downloads. See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
+can **preview** it while it downloads (on Linux too, through a private local address). See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
 
 On the desktop: closing the window keeps VeloxFetch in the tray, it can start at login (in the tray), and it notifies when
 a download finishes or fails while the window is hidden (Settings > Appearance > On the desktop). A download sent from the

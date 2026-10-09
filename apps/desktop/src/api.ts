@@ -144,6 +144,7 @@ export const api = {
   setSmartThrottle: (request: SetSmartThrottle) => call<SmartThrottle>("set_smart_throttle", { request }),
   setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
   getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),
+  getPreviewBase: () => call<string | null>("get_preview_base"),
   getLogs: (limit = 300, problemsOnly = false) => call<Logs>("get_logs", { limit, problemsOnly }),
   setDetailedLogging: (enabled: boolean) => call<void>("set_detailed_logging", { enabled }),
   getDiagnosticsReport: () => call<string>("get_diagnostics_report"),
