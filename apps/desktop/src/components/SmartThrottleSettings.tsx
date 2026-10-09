@@ -12,7 +12,7 @@ import {
   useThrottleHistory,
   type ThrottlePoint,
 } from "../throttle";
-import type { SetSmartThrottle } from "../types";
+import type { GamePolicy, SetSmartThrottle } from "../types";
 import { Panel } from "../ui/primitives";
 
 const KB = 1024;
@@ -27,6 +27,13 @@ const MINIMUMS = [
   2 * MB,
   5 * MB,
   10 * MB,
+];
+/** The low-bandwidth gaming policy's limit. */
+const GAME_LIMITS = [64 * KB, 128 * KB, 256 * KB, 512 * KB, 1 * MB, 2 * MB, 5 * MB];
+const GAME_POLICIES: { value: GamePolicy; label: "smart.policyAdaptive" | "smart.policyLow" | "smart.policyPause" }[] = [
+  { value: "adaptive", label: "smart.policyAdaptive" },
+  { value: "low", label: "smart.policyLow" },
+  { value: "pause", label: "smart.policyPause" },
 ];
 /** The maximum download speed (the global speed limit). */
 const MAXIMUMS = [1 * MB, 2 * MB, 5 * MB, 10 * MB, 20 * MB, 50 * MB, 100 * MB];
@@ -152,6 +159,11 @@ export function SmartThrottleSettings() {
     s && !MINIMUMS.includes(s.minBps)
       ? [...MINIMUMS, s.minBps].sort((a, b) => a - b)
       : MINIMUMS;
+  const policy = s?.gamePolicy ?? "adaptive";
+  const gameLimits =
+    s && !GAME_LIMITS.includes(s.gameLimitBps)
+      ? [...GAME_LIMITS, s.gameLimitBps].sort((a, b) => a - b)
+      : GAME_LIMITS;
   const maximums =
     globalLimit && !MAXIMUMS.includes(globalLimit)
       ? [...MAXIMUMS, globalLimit].sort((a, b) => a - b)
@@ -279,6 +291,47 @@ export function SmartThrottleSettings() {
       </div>
 
       <div className="mt-4 border-t border-line pt-3">
+        <div className="mb-3 grid gap-3 sm:grid-cols-3">
+          <label className="space-y-1 sm:col-span-2">
+            <span className="label">{t("smart.policy")}</span>
+            <select
+              data-testid="smart-policy"
+              className="input h-9"
+              value={policy}
+              disabled={!s}
+              onChange={(e) =>
+                save({ gamePolicy: e.target.value as GamePolicy }, t("smart.updated"))
+              }
+            >
+              {GAME_POLICIES.map((p) => (
+                <option key={p.value} value={p.value}>
+                  {t(p.label)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {policy === "low" && (
+            <label className="space-y-1">
+              <span className="label">{t("smart.policyLimit")}</span>
+              <select
+                data-testid="smart-policy-limit"
+                className="input h-9"
+                value={s?.gameLimitBps ?? 512 * KB}
+                disabled={!s}
+                onChange={(e) =>
+                  save({ gameLimitBps: Number(e.target.value) }, t("smart.updated"))
+                }
+              >
+                {gameLimits.map((v) => (
+                  <option key={v} value={v}>
+                    {formatSpeed(v)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <p className="text-xs text-dim sm:col-span-3">{t("smart.policyHint")}</p>
+        </div>
         <label className="space-y-1">
           <span className="label">{t("smart.appsTitle")}</span>
           <span className="block text-xs text-dim">{t("smart.apps")}</span>

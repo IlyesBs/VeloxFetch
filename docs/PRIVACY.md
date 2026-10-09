@@ -34,6 +34,7 @@ The extension only sends links to the VeloxFetch desktop application running on 
 
 ## Smart throttle (desktop app, off unless you turn it on)
 
-When it is on, VeloxFetch looks at the **names** of the programs running on your computer every few seconds, to slow
-downloads down while a game or a call from your list runs. Only the names are read (not what the programs do), they are
-compared with your list and forgotten; nothing is stored or sent anywhere.
+When it is on, VeloxFetch looks at the **names** of the programs running on your computer every few seconds (the name
+the system shows and the file name of the program, never its folder), to slow or pause downloads while a game or a call
+from your list runs. Only the names are read (not what the programs do), they are compared with your list and
+forgotten; nothing is stored or sent anywhere.

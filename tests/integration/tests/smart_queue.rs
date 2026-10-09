@@ -356,7 +356,8 @@ async fn while_smart_throttle_slows_downloads_low_priority_ones_wait_and_running
     wait_status(&r.m, normal.id, DownloadStatus::Completed).await;
     assert_eq!(status(&r.m, low.id).await, DownloadStatus::Queued, "low priority waits for the line to be free");
     assert_eq!(status(&r.m, running.id).await, DownloadStatus::Downloading, "nothing running is stopped");
-    // The call ends: it starts.
+    // The call ends (two scans without it: one could be a restart): it starts.
+    r.m.smart_throttle_observe_signals(Some(&[]), ThrottleSignals::default());
     r.m.smart_throttle_observe_signals(Some(&[]), ThrottleSignals::default());
     wait_status(&r.m, low.id, DownloadStatus::Completed).await;
     r.m.cancel_download(running.id).await.unwrap();

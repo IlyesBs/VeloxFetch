@@ -178,6 +178,12 @@ export interface SmartThrottle {
   peakBps: number | null;
   /** What the caps are a share of: what downloads got lately while free, at most the best speed seen. */
   referenceBps: number | null;
+  /** What downloads do while a listed program (a game, a call) runs. */
+  gamePolicy: GamePolicy;
+  /** The speed limit of the "low" policy (bytes/s). */
+  gameLimitBps: number;
+  /** The "pause" policy holds the queue right now. */
+  gameHold: boolean;
 }
 
 export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
@@ -188,7 +194,12 @@ export interface SetSmartThrottle {
   sharePercent?: number;
   auto?: boolean;
   minBps?: number;
+  gamePolicy?: GamePolicy;
+  gameLimitBps?: number;
 }
+
+/** While a listed program runs: the mode's share (adaptive), a fixed low limit, or pause. */
+export type GamePolicy = "adaptive" | "low" | "pause";
 
 /** What the live preview can play so far. */
 export interface PreviewInfo {
@@ -348,6 +359,8 @@ export interface QueueState {
   running: number;
   waiting: number;
   held: number;
+  /** Held because a listed program runs (Smart throttle's "pause" policy). */
+  gameHold?: boolean;
   schedule: Schedule;
   scheduleOpen: boolean;
   /** Local time of the next window boundary, `YYYY-MM-DDTHH:MM`. */

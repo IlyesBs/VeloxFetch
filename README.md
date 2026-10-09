@@ -63,6 +63,7 @@ node tests/e2e/desktop-diagnostics.mjs  # diagnostics card, Settings > Diagnosti
 node tests/e2e/desktop-video.mjs  # video bar hand-over -> video dialog -> file (stand-in yt-dlp), DRM refusals, 64 connections
 node tests/e2e/desktop-preview.mjs  # live preview through the velox-preview protocol, smart throttle with the real process scan
 node tests/e2e/desktop-throttle.mjs # Smart throttle card / Settings / status bar: clicks, modes, a capped download that never stops
+node tests/e2e/desktop-gaming.mjs   # gaming policy with a stand-in game process: pause / resume only what it paused, low speed, off
 node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with downloads running (see docs/ui-performance.md)
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
@@ -80,7 +81,7 @@ when the site or the network fails part-way (Retry continues from what is alread
 downloaded, and VeloxFetch says so.
 
 Smart throttle (Settings > Speed) lets downloads give way while you browse, watch or play (automatic mode, or while a
-listed game / call runs) and gives them the whole connection when the network or the computer is idle, smoothly and never
+listed game / call runs: give way, a low speed limit or pause, lifted when it closes) and gives them the whole connection when the network or the computer is idle, smoothly and never
 below the reserved minimum; a status line and a speed graph show what it does. The details of a video or audio download
 can **preview** it while it downloads. See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
 

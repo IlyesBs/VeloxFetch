@@ -427,9 +427,13 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
   Commands: `get_download_diagnostics`, `get_logs`, `set_detailed_logging`, `get_diagnostics_report`, `open_log_folder`.
 
 * **Smart throttle and Live preview** (`docs/smart-throttle-and-preview.md`): `manager/smart_throttle.rs` decides a cap
-  that goes into the `smart` bucket of `RateLimits` (a listed program's share, or the automatic `Controller` fed by the
-  computer's other traffic from `sysio` and the user's idle time); `src-tauri/src/smart_throttle.rs` feeds it the running
-  program names and `SystemIntegration::user_idle`. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
+  that goes into the `smart` bucket of `RateLimits` (a listed program's gaming policy, or the automatic `Controller` fed by
+  the computer's other traffic from `sysio` and the user's idle time); `src-tauri/src/smart_throttle.rs` feeds it the
+  running program and executable names and `SystemIntegration::user_idle`. Gaming policy: `GameWatch` debounces
+  detection (on at once, off after two scans, 15 s through failed scans); *adaptive* = the mode's share, *low* = a fixed
+  limit, *pause* = the queue gate closes (`QueueState::game_hold`, in memory) through `sync_game_hold`, which reuses the
+  queue's `hold_running` / `release_held`, so only what the game paused resumes. Gate = not user-paused and in the
+  schedule window and not held for a game. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
   asynchronous custom protocol (`velox-preview`); `DownloadControl::set_preview` makes the engine start the last
   segment second.
 

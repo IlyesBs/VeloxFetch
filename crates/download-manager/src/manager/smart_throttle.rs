@@ -1,8 +1,12 @@
 //! Smart throttle: downloads give way to what the user is doing, and take the whole connection when nothing
 //! else needs it.
 //!
-//! * A listed program (a game, a video call) runs: downloads keep the chosen share of the connection; when it
-//!   closes, full speed comes back at once.
+//! * A listed program (a game, a video call) runs: the gaming policy applies ([`GamePolicy`]): downloads keep the
+//!   chosen share of the connection (adaptive, the default), a fixed low limit, or pause (the queue holds them and
+//!   starts nothing). Seen once is enough to apply it; it is lifted when the program has been gone for two scans
+//!   in a row (a program restarting, or a launcher handing over to the game, does not flip it), and nothing the
+//!   user set is changed, so lifting it restores exactly what was there. A failed scan keeps it for
+//!   [`SCAN_FAIL_GRACE`] (no burst of traffic over a game because one scan failed), never longer.
 //! * Automatic mode (on by default): the computer's own traffic is measured. When something else uses the
 //!   connection while the user is at the computer (browsing, a video), downloads slow down so it stays
 //!   responsive; heavy traffic while the user is away slows them less; when the network is free or the
@@ -36,6 +40,14 @@ const SHARE_KEY: &str = "smart_throttle.share";
 const PEAK_KEY: &str = "smart_throttle.peak";
 const AUTO_KEY: &str = "smart_throttle.auto";
 const MIN_KEY: &str = "smart_throttle.min_bps";
+const POLICY_KEY: &str = "smart_throttle.game_policy";
+const GAME_LIMIT_KEY: &str = "smart_throttle.game_limit_bps";
+/// The low-bandwidth policy's limit until the user picks one.
+const DEFAULT_GAME_LIMIT_BPS: u64 = 512 * 1024;
+/// Scans in a row without a listed program before its policy is lifted.
+const GONE_AFTER_SCANS: u32 = 2;
+/// The programs cannot be listed: a policy in force stays this long, then is lifted (never stuck).
+pub const SCAN_FAIL_GRACE: Duration = Duration::from_secs(15);
 /// Below this total nothing is really downloading: the learned speed is left alone.
 const LEARN_MIN_BPS: f64 = 64.0 * 1024.0;
 /// While downloading below the best speed seen, it is forgotten slowly (half in about 35 minutes of
@@ -105,6 +117,13 @@ pub(super) struct SmartState {
     /// Other traffic (smoothed) and whether the user is away, as last seen (for the status line).
     other_bps: Option<u64>,
     user_idle: Option<bool>,
+    /// What downloads do while a listed program runs, and the low policy's limit.
+    policy: GamePolicy,
+    game_limit: u64,
+    /// Whether a listed program counts as running (debounced).
+    watch: GameWatch,
+    /// The pause policy holds the queue (as last decided).
+    hold: bool,
     /// The previous measurement: when, the computer's received bytes, VeloxFetch's received bytes.
     meter: Option<(Instant, u64, u64)>,
     /// The last window's other traffic and VeloxFetch's speed (bytes/s).
@@ -162,6 +181,11 @@ impl SmartState {
                 .and_then(|s| s.parse::<u64>().ok())
                 .filter(|v| (MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(v))
                 .unwrap_or(FLOOR_BPS),
+            policy: get(POLICY_KEY).and_then(|s| serde_json::from_str::<GamePolicy>(&format!("\"{s}\"")).ok()).unwrap_or_default(),
+            game_limit: get(GAME_LIMIT_KEY)
+                .and_then(|s| s.parse::<u64>().ok())
+                .filter(|v| (MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(v))
+                .unwrap_or(DEFAULT_GAME_LIMIT_BPS),
             ..Default::default()
         }
     }
@@ -185,6 +209,42 @@ pub fn find_running<'a>(apps: &'a [String], running: &[String]) -> Option<&'a st
             running.contains(&a) || (a.len() > LINUX_NAME_LEN && cut.iter().any(|c| a.starts_with(c.as_str())))
         })
         .map(String::as_str)
+}
+
+/// Whether a listed program counts as running, from one scan after another: on at the first sighting, off after
+/// [`GONE_AFTER_SCANS`] scans without it, and kept through failed scans for at most [`SCAN_FAIL_GRACE`].
+#[derive(Debug, Default, Clone)]
+pub struct GameWatch {
+    active: Option<String>,
+    misses: u32,
+    failing_since: Option<Instant>,
+}
+
+impl GameWatch {
+    /// One scan: `Some(found)` (the listed program found, if any) or `None` (the programs could not be listed).
+    /// Returns the program that counts as running.
+    pub fn update(&mut self, scan: Option<Option<String>>, now: Instant) -> Option<&str> {
+        match scan {
+            Some(Some(name)) => {
+                // Another listed program while one runs: the same policy goes on (no lift in between).
+                *self = GameWatch { active: Some(name), ..Default::default() };
+            }
+            Some(None) => {
+                self.failing_since = None;
+                self.misses = self.misses.saturating_add(1);
+                if self.misses >= GONE_AFTER_SCANS {
+                    self.active = None;
+                }
+            }
+            None => {
+                let since = *self.failing_since.get_or_insert(now);
+                if now.duration_since(since) >= SCAN_FAIL_GRACE {
+                    self.active = None;
+                }
+            }
+        }
+        self.active.as_deref()
+    }
 }
 
 /// The best speed after seeing `total` (bytes/s) while nothing held downloads back.
@@ -233,6 +293,16 @@ pub fn reference_speed(peak: f64, recent: f64) -> f64 {
         recent.min(peak)
     } else {
         recent
+    }
+}
+
+/// The smart bucket's limit while a listed program runs, by policy. Pause: the queue holds the downloads; the
+/// reserved minimum is for what cannot be paused that way (video jobs), so nothing runs at full speed.
+fn game_cap(policy: GamePolicy, reference: f64, share: u8, floor: u64, low: u64) -> u64 {
+    match policy {
+        GamePolicy::Adaptive => cap_with_floor(reference, share, floor),
+        GamePolicy::Low => low,
+        GamePolicy::Pause => floor,
     }
 }
 
@@ -479,6 +549,9 @@ impl DownloadManager {
             user_idle: s.user_idle,
             peak_bps: (s.peak_bps >= 1.0).then_some(s.peak_bps as u64),
             reference_bps: Some(reference_speed(s.peak_bps, s.recent_bps)).filter(|r| *r >= 1.0).map(|r| r as u64),
+            game_policy: s.policy,
+            game_limit_bps: s.game_limit,
+            game_hold: s.hold,
         }
     }
 
@@ -493,6 +566,18 @@ impl DownloadManager {
             if !(MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(&m) {
                 return Err(ManagerError::invalid("the reserved minimum must be between 32 KB/s and 1 GB/s"));
             }
+        }
+        if let Some(m) = req.game_limit_bps {
+            if !(MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(&m) {
+                return Err(ManagerError::invalid("the gaming speed limit must be between 32 KB/s and 1 GB/s"));
+            }
+            self.inner.store.set_setting(GAME_LIMIT_KEY, &m.to_string())?;
+        }
+        if let Some(p) = req.game_policy {
+            let code = serde_json::to_string(&p).unwrap_or_default();
+            self.inner.store.set_setting(POLICY_KEY, code.trim_matches('"'))?;
+        }
+        if let Some(m) = req.min_bps {
             self.inner.store.set_setting(MIN_KEY, &m.to_string())?;
         }
         if let Some(on) = req.auto {
@@ -524,10 +609,21 @@ impl DownloadManager {
             if let Some(on) = req.auto {
                 s.auto = on;
             }
+            if let Some(p) = req.game_policy {
+                s.policy = p;
+            }
+            if let Some(l) = req.game_limit_bps {
+                s.game_limit = l;
+            }
             if !s.enabled || !s.auto {
                 s.ctl.reset();
             }
-            !s.enabled || req.auto == Some(false) || req.min_bps.is_some() || req.share_percent.is_some()
+            !s.enabled
+                || req.auto == Some(false)
+                || req.min_bps.is_some()
+                || req.share_percent.is_some()
+                || req.game_policy.is_some()
+                || req.game_limit_bps.is_some()
         };
         if release {
             // Off (or a new mode / minimum): applied now, not at the next scan. Off means full speed at once.
@@ -542,7 +638,8 @@ impl DownloadManager {
         Ok(self.smart_throttle())
     }
 
-    /// What the desktop app found running (`None` = it could not tell: full speed). Applies or lifts the cap.
+    /// What the desktop app found running (`None` = it could not tell: a gaming policy in force stays for
+    /// [`SCAN_FAIL_GRACE`], then full speed). Applies or lifts the cap.
     /// Without activity information: the automatic mode keeps full speed (see [`Self::smart_throttle_observe_activity`]).
     pub fn smart_throttle_observe(&self, running: Option<&[String]>) {
         self.smart_throttle_observe_signals(running, Signals::default());
@@ -587,9 +684,12 @@ impl DownloadManager {
         let (changed, limit, reason, save_peak) = {
             let mut s = self.inner.smart.lock().unwrap();
             s.scan_ok = running.is_some();
-            let found = match running {
-                Some(r) if s.enabled => find_running(&s.apps, r).map(str::to_string),
-                _ => None,
+            let found = if s.enabled {
+                let scan = running.map(|r| find_running(&s.apps, r).map(str::to_string));
+                s.watch.update(scan, Instant::now()).map(str::to_string)
+            } else {
+                s.watch = GameWatch::default();
+                None
             };
             s.other_bps = sig.other_bps.map(|o| o.max(0.0) as u64);
             s.user_idle = sig.idle.map(|i| i >= IDLE_AFTER);
@@ -601,7 +701,7 @@ impl DownloadManager {
             } else if found.is_some() {
                 // A listed program wins; the automatic cap starts over when it closes.
                 s.ctl.reset();
-                (Some(cap_with_floor(reference, share, floor)), Reason::App)
+                (Some(game_cap(s.policy, reference, share, floor, s.game_limit)), Reason::App)
             } else if s.auto {
                 s.ctl.step_with(sig, peak, reference, share, floor)
             } else {
@@ -621,10 +721,13 @@ impl DownloadManager {
                 s.saved_peak = p;
             }
             let changed = s.active_app != found || s.limit != limit;
+            let hold = found.is_some() && s.policy == GamePolicy::Pause;
+            let hold_changed = s.hold != hold;
+            s.hold = hold;
             s.active_app = found;
             s.limit = limit;
             s.reason = reason;
-            (changed, limit, reason, save_peak)
+            (changed || hold_changed, limit, reason, save_peak)
         };
         if let Some(p) = save_peak {
             if let Err(e) = self.inner.store.set_setting(PEAK_KEY, &format!("{p:.0}")) {
@@ -634,6 +737,7 @@ impl DownloadManager {
         }
         if changed {
             self.inner.limits.set_smart(limit);
+            self.spawn_game_hold_sync();
             match limit {
                 Some(l) => tracing::info!(reason = reason.code(), limit_bps = l, "smart throttle: downloads slowed"),
                 None => tracing::info!(reason = reason.code(), "smart throttle: full speed"),
@@ -641,14 +745,16 @@ impl DownloadManager {
         }
     }
 
-    /// A new mode or minimum: an active cap follows at once (a listed program's cap, or the automatic one).
+    /// A new mode, minimum or gaming policy: an active cap follows at once (a listed program's cap, or the
+    /// automatic one), and the queue is held or let go to match the policy.
     fn reapply_smart_cap(&self) {
         let limit = {
             let mut s = self.inner.smart.lock().unwrap();
             let reference = reference_speed(s.peak_bps, s.recent_bps);
             let (share, floor) = (s.share, s.floor);
+            s.hold = s.reason == Reason::App && s.policy == GamePolicy::Pause;
             let limit = match s.reason {
-                Reason::App => Some(cap_with_floor(reference, share, floor)),
+                Reason::App => Some(game_cap(s.policy, reference, share, floor, s.game_limit)),
                 // The automatic cap follows the new settings now, and keeps its state (no lift-then-slow).
                 _ if s.limit.is_some() && s.auto => s.ctl.retarget(reference, share, floor),
                 _ => None,
@@ -657,6 +763,22 @@ impl DownloadManager {
             limit
         };
         self.inner.limits.set_smart(limit);
+        self.spawn_game_hold_sync();
+    }
+
+    /// The pause policy wants the queue held right now.
+    pub(super) fn smart_holds_queue(&self) -> bool {
+        let s = self.inner.smart.lock().unwrap();
+        s.enabled && s.hold
+    }
+
+    /// Bring the queue in line with the pause policy, in the background (the observation runs on a blocking thread
+    /// and must not wait for downloads to pause). Without a runtime (some unit tests) there is nothing to hold.
+    fn spawn_game_hold_sync(&self) {
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let m = self.clone();
+            rt.spawn(async move { m.sync_game_hold().await });
+        }
     }
 }
 
@@ -1012,5 +1134,101 @@ mod tests {
         }
         let many: Vec<String> = (0..65).map(|i| format!("app{i}")).collect();
         assert!(clean_apps(&many).is_err());
+    }
+
+    // ---------------------------------------------------------------------------------- gaming policy
+
+    fn seen(name: &str) -> Option<Option<String>> {
+        Some(Some(name.to_string()))
+    }
+
+    #[test]
+    fn a_game_counts_at_once_and_is_let_go_after_two_scans_without_it() {
+        let t = Instant::now();
+        let mut w = GameWatch::default();
+        assert_eq!(w.update(Some(None), t), None, "nothing running");
+        assert_eq!(w.update(seen("cs2"), t), Some("cs2"), "the first sighting is enough");
+        assert_eq!(w.update(Some(None), t), Some("cs2"), "one scan without it: kept (a restart, a launcher handing over)");
+        assert_eq!(w.update(Some(None), t), None, "two in a row: gone");
+    }
+
+    #[test]
+    fn a_game_that_flickers_never_makes_the_policy_flip() {
+        let t = Instant::now();
+        let mut w = GameWatch::default();
+        for _ in 0..20 {
+            assert!(w.update(seen("dota2"), t).is_some());
+            assert!(w.update(Some(None), t).is_some(), "one miss between sightings never lifts it");
+        }
+    }
+
+    #[test]
+    fn several_games_keep_the_policy_while_any_runs() {
+        let t = Instant::now();
+        let mut w = GameWatch::default();
+        w.update(seen("cs2"), t);
+        assert_eq!(w.update(seen("r5apex"), t), Some("r5apex"), "one closed, another runs: still on, no gap");
+        assert_eq!(w.update(Some(None), t), Some("r5apex"));
+        assert_eq!(w.update(Some(None), t), None);
+    }
+
+    #[test]
+    fn a_failed_scan_keeps_the_policy_for_a_while_never_for_good() {
+        let t = Instant::now();
+        let mut w = GameWatch::default();
+        assert_eq!(w.update(None, t), None, "no game known: a failed scan finds none");
+        w.update(seen("GTA5"), t);
+        assert_eq!(w.update(None, t), Some("GTA5"), "uncertain: no burst of traffic over the game");
+        assert_eq!(w.update(None, t + SCAN_FAIL_GRACE - Duration::from_secs(1)), Some("GTA5"));
+        assert_eq!(w.update(None, t + SCAN_FAIL_GRACE), None, "still failing after the grace: lifted");
+        // Back with the game: on again; a failure later starts a new grace.
+        let t2 = t + SCAN_FAIL_GRACE * 2;
+        assert_eq!(w.update(seen("GTA5"), t2), Some("GTA5"));
+        assert_eq!(w.update(None, t2 + Duration::from_secs(3)), Some("GTA5"));
+        assert_eq!(w.update(seen("GTA5"), t2 + Duration::from_secs(6)), Some("GTA5"));
+        assert_eq!(
+            w.update(None, t2 + Duration::from_secs(9) + SCAN_FAIL_GRACE - Duration::from_secs(1)),
+            Some("GTA5"),
+            "the grace restarted"
+        );
+    }
+
+    #[test]
+    fn each_policy_has_its_own_cap_and_none_is_zero() {
+        let mb = 1024.0 * 1024.0;
+        assert_eq!(game_cap(GamePolicy::Adaptive, 40.0 * mb, 25, FLOOR_BPS, 999), (10.0 * mb) as u64, "the mode's share, as before");
+        assert_eq!(game_cap(GamePolicy::Low, 40.0 * mb, 25, FLOOR_BPS, 300_000), 300_000, "the chosen limit");
+        assert_eq!(
+            game_cap(GamePolicy::Pause, 40.0 * mb, 25, FLOOR_BPS, 300_000),
+            FLOOR_BPS,
+            "the queue pauses; the rest keeps the minimum"
+        );
+        for p in [GamePolicy::Adaptive, GamePolicy::Low, GamePolicy::Pause] {
+            assert!(game_cap(p, 0.0, 10, MIN_FLOOR_BPS, MIN_FLOOR_BPS) > 0, "{p:?}: zero would mean no limit at all");
+        }
+    }
+
+    #[test]
+    fn unrelated_programs_never_count_as_a_game() {
+        let apps: Vec<String> = DEFAULT_APPS.iter().map(|s| s.to_string()).collect();
+        let everyday = v(&[
+            "steam",
+            "steamwebhelper",
+            "EpicGamesLauncher",
+            "Battle.net",
+            "explorer.exe",
+            "chrome",
+            "firefox",
+            "Discord",
+            "code",
+            "gamemoded",
+            "csrss.exe",
+            "teamviewer",
+            "zoomit",
+            "GTA5Launcher",
+            "cs2-helper",
+            "overwatch_updater",
+        ]);
+        assert_eq!(find_running(&apps, &everyday), None, "launchers, helpers and look-alikes are not the game");
     }
 }
