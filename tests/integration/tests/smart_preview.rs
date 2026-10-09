@@ -4,7 +4,10 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use download_manager::{DownloadManager, ManagerConfig, ManagerError, NewDownload, SetSmartThrottle, ThrottleSignals};
+use download_manager::{
+    DownloadManager, GamePolicy, ManagerConfig, ManagerError, NewDownload, PauseQueue, SetSmartThrottle, SetSpeedLimit, SpeedTarget,
+    ThrottleSignals,
+};
 use downloader_core::DownloadStatus;
 use velox_integration_tests::{random_data, serve};
 
@@ -39,7 +42,7 @@ fn names(v: &[&str]) -> Vec<String> {
 // ------------------------------------------------------------------------------------ smart throttle
 
 #[tokio::test(flavor = "multi_thread")]
-async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at_once() {
+async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_when_it_closes() {
     let b = base("throttle");
     let m = manager(&b).await;
     let s = m.smart_throttle();
@@ -62,6 +65,7 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
     let s = m.smart_throttle();
     assert_eq!(s.active_app.as_deref(), Some("VeloxTestGame"));
     assert_eq!(s.limit_bps, Some(1024 * 1024), "before any speed is known: 1 MB/s");
+    assert_eq!(s.game_policy, GamePolicy::Adaptive, "the default policy is the one it always had");
 
     // A download started while the game runs is held to about 1 MB/s.
     let data = random_data(6 * MB, 7);
@@ -72,7 +76,10 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
     assert!(mid < 4 * MB as u64, "throttled: {mid} bytes after 2 s");
     assert!(mid > 0, "but still moving");
 
-    // The game closes: full speed at once (not at the next restart of the download).
+    // The game closes: full speed after two scans without it (one could be a restart), not at the next restart of
+    // the download.
+    m.smart_throttle_observe(Some(&names(&["explorer.exe"])));
+    assert!(m.smart_throttle().limit_bps.is_some(), "one scan without it: kept");
     m.smart_throttle_observe(Some(&names(&["explorer.exe"])));
     assert!(m.smart_throttle().limit_bps.is_none());
     let t = Instant::now();
@@ -80,12 +87,19 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
     assert!(t.elapsed() < Duration::from_secs(3), "the rest went at full speed: {:?}", t.elapsed());
     assert_eq!(std::fs::read(m.get_download(d.id).await.unwrap().destination).unwrap(), *data);
 
-    // A failed scan never leaves downloads slow.
+    // A failed scan keeps the policy for a short while (no burst over the game), and a scan that works decides.
     m.smart_throttle_observe(Some(&names(&["VeloxTestGame.exe"])));
     assert!(m.smart_throttle().limit_bps.is_some());
     m.smart_throttle_observe(None);
     let s = m.smart_throttle();
-    assert!(s.limit_bps.is_none() && !s.scan_ok, "{s:?}");
+    assert!(s.limit_bps.is_some() && !s.scan_ok && s.active_app.is_some(), "{s:?}");
+    m.smart_throttle_observe(Some(&[]));
+    m.smart_throttle_observe(Some(&[]));
+    let s = m.smart_throttle();
+    assert!(s.limit_bps.is_none() && s.scan_ok, "{s:?}");
+    // Without a game, a failed scan slows nothing.
+    m.smart_throttle_observe(None);
+    assert!(m.smart_throttle().limit_bps.is_none());
 
     // Turning it off lifts the cap immediately, without waiting for a scan.
     m.smart_throttle_observe(Some(&names(&["VeloxTestGame.exe"])));
@@ -269,6 +283,193 @@ async fn changing_modes_while_capped_never_stops_a_running_download() {
     }
     assert!(still.is_empty(), "no bytes for half a second at (ms): {still:?}");
     let _ = m.cancel_download(d.id).await;
+}
+
+// ------------------------------------------------------------------------------------ gaming policy
+
+async fn wait_for(what: &str, secs: u64, mut ok: impl AsyncFnMut() -> bool) {
+    let t = Instant::now();
+    while !ok().await {
+        assert!(t.elapsed() < Duration::from_secs(secs), "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn gaming(m: &DownloadManager, policy: GamePolicy) {
+    m.set_smart_throttle(SetSmartThrottle {
+        enabled: Some(true),
+        auto: Some(false),
+        apps: Some(names(&["VeloxTestGame", "OtherTestGame"])),
+        game_policy: Some(policy),
+        game_limit_bps: Some(256 * 1024),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pause_policy_pauses_downloads_during_a_game_and_resumes_only_those_it_paused() {
+    let b = base("game-pause");
+    let m = manager(&b).await;
+    gaming(&m, GamePolicy::Pause).await;
+    let data = random_data(8 * MB, 31);
+    let srv = serve(data.clone()).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(15);
+    let a = m.create_download(NewDownload { url: srv.url("/a.bin"), ..Default::default() }).await.unwrap();
+    let mine = m.create_download(NewDownload { url: srv.url("/b.bin"), ..Default::default() }).await.unwrap();
+    let before = m.create_download(NewDownload { url: srv.url("/c.bin"), ..Default::default() }).await.unwrap();
+    wait_for("the downloads to run", 10, async || m.get_download(a.id).await.unwrap().downloaded > 0).await;
+    // Paused by the user before the game.
+    m.pause_download(before.id).await.unwrap();
+
+    // The game starts: running downloads pause (progress kept), nothing new starts.
+    m.smart_throttle_observe(Some(&names(&["VeloxTestGame.exe"])));
+    wait_for("the queue to hold", 20, async || {
+        m.get_queue_state().await.unwrap().game_hold
+            && m.get_download(a.id).await.unwrap().status == DownloadStatus::Paused
+            && m.get_download(mine.id).await.unwrap().status == DownloadStatus::Paused
+    })
+    .await;
+    let q = m.get_queue_state().await.unwrap();
+    assert!(!q.gate_open && !q.paused && q.held == 2, "held for the game, not paused by the user: {q:?}");
+    let s = m.smart_throttle();
+    assert!(s.game_hold && s.reason == "app" && s.limit_bps == Some(s.min_bps), "{s:?}");
+    let kept = m.get_download(a.id).await.unwrap().downloaded;
+    assert!(kept > 0, "progress kept");
+    let late = m.create_download(NewDownload { url: srv.url("/late.bin"), ..Default::default() }).await.unwrap();
+    // The user pauses one of the held downloads during the game: it is theirs now.
+    m.pause_download(mine.id).await.unwrap();
+
+    // Another listed game, then the first closes: still held (and the same scan again changes nothing).
+    for _ in 0..3 {
+        m.smart_throttle_observe(Some(&names(&["OtherTestGame"])));
+    }
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(m.get_queue_state().await.unwrap().game_hold);
+    assert_eq!(m.get_download(late.id).await.unwrap().downloaded, 0, "nothing new started during the game");
+    assert_eq!(m.get_download(a.id).await.unwrap().status, DownloadStatus::Paused);
+
+    // All games closed (two scans): what the game paused resumes and finishes intact; the user's pauses stay.
+    m.smart_throttle_observe(Some(&[]));
+    m.smart_throttle_observe(Some(&[]));
+    wait_for("the queue to let go", 10, async || !m.get_queue_state().await.unwrap().game_hold).await;
+    wait_status(&m, a.id, DownloadStatus::Completed, 30).await;
+    assert_eq!(std::fs::read(m.get_download(a.id).await.unwrap().destination).unwrap(), *data);
+    wait_status(&m, late.id, DownloadStatus::Completed, 30).await;
+    assert_eq!(m.get_download(mine.id).await.unwrap().status, DownloadStatus::Paused, "paused by the user during the game");
+    assert_eq!(m.get_download(before.id).await.unwrap().status, DownloadStatus::Paused, "paused by the user before the game");
+    let q = m.get_queue_state().await.unwrap();
+    assert!(q.gate_open && q.held == 0 && m.smart_throttle().limit_bps.is_none(), "{q:?}");
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_users_own_queue_pause_and_limits_outlast_a_game() {
+    let b = base("game-user");
+    let m = manager(&b).await;
+    gaming(&m, GamePolicy::Pause).await;
+    m.set_speed_limit(SetSpeedLimit { target: SpeedTarget::Global, bytes_per_sec: Some(2 * MB as u64) }).await.unwrap();
+    // The user paused the queue (running downloads go on) before the game.
+    let srv = serve(random_data(24 * MB, 33)).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(15);
+    let a = m.create_download(NewDownload { url: srv.url("/a.bin"), ..Default::default() }).await.unwrap();
+    wait_for("the download to run", 10, async || m.get_download(a.id).await.unwrap().downloaded > 0).await;
+    m.pause_queue(PauseQueue { pause_running: false }).await.unwrap();
+    assert_eq!(m.get_download(a.id).await.unwrap().status, DownloadStatus::Downloading);
+
+    // The game pauses the running download although the gate was already closed.
+    m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+    wait_status(&m, a.id, DownloadStatus::Paused, 20).await;
+    // During the game the user changes their own limit.
+    m.set_speed_limit(SetSpeedLimit { target: SpeedTarget::Global, bytes_per_sec: Some(3 * MB as u64) }).await.unwrap();
+
+    // The game closes: the user's queue pause and their new limit stay; nothing resumes while the queue is paused.
+    m.smart_throttle_observe(Some(&[]));
+    m.smart_throttle_observe(Some(&[]));
+    wait_for("the game hold to lift", 10, async || !m.get_queue_state().await.unwrap().game_hold).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let q = m.get_queue_state().await.unwrap();
+    assert!(q.paused && !q.gate_open && q.held == 1, "{q:?}");
+    assert_eq!(m.get_download(a.id).await.unwrap().status, DownloadStatus::Paused);
+    assert_eq!(m.speed_limits().global, Some(3 * MB as u64), "the user's change during the game is kept");
+    // The user resumes the queue: the held download goes on.
+    m.resume_queue().await.unwrap();
+    wait_for("the download to resume", 10, async || m.get_download(a.id).await.unwrap().status == DownloadStatus::Downloading).await;
+    let _ = m.cancel_download(a.id).await;
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restart_during_a_game_never_leaves_downloads_held() {
+    let b = base("game-restart");
+    let m = manager(&b).await;
+    gaming(&m, GamePolicy::Pause).await;
+    let data = random_data(6 * MB, 35);
+    let srv = serve(data.clone()).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(15);
+    let a = m.create_download(NewDownload { url: srv.url("/a.bin"), ..Default::default() }).await.unwrap();
+    wait_for("the download to run", 10, async || m.get_download(a.id).await.unwrap().downloaded > 0).await;
+    m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+    wait_status(&m, a.id, DownloadStatus::Paused, 20).await;
+    m.shutdown().await;
+    drop(m);
+
+    // Launched again with no scan yet (or the game gone): nothing is held, the download goes on by itself.
+    *srv.state.chunk_delay.lock().unwrap() = Duration::ZERO;
+    let m = manager(&b).await;
+    let s = m.smart_throttle();
+    assert!(s.enabled && s.game_policy == GamePolicy::Pause && s.game_limit_bps == 256 * 1024, "settings kept: {s:?}");
+    assert!(!s.game_hold && s.limit_bps.is_none() && s.active_app.is_none(), "no stale override: {s:?}");
+    wait_status(&m, a.id, DownloadStatus::Completed, 30).await;
+    assert_eq!(std::fs::read(m.get_download(a.id).await.unwrap().destination).unwrap(), *data);
+    assert!(!m.get_queue_state().await.unwrap().game_hold);
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn changing_the_policy_during_a_game_applies_at_once_and_flickers_change_nothing() {
+    let b = base("game-switch");
+    let m = manager(&b).await;
+    gaming(&m, GamePolicy::Low).await;
+    let srv = serve(random_data(64 * MB, 37)).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(5);
+    let a = m.create_download(NewDownload { url: srv.url("/a.bin"), ..Default::default() }).await.unwrap();
+    wait_for("the download to run", 10, async || m.get_download(a.id).await.unwrap().downloaded > 0).await;
+
+    m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+    assert_eq!(m.smart_throttle().limit_bps, Some(256 * 1024), "low: the chosen limit");
+    // About 256 KB/s while the game runs.
+    let from = m.get_download(a.id).await.unwrap().downloaded;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let got = m.get_download(a.id).await.unwrap().downloaded - from;
+    assert!(got > 0 && got < 1200 * 1024, "held near 256 KB/s: {got} bytes in 2 s");
+
+    // A game that flickers (seen, missed once, seen...) never lifts the limit.
+    let game = names(&["VeloxTestGame"]);
+    for i in 0..10 {
+        m.smart_throttle_observe(Some(if i % 2 == 0 { &[] } else { &game[..] }));
+        assert_eq!(m.smart_throttle().limit_bps, Some(256 * 1024), "scan {i}");
+    }
+
+    // The user switches to pause during the game: held at once; back to adaptive: let go at once.
+    m.set_smart_throttle(SetSmartThrottle { game_policy: Some(GamePolicy::Pause), ..Default::default() }).await.unwrap();
+    wait_status(&m, a.id, DownloadStatus::Paused, 20).await;
+    assert!(m.smart_throttle().game_hold);
+    m.set_smart_throttle(SetSmartThrottle { game_policy: Some(GamePolicy::Adaptive), ..Default::default() }).await.unwrap();
+    wait_for("the download to resume", 10, async || m.get_download(a.id).await.unwrap().status == DownloadStatus::Downloading).await;
+    let s = m.smart_throttle();
+    assert!(!s.game_hold && s.limit_bps.is_some() && s.reason == "app", "adaptive: the mode's share while the game runs: {s:?}");
+    // Turned off during the game: full speed and nothing held.
+    m.set_smart_throttle(SetSmartThrottle { enabled: Some(false), ..Default::default() }).await.unwrap();
+    let s = m.smart_throttle();
+    assert!(s.limit_bps.is_none() && !s.game_hold && s.active_app.is_none(), "{s:?}");
+    for bad in [Some(1024), Some(2 * 1024 * 1024 * 1024)] {
+        let r = m.set_smart_throttle(SetSmartThrottle { game_limit_bps: bad, ..Default::default() }).await;
+        assert!(matches!(r, Err(ManagerError::InvalidInput(_))), "{bad:?}");
+    }
+    let _ = m.cancel_download(a.id).await;
+    m.shutdown().await;
 }
 
 // -------------------------------------------------------------------------------------- live preview

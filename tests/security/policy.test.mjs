@@ -707,15 +707,24 @@ test("live preview: main window only, a download id only, media types only, nosn
   assert.ok(!/text\/html|application\/|image\/svg/.test(pv.slice(pv.indexOf("pub fn media_type"), pv.indexOf("pub fn available_runs"))), "only audio / video types");
 });
 
-test("smart throttle: process names only, nothing stored or sent, full speed on any failure", () => {
+test("smart throttle: process and executable names only, nothing stored or sent, full speed soon after any failure", () => {
   const cargo = read("apps", "desktop", "src-tauri", "Cargo.toml");
   assert.match(cargo, /sysinfo = \{ version = "[^"]+", default-features = false, features = \["system"\] \}/);
   const st = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "smart_throttle.rs"));
-  assert.match(st, /ProcessRefreshKind::nothing\(\)/, "no CPU, memory, command line or environment of other programs");
-  assert.ok(!/tracing::|println!|eprintln!|cmd\(\)|environ|\.exe\(\)/.test(st), "process details are never logged or read beyond the name");
+  assert.match(st, /ProcessRefreshKind::nothing\(\)\.with_exe\(UpdateKind::OnlyIfNotSet\)/, "no CPU, memory, command line or environment of other programs; the executable read once");
+  assert.ok(!/tracing::|println!|eprintln!|cmd\(\)|environ|\.cwd\(\)|\.root\(\)|\.user_id\(\)/.test(st), "process details are never logged or read beyond names");
+  assert.match(st, /p\.exe\(\)\.and_then\(\|e\| e\.file_name\(\)\)/, "of the executable only its file name is kept (never its folder)");
   assert.match(st, /if !matches!\(tokio::time::timeout\(SCAN_LIMIT, scan\)\.await, Ok\(Ok\(\(\)\)\)\) \{[\s\S]{0,120}manager\.smart_throttle_observe\(None\);/, "a failed, slow or panicking scan means full speed");
   const core = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
   assert.match(core, /enabled: get\(ENABLED_KEY\)\.as_deref\(\) == Some\("true"\)/, "off unless the user turned it on");
+  // Gaming policy: a failed scan keeps it for a bounded time only; the queue hold lives in memory (a restart never
+  // leaves downloads held); the low limit can never be zero (zero would mean "no limit").
+  assert.match(core, /pub const SCAN_FAIL_GRACE: Duration = Duration::from_secs\(\d{1,2}\);/, "a failed scan lifts the policy within seconds");
+  assert.match(core, /if now\.duration_since\(since\) >= SCAN_FAIL_GRACE \{\s*self\.active = None;/);
+  assert.match(core, /req\.game_limit_bps \{\s*if !\(MIN_FLOOR_BPS\.\.=MAX_FLOOR_BPS\)\.contains\(&m\)/, "the gaming limit is bounded");
+  const qu = read("crates", "download-manager", "src", "manager", "queue.rs");
+  assert.ok(!/GAME_HOLD_KEY|"queue\.game/.test(qu), "the game hold is never saved");
+  assert.match(qu, /!self\.manual_paused && !self\.game_hold && self\.schedule\.is_open\(now\)/);
   // Automatic mode: of the keyboard and mouse only the idle time is known; traffic is a total, never per program
   // or per site; no counters means full speed; downloads never go below the reserved minimum.
   const sys = withoutTestModules(read("crates", "system-integration", "src", "system.rs"));

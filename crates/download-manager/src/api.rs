@@ -596,6 +596,26 @@ pub struct SmartThrottleDto {
     /// The speed the caps are a share of: what downloads got lately while nothing held them back, at most the
     /// best speed seen (the gauge shows the cap against it).
     pub reference_bps: Option<u64>,
+    /// What downloads do while a listed program (a game, a call) runs.
+    pub game_policy: GamePolicy,
+    /// The speed limit of [`GamePolicy::Low`] (bytes/s).
+    pub game_limit_bps: u64,
+    /// [`GamePolicy::Pause`] holds the queue right now (running downloads paused, none started).
+    pub game_hold: bool,
+}
+
+/// What downloads do while a listed program (a game, a call) runs. Nothing the user set is changed: the policy is
+/// laid over the user's settings while the program runs and lifted when it closes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GamePolicy {
+    /// The chosen share of the speed downloads had (Smart throttle's mode); the default, as before.
+    #[default]
+    Adaptive,
+    /// A fixed speed limit (`game_limit_bps`).
+    Low,
+    /// Running downloads pause and no new one starts; they resume when the program closes.
+    Pause,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -607,6 +627,9 @@ pub struct SetSmartThrottle {
     pub min_bps: Option<u64>,
     pub apps: Option<Vec<String>>,
     pub share_percent: Option<u8>,
+    pub game_policy: Option<GamePolicy>,
+    /// The speed limit of [`GamePolicy::Low`] (bytes/s), 32 KB/s to 1 GB/s.
+    pub game_limit_bps: Option<u64>,
 }
 
 /// How the app behaves on the desktop (see `manager/desktop.rs`): tray, start at login, notifications, and the
@@ -807,6 +830,8 @@ pub struct QueueStateDto {
     pub waiting: usize,
     /// Downloads paused by the queue or schedule that will resume when it reopens.
     pub held: usize,
+    /// The queue is held because a listed program runs (Smart throttle's "pause" policy).
+    pub game_hold: bool,
     pub schedule: Schedule,
     pub schedule_open: bool,
     /// Local time of the next window boundary, `YYYY-MM-DDTHH:MM`.

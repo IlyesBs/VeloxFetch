@@ -1102,5 +1102,13 @@
   "doc.btn.openFolder": "Open download folder",
   "doc.btn.restart": "Restart safely",
   "doc.btn.retryAnyway": "Retry now",
-  "doc.btn.retry": "Retry"
+  "doc.btn.retry": "Retry",
+  "thr.appPaused": "{app} is running · downloads paused until it closes",
+  "qc.game": "Paused while a game or call runs · {n} will resume when it closes",
+  "smart.policy": "While a listed program runs",
+  "smart.policyAdaptive": "Give way by the chosen mode (recommended)",
+  "smart.policyLow": "Limit downloads to a low speed",
+  "smart.policyPause": "Pause downloads",
+  "smart.policyLimit": "Low speed",
+  "smart.policyHint": "Applied when the program starts and lifted when it closes. Your own pauses, limits and queue settings are never changed."
 }

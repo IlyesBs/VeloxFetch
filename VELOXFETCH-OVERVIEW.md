@@ -190,8 +190,11 @@ Details: `docs/download-intelligence.md`.
   - **Automatic mode** (on by default once Smart throttle is on): when something else uses the internet while the
     user is at the computer (browsing, a video), downloads slow down; heavy traffic while the user is away slows them
     less; when the network is free or the computer idle (no input for 2 minutes), full speed.
-  - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), downloads keep only a
-    share of the speed; full speed again when it closes.
+  - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), the gaming policy applies:
+    *give way by the mode* (default: a share of the speed), *a low speed limit*, or *pause* (running downloads pause,
+    none starts; only those resume when it closes, the user's own pauses stay). Detected at once, lifted after two
+    scans without it (no flip-flop), kept at most 15 s if scans fail; matched by process or executable name; nothing
+    the user set is changed.
 - **Measured right:** the other traffic is the computer's received bytes minus VeloxFetch's own, both counted over the
   same seconds (with an allowance for packet headers, and a larger one while a limit paces downloads, when the
   system receives data by bursts). It is never fooled by VeloxFetch's own speed changing.
@@ -564,7 +567,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
 | + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions) |
-| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour |
+| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, debounced detection, safe on scan failure and restart) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |

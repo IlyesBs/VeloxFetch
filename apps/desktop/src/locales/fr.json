@@ -1102,5 +1102,13 @@
   "doc.btn.openFolder": "Ouvrir le dossier",
   "doc.btn.restart": "Recommencer sans risque",
   "doc.btn.retryAnyway": "Réessayer maintenant",
-  "doc.btn.retry": "Réessayer"
+  "doc.btn.retry": "Réessayer",
+  "thr.appPaused": "{app} est lancé · téléchargements en pause jusqu’à sa fermeture",
+  "qc.game": "En pause pendant un jeu ou un appel · {n} reprendront à sa fermeture",
+  "smart.policy": "Pendant qu’un programme de la liste tourne",
+  "smart.policyAdaptive": "Céder la place selon le mode choisi (recommandé)",
+  "smart.policyLow": "Limiter les téléchargements à une vitesse basse",
+  "smart.policyPause": "Mettre les téléchargements en pause",
+  "smart.policyLimit": "Vitesse basse",
+  "smart.policyHint": "Appliqué au lancement du programme et levé à sa fermeture. Vos pauses, limites et réglages de file ne sont jamais modifiés."
 }

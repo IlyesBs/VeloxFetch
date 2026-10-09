@@ -324,3 +324,22 @@ Details in `docs/ui-performance.md`.
 |---|---|
 | `apps/desktop/src/perf.test.ts` | 8 tests: the backdrop picture has the CSS lights (same order, own-colour fade, scaled ellipses) and is used; the window is asked for at commit by a direct call; the Linux block turns shadows off, keeps meaningful rings as outlines, drops drop-shadow filters, keeps the glass highlight |
 | `tests/e2e/desktop-perf.mjs` | 5 checks in the real app, prints the numbers: shown within 150 ms of the script, painted within 1 s, >= 45 fps with downloads running, >= 40 fps scrolling over them, no shadow on Linux cards / panels. `VELOX_E2E_DISPLAY=:0` (real screen), `PERF_WAYLAND=1`, `PERF_CSS` (a stylesheet laid over the page, to find what costs) |
+
+## Gaming policy (Smart throttle)
+
+Details in `docs/smart-throttle-and-preview.md` > Gaming policy.
+
+| Where | What |
+|---|---|
+| `manager/smart_throttle.rs` | 6 tests: `GameWatch` on at the first sighting / off after two scans, a flickering game never flips it, several games, failed scans kept 15 s then lifted (given clock, no waiting), each policy's cap is never zero, launchers / helpers / look-alikes never match |
+| `src-tauri/src/smart_throttle.rs` | a program that renamed its main thread is found by its executable's name (a copy of the test binary; fails without the executable match) |
+| `tests/integration/tests/smart_preview.rs` | 4 new tests through the real manager and engine: pause (only what it paused resumes, intact; the user's pauses before / during the game stay; nothing new starts; a second game keeps it), the user's queue pause and a limit changed during the game outlast it, a restart during a game leaves nothing held, low / switching policy mid-game / flicker / off / bad limits; the first test now lifts after two scans and keeps the policy through a failed scan |
+| `tests/integration/tests/smart_queue.rs` | the call ends after two scans |
+| `apps/desktop/src/throttle.test.ts` | the status line for low / pause, never "a game" without one; the policy is saved like other settings |
+| `tests/e2e/desktop-gaming.mjs` | 17 checks in the real app with a stand-in game (this runtime copied under a test name and left idle): the Settings choices, pause / resume through the real process scan, the card and Queue view texts, low speed held, off |
+| `tests/security/policy.test.mjs` | "smart throttle": executable file names only, bounded grace, game hold never saved, gate rule, bounded limit |
+
+Results (2026-10-09, Linux): Rust 669 passed (workspace); frontend 91; policy 42/42; e2e gaming 17/17, throttle, ipc,
+views, redesign pass; `desktop-queue.mjs` stops at its last dry-run power step as before this change. Once, under the
+full parallel run, `smart_preview.rs`'s preview-order check (a timing bound, no gaming code) failed and passed 3/3
+when rerun.

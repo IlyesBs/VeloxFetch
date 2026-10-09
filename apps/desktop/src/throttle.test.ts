@@ -33,7 +33,7 @@ vi.mock("./hooks", () => ({
   store: { toast: (_k: string, m: string) => server.toasts.push(m), getState: () => ({ metrics: { speedBps: 0 } }) },
 }));
 
-const { throttleStore, gaugeShare } = await import("./throttle");
+const { throttleStore, gaugeShare, throttleStatus } = await import("./throttle");
 
 const base: SmartThrottle = {
   enabled: false,
@@ -49,6 +49,9 @@ const base: SmartThrottle = {
   userIdle: null,
   peakBps: null,
   referenceBps: null,
+  gamePolicy: "adaptive",
+  gameLimitBps: 524288,
+  gameHold: false,
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -133,5 +136,24 @@ describe("Smart throttle state in the window", () => {
     expect(gaugeShare({ ...base, enabled: true, limitBps: 500, reason: "app" })).toBe(0.25);
     expect(gaugeShare({ ...base, enabled: true, limitBps: 500, reason: "browsing" })).toBe(0.5);
     expect(gaugeShare({ ...base, enabled: true, limitBps: 10, referenceBps: 1_000_000 })).toBe(0.04);
+  });
+
+  it("a game's policy is shown as it is: limited to a speed, or downloads paused until it closes", () => {
+    const t = (k: string, v?: Record<string, string | number>) => `${k} ${JSON.stringify(v ?? {})}`;
+    const playing: SmartThrottle = { ...base, enabled: true, reason: "app", activeApp: "cs2", limitBps: 262144, gamePolicy: "low" };
+    expect(throttleStatus(t, playing)).toMatch(/^thr\.app .*"speed":"256/);
+    expect(throttleStatus(t, { ...playing, gamePolicy: "pause", gameHold: true })).toBe('thr.appPaused {"app":"cs2"}');
+    // Never "a game" without a detected program.
+    expect(throttleStatus(t, { ...base, enabled: true, reason: "fullFree" })).toMatch(/^thr\.fullFree/);
+  });
+
+  it("the policy is changed like any other setting: at once, and sent to the app", async () => {
+    void throttleStore.save({ gamePolicy: "pause" });
+    expect(throttleStore.get()?.gamePolicy).toBe("pause");
+    await tick();
+    expect(server.sets.map((x) => x.patch)).toEqual([{ gamePolicy: "pause" }]);
+    server.sets[0]?.resolve();
+    await tick();
+    expect(server.state.gamePolicy).toBe("pause");
   });
 });

@@ -38,7 +38,9 @@ export function throttleStatus(
   const speed = formatSpeed(s.limitBps ?? 0);
   switch (s.reason) {
     case "app":
-      return t("thr.app", { app: s.activeApp ?? "", speed });
+      return s.gameHold
+        ? t("thr.appPaused", { app: s.activeApp ?? "" })
+        : t("thr.app", { app: s.activeApp ?? "", speed });
     case "browsing":
       return t("thr.browsing", { speed });
     case "busy":

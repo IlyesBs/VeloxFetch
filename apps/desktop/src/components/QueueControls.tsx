@@ -27,12 +27,14 @@ export function QueueControls() {
   let status: string;
   if (q.paused) {
     status = q.held > 0 ? t("qc.pausedHeld", { n: q.held }) : t("qc.paused");
+  } else if (q.gameHold) {
+    status = t("qc.game", { n: q.held });
   } else if (waitingForWindow) {
     status = q.nextChange ? t("qc.outsideOpens", { when: formatWhen(q.nextChange) }) : t("qc.outside");
   } else {
     status = t("qc.running", { r: running, w: waiting });
   }
-  const idle = q.paused || waitingForWindow;
+  const idle = q.paused || waitingForWindow || !!q.gameHold;
 
   return (
     <section className="card p-4" aria-label={t("qc.label")} data-testid="queue-controls">

@@ -186,6 +186,16 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    status never sticks on "browsing". While capped, click Aggressive / Balanced / Conservative and the switch quickly
    several times: the download never shows 0 B/s, the switch never flicks back, the gauge's centre stays in the middle and
    "Conservative" is written in full. Choosing a mode while it is off turns it on.
+4b. Gaming policy (once per OS): Settings > Speed > Smart throttle > "While a listed program runs".
+   * *Pause downloads*: with two large downloads running, pause one yourself, then start the listed program: within ~3 s
+     the other pauses (its progress stays), the card says "… is running · downloads paused until it closes", the Queue
+     view says "Paused while a game or call runs · 1 will resume when it closes"; add a new download: it does not start.
+     Close the program: within ~6 s the download it paused resumes from where it was, the new one starts, yours stays
+     paused. Repeat, and quit VeloxFetch during the game: at the next launch nothing stays held.
+   * *Limit downloads to a low speed* (e.g. 256 KB/s): with the program running the speed stays near it, nothing pauses;
+     change your own maximum speed meanwhile: it is still set after the program closes.
+   * *Give way by the chosen mode* (default): the same as step 1.
+   * Close and reopen the program quickly: the policy does not flip off in between.
 5. Speed without Smart throttle: a large download from a server that limits connections (many mirrors do) keeps a steady
    speed and connection count, instead of swinging between full and nearly nothing every ~15 s.
 

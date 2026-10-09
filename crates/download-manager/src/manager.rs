@@ -35,7 +35,10 @@ use pending::PendingList;
 pub use preview::{media_type as preview_media_type, PreviewResponse};
 use queue::QueueState;
 pub use queues::MAIN_QUEUE;
-pub use smart_throttle::{Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER};
+pub use smart_throttle::{
+    find_running as smart_throttle_find_running, Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS,
+    IDLE_AFTER as THROTTLE_IDLE_AFTER,
+};
 use storage::{Sorter, Storage};
 
 /// Time constant of the speed shown for each download: long enough that the short pause between two parts of
@@ -125,6 +128,8 @@ struct Inner {
     network: Mutex<network::Network>,
     /// Serialises gate changes (pause/resume queue, schedule boundaries).
     queue_lock: tokio::sync::Mutex<()>,
+    /// Serialises Smart throttle's pause policy holding / letting go of the queue.
+    game_hold_lock: tokio::sync::Mutex<()>,
     /// Serialises changes to the saved diagnostics of downloads (a run ending while the next one starts).
     diag_lock: tokio::sync::Mutex<()>,
     shutting_down: AtomicBool,
@@ -273,6 +278,7 @@ impl DownloadManager {
             sealer: settings_sealer,
             network: Mutex::new(network),
             queue_lock: tokio::sync::Mutex::new(()),
+            game_hold_lock: tokio::sync::Mutex::new(()),
             diag_lock: tokio::sync::Mutex::new(()),
             shutting_down: AtomicBool::new(false),
             awake: Mutex::new(None),
@@ -501,6 +507,7 @@ impl DownloadManager {
     pub async fn pause_download(&self, id: i64) -> Result<DownloadDto, ManagerError> {
         self.inner.queue.lock().unwrap().note_user_pause();
         self.user_took_over(id).await;
+        self.forget_held(id).await;
         match self.active_handle(id) {
             Some((control, mut done)) => {
                 control.pause();

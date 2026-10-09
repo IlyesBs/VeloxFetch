@@ -20,10 +20,11 @@ how segments are planned or how files are written; each one enters the engine th
 
 ```text
 src-tauri/src/smart_throttle.rs   every 3 s (Skip on missed ticks), only while enabled:
-    sysinfo: process NAMES only (ProcessRefreshKind::nothing(), ~2-6 ms), on a blocking thread, 2 s limit
+    sysinfo: process NAMES + executable FILE NAMES only (ProcessRefreshKind::nothing().with_exe(OnlyIfNotSet),
+             ~7 ms for 530 processes in release, the same as names alone), on a blocking thread, 2 s limit
     + automatic mode: SystemIntegration::user_idle()   (time since the last input only; ~1-2 ms)
     -> manager.smart_throttle_observe_activity(names, idle)      (on the same blocking thread)
-                                                                  timeout / panic -> observe(None) = full speed
+                                                                  timeout / panic -> observe(None) = unknown
 download-manager/src/manager/smart_throttle.rs
     measure: the computer's received bytes (SysIo::net_received_total, read now) and VeloxFetch's received bytes
              (session total + what running downloads received since their last tick), at the same moment;
@@ -31,11 +32,65 @@ download-manager/src/manager/smart_throttle.rs
              (signed; first reading, a gap over 30 s or counters that went back start over; two calls closer
              than 1.5 s reuse the last window)
     reference = what downloads got lately while nothing held them back (at most the best speed seen)
-    listed program running?   yes -> cap = mode share of the reference (at least the reserved minimum)
+    listed program running?   GameWatch (on at the first sighting, off after 2 scans without, kept <= 15 s
+                              through failed scans)
+                              yes -> by gaming policy: adaptive = mode share of the reference (at least the
+                                     reserved minimum); low = the chosen limit; pause = the reserved minimum and
+                                     the queue held (sync_game_hold)
     else automatic mode?      Controller::step_with(other, idle, mine, paced, peak, reference, share, minimum)
                               -> cap or full speed, and why
     -> RateLimits::set_smart(cap)    (only when it changed; logged with the reason)
 ```
+
+### Gaming policy (October 2026)
+
+What downloads do while a listed program (a game, a call) runs. Settings > Speed > Smart throttle > "While a listed
+program runs"; `SetSmartThrottle { game_policy, game_limit_bps }`; saved as `smart_throttle.game_policy` and
+`smart_throttle.game_limit_bps`.
+
+| Policy | Smart bucket while the program runs | Queue | Default |
+|---|---|---|---|
+| `adaptive` | the mode's share of what downloads got lately (at least the reserved minimum), as before this change | untouched | yes (no change for existing users) |
+| `low` | the chosen limit (32 KB/s - 1 GB/s; default 512 KB/s), never zero | untouched | |
+| `pause` | the reserved minimum (for what the queue cannot pause: video jobs) | gate closed, running downloads paused and remembered (`held`), nothing new starts | |
+
+**Detection** (`GameWatch`, pure, unit tested with a given clock): the listed name (or the executable's file name)
+seen once applies the policy; it is lifted after `GONE_AFTER_SCANS` = 2 successful scans in a row without any listed
+program (3-6 s: a launcher handing over to the game, a program restarting or a flicker never lift it in between).
+Another listed program taking over keeps it on without a gap. A failed scan (`observe(None)`: listing failed, took
+over 2 s or panicked) keeps a policy in force for `SCAN_FAIL_GRACE` = 15 s, then lifts it; with no program known, a
+failed scan finds none. Matching is on whole names, without case or `.exe` (a 15-byte Linux name may match a longer
+listed name it starts); launchers, helpers and look-alikes (`steam`, `cs2-helper`, `GTA5Launcher`, `teamviewer` for
+`Teams`) never match. The executable's file name counts because a program may rename its main thread (Linux then
+shows e.g. `MainThread`) and is not cut at 15 bytes; its folder is never kept.
+
+**Precedence** (highest first):
+
+1. Smart throttle off: no gaming policy at all (turning it off during a game lifts everything at once).
+2. A listed program runs: the gaming policy replaces the automatic mode (its controller starts over afterwards).
+3. Otherwise the automatic mode (if on), else full speed.
+4. Every limit applies at once, the tightest wins: the user's global, per-kind and per-download limits and the
+   smart bucket are separate buckets, so the gaming policy never changes the user's limits, and lifting it restores
+   exactly what the user has, including changes made during the game.
+5. Queue gate = not paused by the user **and** inside the schedule window **and** not held for a game. The game
+   closing opens it only if the other two agree; what the game paused resumes when the gate opens.
+
+**Transitions** (`queue.rs`, `sync_game_hold`): one at a time (`game_hold_lock`) and always towards the newest wish,
+so a game that closes while its downloads are still pausing is let go right after; idempotent (a repeated scan
+changes nothing). Holding uses the queue's existing `hold_running` (pause, wait, remember in `held`, saved) also
+when the user had already closed the gate without pausing running downloads; letting go uses the existing
+`release_held` (only what is still paused, at the front of the queue). The hold itself is in memory only: after a
+restart nothing is held, the remembered downloads resume at launch, and a game still running is seen again within
+3 s. A download the user pauses during the game is taken off `held` (`forget_held`) and stays paused; one the user
+starts during the game waits for the gate; one added during the game starts after it.
+
+**Shown**: the card, the status bar and Settings say "{app} is running · limited to {speed}" (adaptive, low) or
+"{app} is running · downloads paused until it closes" (pause), only while a program is really detected; the Queue view
+says "Paused while a game or call runs · N will resume when it closes". No notification.
+
+**Limits**: names only, no full executable paths in the list; launchers whose game runs under another name need
+that name in the list; in pause, video jobs are not paused but held to the reserved minimum; another user's or a
+protected process shows its name only (its executable is not readable), which is enough for matching.
 
 ### What was wrong, and the fixes (October 2026)
 
@@ -136,7 +191,16 @@ browsing, noise at high speed), `adaptive.rs` (a dip never cuts a few connection
 and less often, useless probes back off, a 429 halves once), `limiter.rs` (a shared limit shows as waits, lowering a
 limit never stops downloads, raising one speeds up without a stop), `disk.rs` (a slow connection reports progress
 often), `media.rs` (only a real change of limit restarts a video job),
-`tests/integration/tests/smart_preview.rs` (6 tests through the real manager and engine; one slows a real download
+gaming policy: `manager/smart_throttle.rs` (`GameWatch`: on at once, off after two scans, flicker never flips it,
+several games, failed scans kept 15 s then lifted; each policy's cap is never zero; unrelated programs never match),
+`src-tauri` (a program that renamed its main thread is found by its executable's name; fails without it),
+`smart_preview.rs` (pause: running downloads pause with progress kept, nothing new starts, a second game keeps it,
+only what it paused resumes and finishes intact, the user's pauses before and during the game stay; the user's
+queue pause and a limit changed during the game outlast it; a restart during a game leaves nothing held; low holds
+the chosen speed, flicker never lifts it, switching policy mid-game holds / lets go at once, off lifts everything,
+bad limits refused), `smart_queue.rs` (Low priority waits during a call), `throttle.test.ts` (status lines, saving
+the policy), `tests/e2e/desktop-gaming.mjs` (17 checks, the real app with a stand-in game process),
+`tests/integration/tests/smart_preview.rs` (10 tests through the real manager and engine; one slows a real download
 while browsing and recovers, checks the minimum, the switches and their persistence; one flips through the modes
 while capped: bytes every half second),
 `tests/e2e/desktop-throttle.mjs` (the real app: a mode chosen while off turns it on, five quick clicks end where the

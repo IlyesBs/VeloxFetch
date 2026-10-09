@@ -191,7 +191,15 @@ Pause / Cancel waiting for a slow server, no free-space check before pre-allocat
 See `docs/smart-throttle-and-preview.md` (threats 21 and 22). In short: the preview protocol answers the main
 window only, takes a download id only, serves only audio / video bytes that are really written, with `nosniff` and
 a `default-src 'none'` CSP, and scripts still cannot read it (`connect-src` unchanged, `media-src` only for it).
-The process scan reads names only, stores and sends nothing, and any failure means full speed.
+The process scan reads names and executable file names only (never folders, command lines or environment), stores
+and sends nothing, and any failure means full speed within 15 s (a gaming policy in force is kept that long, so a
+single failed scan does not unleash traffic over a game; it can never stay longer).
+
+**Gaming policy (October 2026):** two new optional fields on `set_smart_throttle` (`gamePolicy`: one of three
+values, read strictly; `gameLimitBps`: 32 KB/s - 1 GB/s, so never zero = unlimited); no new command, capability or
+CSP change. The pause policy only uses the queue's own pause / resume (no process is touched: VeloxFetch never
+terminates, suspends or injects into a game); its hold lives in memory, so a crash or restart can never leave
+downloads held, and a download the user paused is never resumed by it. Policy test "smart throttle".
 
 Found and fixed on the way (engine): the last chunk of every range was never charged to the speed limits, so with
 a fast server no limit applied at all; and a connection waiting under a limit kept waiting after the limit was lifted.

@@ -1,7 +1,7 @@
 //! Queue control, the time-window scheduler and the (opt-in) power action.
 //!
 //! ```text
-//!  user pause / schedule window ──► gate ──► SlotScheduler (max active, priority order)
+//!  user pause / schedule window / game (pause policy) ──► gate ──► SlotScheduler (max active, priority order)
 //!  everything finished ──► [armed?] ──► visible countdown ──► SystemIntegration::power (once, then disarmed)
 //! ```
 //! Design rules that keep this from regressing the rest of the manager:
@@ -10,7 +10,9 @@
 //! * Closing the gate never touches downloads that are merely waiting; they keep their place in
 //!   the queue. Only downloads holding a run slot are paused, and only when asked to be.
 //! * Downloads paused by the queue are remembered (`held`, persisted) and resumed when it reopens;
-//!   downloads the user paused themselves are never resumed by the queue.
+//!   downloads the user paused themselves are never resumed by the queue (pausing a held one takes it off the list).
+//! * Smart throttle's "pause" policy closes the gate while a listed program runs (`game_hold`, in memory only: a
+//!   restart never leaves it closed; what it paused is in `held` and resumes at the next launch).
 //! * A power action is armed only by an explicit request, is in-memory only (a restart disarms it),
 //!   fires once, and is preceded by a cancellable countdown.
 
@@ -52,6 +54,8 @@ pub(super) struct QueueState {
     /// Downloads paused by the queue or schedule, to resume when it reopens.
     held: Vec<i64>,
     schedule: Schedule,
+    /// Smart throttle's pause policy: a listed program runs (in memory only).
+    game_hold: bool,
     /// Gate state last applied, `None` before the first evaluation.
     applied_open: Option<bool>,
     power: PowerRuntime,
@@ -76,6 +80,7 @@ impl QueueState {
             manual_paused: store.get_setting(PAUSED_KEY)?.as_deref() == Some("1"),
             held,
             schedule,
+            game_hold: false,
             applied_open: None,
             power: PowerRuntime::default(),
         })
@@ -90,7 +95,7 @@ impl QueueState {
     }
 
     pub(super) fn wants_open(&self, now: scheduler::chrono::NaiveDateTime) -> bool {
-        !self.manual_paused && self.schedule.is_open(now)
+        !self.manual_paused && !self.game_hold && self.schedule.is_open(now)
     }
 
     /// Note that downloads are (or were just) active while a power action is armed.
@@ -254,6 +259,46 @@ impl DownloadManager {
         if prev.is_some() || !want_open {
             self.emit_queue();
         }
+    }
+
+    /// Hold the queue while Smart throttle's pause policy wants it (a listed program runs), let it go after. One at
+    /// a time and always towards the newest wish: a game that closes while its downloads are still pausing is let
+    /// go right after, never left held.
+    pub(super) async fn sync_game_hold(&self) {
+        let _serial = self.inner.game_hold_lock.lock().await;
+        loop {
+            if self.inner.shutting_down.load(Ordering::Relaxed) {
+                return;
+            }
+            let want = self.smart_holds_queue();
+            {
+                let mut q = self.inner.queue.lock().unwrap();
+                if q.game_hold == want {
+                    return;
+                }
+                q.game_hold = want;
+            }
+            tracing::info!(hold = want, "smart throttle: the queue is {} for a listed program", if want { "held" } else { "let go" });
+            self.reconcile().await;
+            if want {
+                // Also when the gate was already closed (the user paused the queue but let running downloads run).
+                self.hold_running().await;
+            }
+            self.emit_queue();
+        }
+    }
+
+    /// The user paused a download the queue had paused: it is theirs now, not resumed when the queue reopens.
+    pub(super) async fn forget_held(&self, id: i64) {
+        let csv = {
+            let mut q = self.inner.queue.lock().unwrap();
+            if !q.held.contains(&id) {
+                return;
+            }
+            q.held.retain(|h| *h != id);
+            (!q.held.is_empty()).then(|| q.held.iter().map(i64::to_string).collect::<Vec<_>>().join(","))
+        };
+        let _ = self.save_text(HELD_KEY, csv).await;
     }
 
     /// Pause the downloads that hold a run slot and remember them. Downloads waiting for a slot are
@@ -446,6 +491,7 @@ impl DownloadManager {
             running: self.inner.scheduler.running(),
             waiting: self.inner.scheduler.queued(),
             held: q.held.len(),
+            game_hold: q.game_hold,
             schedule: q.schedule.clone(),
             schedule_open: q.schedule.is_open(now),
             next_change: q.schedule.next_change(now).map(|t| t.format("%Y-%m-%dT%H:%M").to_string()),
