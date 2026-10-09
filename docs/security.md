@@ -18,6 +18,8 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
   `connect-src ipc: http://ipc.localhost`, `img-src 'self' asset: blob:`. No `*`, no `unsafe-eval`,
   no `unsafe-inline`, no remote scripts or styles. The page cannot make its own network requests.
 * `freezePrototype: true`, `withGlobalTauri: false`.
+* The window's backdrop is a picture the page draws itself on a canvas and shows as a `blob:` image (`aurora.ts`,
+  `docs/ui-performance.md`): no new source is allowed, nothing is fetched, and the CSP is unchanged.
 * The frontend build emits only external files (no inline script/style), which the CSP requires.
 
 ### Tauri capabilities (one per window, `apps/desktop/src-tauri/capabilities`)

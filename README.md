@@ -63,6 +63,7 @@ node tests/e2e/desktop-diagnostics.mjs  # diagnostics card, Settings > Diagnosti
 node tests/e2e/desktop-video.mjs  # video bar hand-over -> video dialog -> file (stand-in yt-dlp), DRM refusals, 64 connections
 node tests/e2e/desktop-preview.mjs  # live preview through the velox-preview protocol, smart throttle with the real process scan
 node tests/e2e/desktop-throttle.mjs # Smart throttle card / Settings / status bar: clicks, modes, a capped download that never stops
+node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with downloads running (see docs/ui-performance.md)
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
 ```

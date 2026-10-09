@@ -16,5 +16,5 @@
     "types": ["vite/client"]
   },
   "include": ["src"],
-  "exclude": ["src/storage.test.ts", "src/diagnostics.test.ts", "src/locales.test.ts", "src/selectors.test.ts"]
+  "exclude": ["src/storage.test.ts", "src/diagnostics.test.ts", "src/locales.test.ts", "src/selectors.test.ts", "src/perf.test.ts"]
 }

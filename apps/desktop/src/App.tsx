@@ -12,6 +12,8 @@ import { StatusBar } from "./components/shell/StatusBar";
 import { TitleBar } from "./components/shell/TitleBar";
 import { bootstrap, store } from "./hooks";
 import { showWindowWhenReady } from "./nativeFeel";
+import { paintAurora } from "./aurora";
+import { onThemeChange } from "./theme";
 import { useMedia, usePrefs } from "./prefs";
 import { watchThrottle } from "./throttle";
 import { Toasts } from "./ui/primitives";
@@ -68,6 +70,10 @@ export default function App() {
     sync();
     return onLangChange(sync);
   }, []);
+
+  // The backdrop as a picture (see aurora.ts).
+  const auroraRef = useRef<HTMLDivElement>(null);
+  useEffect(() => (auroraRef.current ? paintAurora(auroraRef.current, onThemeChange) : undefined), []);
 
   // The first render is on the page: show the (hidden) window now, at commit, before the data arrives (a
   // passive effect runs later, held back while the window is hidden; see showWindowWhenReady).
@@ -169,7 +175,7 @@ export default function App() {
 
   return (
     <div className={`relative flex h-full flex-col ${dropping ? "drop-target" : ""}`}>
-      <div className="aurora" aria-hidden="true" />
+      <div className="aurora" aria-hidden="true" ref={auroraRef} />
       <div className="flex min-h-0 flex-1">
         <Sidebar current={current} folded={folded} canUnfold={wide} onNav={nav} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

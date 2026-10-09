@@ -48,6 +48,8 @@ let shown = false;
 export function showWindowWhenReady(): void {
   if (shown) return;
   shown = true;
+  // When, on the page's clock (read by the e2e start-up test).
+  (window as unknown as { __veloxReadyAt?: number }).__veloxReadyAt = Math.round(performance.now());
   // Rust shows it (and leaves it in the tray when VeloxFetch was started hidden at login).
   void windowControl("ready");
 }

@@ -273,3 +273,12 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 7. A browser download whose session expires mid-way (sign out on the site, then Retry): "Your sign-in or session
    has likely expired" and "Start the download again from the page…".
 8. French and Arabic: every line is translated, and the panel is mirrored in Arabic.
+
+## S. Smoothness and start-up (once per OS, on a high-refresh screen if there is one)
+1. Start VeloxFetch: the window appears with the interface drawn almost at once, in the theme's colours (light theme: no
+   dark frame first). Linux may show the empty window in the theme's colour for about a third of a second.
+2. Start four or more large downloads, watch the dashboard and scroll it up and down: no stutter. Linux: about 60 fps (the
+   web view's own ceiling there, whatever the screen); Windows / macOS: the screen's rate.
+3. Linux: cards and panels have no shadows; the selected tab, the current page in the side menu, the chosen Smart throttle
+   mode and a focused field still show a clear ring. Switch the theme and turn Smart throttle on (amber): the soft light in
+   the background follows within half a second.

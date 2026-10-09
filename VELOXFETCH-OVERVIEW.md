@@ -379,6 +379,12 @@ More: `docs/architecture.md`.
     of the download disk;
   - loopback, tunnels and capture drivers are skipped;
   - they refresh once a second, idle too.
+- **Smooth on Linux too** (details in `docs/ui-performance.md`): the Linux web view paints on the CPU, so there the
+  interface has no shadows (selected and focused rings become outlines), and the window-wide backdrop is a picture
+  drawn once on every system. Six running downloads: 23 -> 62 fps. Linux's web view itself stops at 60 fps, whatever
+  the screen; Windows uses the screen's rate.
+- **Starts fast:** the window appears as soon as the interface is on the page (~60 ms of page time, it was ~310 ms),
+  over the interface's own background colour (no dark flash before a light theme).
 
 ### 4.4 Browser hand-off
 - The download passes through several checks:
@@ -558,7 +564,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
 | + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions) |
-| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds) |
+| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
@@ -657,6 +663,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Checks done by hand on each OS | `docs/manual-test.md` |
 | Building and publishing a release | `docs/release-process.md`, `docs/store-publishing.md` |
 | Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
+| Interface smoothness and start-up | `docs/ui-performance.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
 | Download Intelligence | `docs/download-intelligence.md` |
 | Download Doctor | `docs/download-doctor.md` |

@@ -342,6 +342,12 @@ link --analyze_media--> qualities / audio / subtitles (nothing written)
   value in a `requestAnimationFrame` loop that stops when everything has settled.
 * Measured in the real app (`tests/e2e/desktop-ui.mjs`): 60 fps, p95 frame 16.8 ms, no long tasks,
   ~50 DOM mutations/s, 5.0 ticks/s while downloading.
+* Paint cost (details and numbers in `docs/ui-performance.md`): on Linux the web view paints on the CPU, so the
+  styles there carry no box shadows or drop-shadow filters (rings become outlines, the glass highlight a top border);
+  the window-wide backdrop is a picture drawn once (`aurora.ts`) on every platform. Six running downloads: 23 -> 62
+  fps on a real screen, 22 -> 62 on a virtual display. `tests/e2e/desktop-perf.mjs` measures it.
+* Start-up: the window is created hidden and shown from a layout effect (at commit, ~60 ms of page time; a passive
+  effect was held back to ~310 ms in the hidden window), over a background in the interface's theme colour.
 
 ## Design system
 

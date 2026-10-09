@@ -205,8 +205,8 @@ virtual display, and KWin (when installed) as window manager in a private D-Bus 
 user's desktop. `VELOX_E2E_DISPLAY=:0` runs on the real display instead; `VELOX_E2E_WM=0` skips the window manager. Windows are
 closed like a user would (`x11-close-window.py`, WM_DELETE_WINDOW). Not ported yet: `desktop-browser.mjs` (Windows registry checks)
 and the `real-*` scripts. Known Linux gaps they show: live preview does not play (WebKitGTK cannot stream media from a custom
-protocol), and `desktop-ui.mjs` measures ~20 fps during the first seconds of a capped download (the WebKit content process is busy;
-idle and later in the download it holds 60 fps). On a machine without root, both tools can be unpacked from their packages into
+protocol). (`desktop-ui.mjs` used to measure ~20 fps while downloading; since the paint fixes of `docs/ui-performance.md` it holds
+60 fps and passes.) On a machine without root, both tools can be unpacked from their packages into
 a user folder (`dpkg -x`) and put on `PATH`. Still failing on Linux, before and after the Smart Download Queue (checked on the previous
 commit too): `desktop-queue.mjs` waits in vain for the second dry-run power action at its very end.
 
@@ -315,3 +315,12 @@ every fix has a test that fails without it. Details in `docs/smart-throttle-and-
 
 On Linux `desktop-preview.mjs` stops before its Smart throttle part (live preview does not play in WebKitGTK, see
 above); `desktop-throttle.mjs` covers that part.
+
+## Interface smoothness and start-up
+
+Details in `docs/ui-performance.md`.
+
+| Where | What |
+|---|---|
+| `apps/desktop/src/perf.test.ts` | 8 tests: the backdrop picture has the CSS lights (same order, own-colour fade, scaled ellipses) and is used; the window is asked for at commit by a direct call; the Linux block turns shadows off, keeps meaningful rings as outlines, drops drop-shadow filters, keeps the glass highlight |
+| `tests/e2e/desktop-perf.mjs` | 5 checks in the real app, prints the numbers: shown within 150 ms of the script, painted within 1 s, >= 45 fps with downloads running, >= 40 fps scrolling over them, no shadow on Linux cards / panels. `VELOX_E2E_DISPLAY=:0` (real screen), `PERF_WAYLAND=1`, `PERF_CSS` (a stylesheet laid over the page, to find what costs) |
