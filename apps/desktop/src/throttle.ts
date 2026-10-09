@@ -1,13 +1,17 @@
-// The Smart throttle state, shared by the dashboard HUD, the status bar and Settings. Polled every 3 s
-// while the window is visible (it changes on its own). While it is on, <html> gets data-throttle
-// (="limiting" while downloads are slowed) and the whole accent pair turns amber.
+// The Smart throttle state, shared by the dashboard HUD, the status bar and Settings: one copy for the whole
+// window, polled every 3 s while the window is visible (it changes on its own). While it is on, <html> gets
+// data-throttle (="limiting" while downloads are slowed) and the whole accent pair turns amber.
+//
+// Changes go through `throttleStore.save`: shown at once (the switch never waits for the answer), sent one
+// after the other in the order they were made, and a poll that was already on its way when a change was made
+// is dropped (it would show the old state for a moment: the switch flicking back, then forward).
 
 import { useSyncExternalStore } from "react";
-import { api } from "./api";
+import { api, normalizeError } from "./api";
 import { store } from "./hooks";
 import { formatSpeed } from "./format";
 import type { Key } from "./i18n";
-import type { SmartThrottle } from "./types";
+import type { SetSmartThrottle, SmartThrottle } from "./types";
 
 /** The three modes: the share downloads keep during a game or a call (and, a little more, while browsing). */
 export const THROTTLE_MODES: {
@@ -50,7 +54,26 @@ export function throttleStatus(
   }
 }
 
+/** How much of their usual speed downloads may use now (0.04-1): the cap against the reference speed. */
+export function gaugeShare(s: SmartThrottle | null): number {
+  if (!s?.enabled || s.limitBps === null) return 1;
+  const ref = s.referenceBps ?? s.peakBps;
+  if (!ref) {
+    // No speed seen yet: the share the mode keeps (a game or a call: the mode's share; browsing: a little more).
+    const keep = keepWhileActive(s.sharePercent) / 100;
+    const share = s.reason === "app" ? s.sharePercent / 100 : s.reason === "busy" ? keep + (1 - keep) / 2 : keep;
+    return Math.min(1, Math.max(0.04, share));
+  }
+  return Math.min(1, Math.max(0.04, s.limitBps / Math.max(ref, s.limitBps)));
+}
+
 let state: SmartThrottle | null = null;
+/** Bumped by every change made here: a poll that started before it is stale. */
+let version = 0;
+/** Changes are sent one at a time, in order. */
+let queue: Promise<unknown> = Promise.resolve();
+/** Changes not answered yet: no poll meanwhile (it could be answered before them, with the old state). */
+let saving = 0;
 
 /** Download speed and the cap at each poll (every 3 s): the last 4 minutes, for the bandwidth graph. */
 export interface ThrottlePoint {
@@ -72,11 +95,51 @@ function apply(next: SmartThrottle | null) {
 
 export const throttleStore = {
   get: () => state,
-  /** A fresh state from a save (Settings, the HUD). */
-  set: (next: SmartThrottle) => apply(next),
+  /** A fresh state from the app (a save's answer). */
+  set: (next: SmartThrottle) => {
+    version++;
+    apply(next);
+  },
+  /**
+   * Change settings: shown at once, then the app's answer (the real state) replaces it. On an error the toast
+   * says why and the real state comes back. Resolves with the answer (undefined on an error).
+   */
+  save: (patch: SetSmartThrottle, okText?: string): Promise<SmartThrottle | undefined> => {
+    const mine = ++version;
+    saving++;
+    if (state) {
+      // Off means full speed at once: no cap is shown while the answer is on its way.
+      const off = patch.enabled === false ? { limitBps: null, activeApp: null, reason: "off" as const } : {};
+      apply({ ...state, ...patch, apps: patch.apps ?? state.apps, ...off });
+    }
+    const run = queue.then(async () => {
+      let failed = false;
+      try {
+        const next = await api.setSmartThrottle(patch);
+        if (mine === version) apply(next); // a later change will bring its own answer
+        if (okText) store.toast("info", okText);
+        return next;
+      } catch (e) {
+        store.toast("error", normalizeError(e).message);
+        failed = true;
+        return undefined;
+      } finally {
+        saving--;
+        if (failed) {
+          version++;
+          void throttleStore.refresh(); // the real state comes back
+        }
+      }
+    });
+    queue = run.catch(() => undefined);
+    return run;
+  },
   refresh: async () => {
+    if (saving > 0) return;
+    const asked = version;
     try {
       const next = await api.getSmartThrottle();
+      if (asked !== version) return; // changed meanwhile: this answer is already old
       history = [
         ...history,
         {

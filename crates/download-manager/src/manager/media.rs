@@ -601,20 +601,18 @@ impl DownloadManager {
             };
             let run_cancel = cancel.child_token();
             let mut restarting = false;
+            let mut differs = 0u32;
             let r = self
                 .run_watched(id, work, progress, &run_cancel, |me| {
-                    // A different limit (more than a quarter off, or one appearing / going) restarts yt-dlp, only
-                    // while it downloads: joining and converting are not network work.
+                    // Restarting yt-dlp costs seconds (it asks the site again), so only a limit that really changed
+                    // and stays changed restarts it, and only while it downloads (joining and converting are not
+                    // network work). See `limit_needs_restart`.
                     let Some(started) = rate else { return false };
                     if progress.phase() != Phase::Downloading {
                         return false;
                     }
-                    let now = me.site_rate();
-                    let changed = match (started, now) {
-                        (None, None) => false,
-                        (Some(a), Some(b)) => a.abs_diff(b) * 4 > a.max(b),
-                        _ => true,
-                    };
+                    differs = if limit_needs_restart(started, me.site_rate()) { differs + 1 } else { 0 };
+                    let changed = differs >= RESTART_CONFIRM;
                     if changed {
                         restarting = true;
                         run_cancel.cancel();
@@ -905,6 +903,21 @@ impl DownloadManager {
 /// How many times a job runs before it is shown as failed.
 const TRIES: u32 = 3;
 
+/// Limit checks in a row (2 s apart) that must find the limit changed before yt-dlp is restarted: a cap that
+/// moves for a moment, or steps back up, does not stop the video.
+const RESTART_CONFIRM: u32 = 2;
+
+/// Whether yt-dlp, started with the limit `started`, must be restarted for the limit `now`: one appears or goes,
+/// or it is at least twice (or half) what it was. Smaller moves (Smart throttle easing back up by steps) are
+/// not worth the seconds a restart costs.
+fn limit_needs_restart(started: Option<u64>, now: Option<u64>) -> bool {
+    match (started, now) {
+        (None, None) => false,
+        (Some(a), Some(b)) => a.max(b) >= a.min(b).saturating_mul(2),
+        _ => true,
+    }
+}
+
 /// A failure that may well not happen again (the network, the site, yt-dlp): try again. DRM, live streams,
 /// sign-in pages, limits and refused links stay failed.
 fn worth_retrying(e: &media_engine::MediaError) -> bool {
@@ -959,4 +972,21 @@ fn growing_video(dir: &Path) -> Option<(PathBuf, bool)> {
         }
     }
     best.map(|(p, d, _)| (p, d))
+}
+
+#[cfg(test)]
+mod restart_tests {
+    use super::limit_needs_restart;
+
+    #[test]
+    fn only_a_real_change_of_limit_restarts_a_video_job() {
+        let mb = 1024 * 1024;
+        assert!(!limit_needs_restart(None, None));
+        assert!(limit_needs_restart(None, Some(mb)), "a cap appears");
+        assert!(limit_needs_restart(Some(mb), None), "the cap goes");
+        assert!(!limit_needs_restart(Some(2 * mb), Some(3 * mb)), "a step up of 1.5x");
+        assert!(!limit_needs_restart(Some(4 * mb), Some(3 * mb)));
+        assert!(limit_needs_restart(Some(mb), Some(2 * mb)));
+        assert!(limit_needs_restart(Some(10 * mb), Some(mb)));
+    }
 }

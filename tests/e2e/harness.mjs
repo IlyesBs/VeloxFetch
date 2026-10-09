@@ -30,7 +30,8 @@ export async function quitOnClose(h) {
 /** Local file server with ranges, a per-chunk delay (throttle) and a request counter. */
 export async function startFileServer(sizeBytes) {
   const FILE = crypto.randomBytes(sizeBytes);
-  const state = { delayMs: 0, requests: 0, FILE, sha: sha256(FILE), base: "", headers: [] };
+  // `rateBps`: the whole server's speed, shared by every connection (like a real line), when set.
+  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, FILE, sha: sha256(FILE), base: "", headers: [] };
   const server = http.createServer(async (req, res) => {
     state.requests++;
     state.headers.push(req.headers); // lets a test check what the client sent
@@ -56,6 +57,11 @@ export async function startFileServer(sizeBytes) {
       if (res.destroyed) return;
       res.write(FILE.subarray(pos, Math.min(pos + 65536, end + 1)));
       if (state.delayMs) await sleep(state.delayMs);
+      if (state.rateBps) {
+        const now = Date.now();
+        state.next = Math.max(state.next, now) + (65536 / state.rateBps) * 1000;
+        await sleep(state.next - now);
+      }
     }
     res.end();
   });

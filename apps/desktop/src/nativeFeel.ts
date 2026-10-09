@@ -3,6 +3,8 @@
 // no page text selection or dragging of the UI chrome. Text fields keep the normal edit menu and
 // selection; download cards provide their own right-click menu (see DownloadCard).
 
+import { windowControl } from "./chrome";
+
 const isEditable = (t: EventTarget | null): boolean => {
   const el = t instanceof Element ? t : null;
   return !!el?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']");
@@ -37,14 +39,17 @@ export function installNativeFeel(): void {
 
 /**
  * The window is created hidden (no blank "loading web page" frame); show it once the UI is on the page.
- * Called from the first effect of <App/>, i.e. after React committed the first render. Not tied to
- * requestAnimationFrame: a page in a hidden window gets no animation frames, so a rAF-based show never ran
- * and the window only appeared through the slow fallback in Rust (as a dark, empty frame on slow machines).
+ * Called from a layout effect of <App/>, i.e. the moment React committed the first render to the page. Nothing
+ * that waits for a later task: a page in a hidden window gets no animation frames, and WebKit (Linux) holds its
+ * other tasks back too. Measured: the first render was on the page 58 ms after start, a passive effect ran only
+ * at 311 ms, and an import() in it would have waited again. The call goes out synchronously here.
  */
 let shown = false;
 export function showWindowWhenReady(): void {
   if (shown) return;
   shown = true;
+  // When, on the page's clock (read by the e2e start-up test).
+  (window as unknown as { __veloxReadyAt?: number }).__veloxReadyAt = Math.round(performance.now());
   // Rust shows it (and leaves it in the tray when VeloxFetch was started hidden at login).
-  void import("./chrome").then((m) => m.windowControl("ready"));
+  void windowControl("ready");
 }

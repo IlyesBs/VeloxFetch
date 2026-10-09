@@ -109,11 +109,11 @@ async fn smart_throttle_slows_downloads_while_a_listed_program_runs_and_lifts_at
 }
 
 fn browsing() -> ThrottleSignals {
-    ThrottleSignals { other_bps: Some(400.0 * 1024.0), idle: Some(Duration::ZERO) }
+    ThrottleSignals { other_bps: Some(400.0 * 1024.0), idle: Some(Duration::ZERO), ..Default::default() }
 }
 
 fn quiet(idle_secs: u64) -> ThrottleSignals {
-    ThrottleSignals { other_bps: Some(0.0), idle: Some(Duration::from_secs(idle_secs)) }
+    ThrottleSignals { other_bps: Some(0.0), idle: Some(Duration::from_secs(idle_secs)), ..Default::default() }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -218,6 +218,57 @@ async fn the_cap_follows_the_speed_this_connection_can_reach() {
         Ok(_) | Err(ManagerError::InvalidState { .. }) => {}
         Err(e) => panic!("{e}"),
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn changing_modes_while_capped_never_stops_a_running_download() {
+    // A download slowed for "a game" while the user flips through the modes (and the cap goes down and up): its
+    // bytes keep coming every half second, never a pause and then a burst.
+    let b = base("modes");
+    let m = manager(&b).await;
+    m.set_smart_throttle(SetSmartThrottle {
+        enabled: Some(true),
+        auto: Some(false),
+        apps: Some(names(&["VeloxTestGame"])),
+        share_percent: Some(25),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let srv = serve(random_data(96 * MB, 21)).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(20);
+    let d = m.create_download(NewDownload { url: srv.url("/modes.bin"), ..Default::default() }).await.unwrap();
+    // Free first: what downloads get is learned (the watcher looks every few seconds; here more often).
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(2) {
+        m.smart_throttle_observe(Some(&[]));
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+    assert!(m.smart_throttle().limit_bps.is_some());
+    let mut samples = vec![(Instant::now(), m.get_download(d.id).await.unwrap().downloaded)];
+    for share in [50u8, 10, 25, 50, 25, 10, 50] {
+        m.set_smart_throttle(SetSmartThrottle { share_percent: Some(share), ..Default::default() }).await.unwrap();
+        let t = Instant::now();
+        while t.elapsed() < Duration::from_millis(1500) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+            samples.push((Instant::now(), m.get_download(d.id).await.unwrap().downloaded));
+        }
+    }
+    let status = m.get_download(d.id).await.unwrap().status;
+    assert_eq!(status, DownloadStatus::Downloading, "still running at the end (else the check below says nothing)");
+    // Every 500 ms window has bytes.
+    let mut still = Vec::new();
+    for (i, (at, bytes)) in samples.iter().enumerate() {
+        if let Some((_, later)) = samples[i..].iter().find(|(t, _)| t.duration_since(*at) >= Duration::from_millis(500)) {
+            if later == bytes {
+                still.push(at.duration_since(samples[0].0).as_millis());
+            }
+        }
+    }
+    assert!(still.is_empty(), "no bytes for half a second at (ms): {still:?}");
+    let _ = m.cancel_download(d.id).await;
 }
 
 // -------------------------------------------------------------------------------------- live preview

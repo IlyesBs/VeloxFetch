@@ -598,9 +598,9 @@ a {
   color: var(--accent);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 32px -6px var(--accent);
 }
-.hud-live {
-  position: relative;
-}
+/* The core is absolutely placed inside the gauge: that already anchors the glow below. (A `position: relative`
+   here once won over the core's own placement while downloads were slowed: the core shrank to its text and left
+   the centre, its ring crossing the numbers.) */
 .hud-live::after {
   content: "";
   position: absolute;
@@ -1221,6 +1221,13 @@ dialog::backdrop {
   @apply flex h-[58px] min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl border border-line px-0.5 text-[10.5px] font-medium text-dim transition-[color,border-color,background-color,box-shadow] duration-150 hover:text-fg;
   background: color-mix(in srgb, var(--fg) 3%, transparent);
 }
+/* The label shrinks a little to fit a narrow card ("Conservative" was cut short in the sidebar). */
+.mode-btn {
+  container-type: inline-size;
+}
+.mode-label {
+  font-size: min(10.5px, 14.5cqi);
+}
 .mode-btn[aria-checked="true"] {
   color: var(--fg);
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
@@ -1406,4 +1413,97 @@ dialog::backdrop {
 }
 .btn.btn-danger:hover {
   filter: brightness(1.08);
+}
+
+/* ------------------------------------------------------------------------------------------------------------
+   Linux: no box shadows, no drop-shadow filters.
+   The Linux web view (WebKitGTK) paints with a CPU rasteriser and caps itself at 60 fps. There a shadow, even a crisp
+   one on a large rounded panel, is repainted at full cost on every frame that changes anything. Measured on a
+   144 / 180 Hz screen (RTX 5080, Wayland), six running downloads: 23 fps with the shadows (45 ms per frame: the
+   connection matrices animate inside softly shadowed cards), the same while scrolling; 60 fps without, scrolling
+   too. So here shadows are off, and what they meant is drawn another way: the rings of a selected tab, mode, page or
+   focused field become outlines, the glass panels' top highlight becomes a lighter top border.
+   `perf.test.ts` checks this block stays in place. */
+:root[data-platform="linux"] *,
+:root[data-platform="linux"] *::before,
+:root[data-platform="linux"] *::after {
+  box-shadow: none !important;
+}
+:root[data-platform="linux"] .gauge-arc,
+:root[data-platform="linux"] .logo-mark,
+:root[data-platform="linux"] .spark-line,
+:root[data-platform="linux"] .side-link[aria-current="page"] .side-icon,
+:root[data-platform="linux"] .stat-icon,
+:root[data-platform="linux"] .stat-violet .stat-icon,
+:root[data-platform="linux"] .spark-violet .spark-line,
+:root[data-platform="linux"] .gauge-grad {
+  filter: none;
+}
+:root[data-platform="linux"] .pill[aria-pressed="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .kind-tile {
+  outline: 1px solid color-mix(in srgb, var(--k) 22%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .rail-btn[aria-current="page"] {
+  outline: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .side-link[aria-current="page"] {
+  outline: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .version-pill {
+  outline: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .tab[aria-pressed="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .tool-btn[aria-expanded="true"] {
+  outline: 1px solid var(--line-strong);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .thumb {
+  outline: 1px solid color-mix(in srgb, var(--k) 30%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .done-icon {
+  outline: 1px solid color-mix(in srgb, var(--k) 30%, transparent);
+  outline-offset: -1px;
+}
+:root[data-platform="linux"] .hud-core[aria-pressed="true"] {
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+:root[data-platform="linux"] .hud-live::after {
+  outline: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+:root[data-platform="linux"] .input:focus {
+  outline: 3px solid var(--accent-soft);
+}
+:root[data-platform="linux"] .add-bar:focus-within {
+  outline: 4px solid var(--accent-soft);
+}
+/* The glass panels' top highlight as a lighter top border, and no drop shadow: even a crisp shadow on a large
+   rounded panel is painted at full size on every repaint (scrolling: 52 -> 60 fps without). `:where` keeps the
+   specificity low, so hover / selected borders still win. */
+:where(:root[data-platform="linux"]) .card,
+:where(:root[data-platform="linux"]) .card-lite,
+:where(:root[data-platform="linux"]) .card-hover:hover,
+:where(:root[data-platform="linux"]) .stat,
+:where(:root[data-platform="linux"]) .task,
+:where(:root[data-platform="linux"]) .task:hover,
+:where(:root[data-platform="linux"]) .panel,
+:where(:root[data-platform="linux"]) .card,
+:where(:root[data-platform="linux"]) .add-bar,
+:where(:root[data-platform="linux"]) .popover,
+:where(:root[data-platform="linux"]) .card-lite,
+:where(:root[data-platform="linux"]) .glass-tile,
+:where(:root[data-platform="linux"]) .done-row,
+:where(:root[data-platform="linux"]) .done-row:hover {
+  box-shadow: none;
+  border-top-color: color-mix(in srgb, var(--glass-edge) 70%, var(--line));
 }

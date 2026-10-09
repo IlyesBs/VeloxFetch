@@ -38,8 +38,10 @@ pub use queues::MAIN_QUEUE;
 pub use smart_throttle::{Signals as ThrottleSignals, DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER};
 use storage::{Sorter, Storage};
 
-/// Time constant of the speed shown for each download.
-const SPEED_SMOOTHING_SECS: f64 = 1.0;
+/// Time constant of the speed shown for each download: long enough that the short pause between two parts of
+/// a connection (a new request) and bursts of buffered data do not make the number jump, short enough that a
+/// real change shows within a few seconds.
+const SPEED_SMOOTHING_SECS: f64 = 2.0;
 
 /// Name of the database sealing key inside the credential store.
 pub const SECRET_KEY_NAME: &str = "database-key-v1";

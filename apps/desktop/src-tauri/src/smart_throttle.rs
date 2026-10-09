@@ -1,5 +1,6 @@
 //! Smart throttle, the desktop half: every few seconds, list the running programs, ask the system how long the
-//! user has been away (automatic mode), and tell the manager, which also measures the computer's traffic. The
+//! user has been away (automatic mode), and tell the manager, which also measures the computer's traffic (its
+//! network counters and VeloxFetch's own, read at the same moment, on the same blocking thread). The
 //! decision (which programs, how slow, smoothing, lifting the cap) lives in `download_manager`'s
 //! `smart_throttle.rs`; this file only looks at the system.
 //!
@@ -37,11 +38,16 @@ pub fn spawn(manager: DownloadManager) {
             let sys = system.clone();
             let auto = manager.smart_throttle().auto;
             let os = manager.system();
-            let scan = tokio::task::spawn_blocking(move || (running_programs(&sys), if auto { os.0.user_idle() } else { None }));
-            match tokio::time::timeout(SCAN_LIMIT, scan).await {
-                Ok(Ok((names, idle))) => manager.smart_throttle_observe_activity(names.as_deref(), idle),
+            let m = manager.clone();
+            // The manager reads the network counters too: all of it on the blocking thread.
+            let scan = tokio::task::spawn_blocking(move || {
+                let names = running_programs(&sys);
+                let idle = if auto { os.0.user_idle() } else { None };
+                m.smart_throttle_observe_activity(names.as_deref(), idle);
+            });
+            if !matches!(tokio::time::timeout(SCAN_LIMIT, scan).await, Ok(Ok(()))) {
                 // Panicked or too slow: full speed.
-                _ => manager.smart_throttle_observe(None),
+                manager.smart_throttle_observe(None);
             }
         }
     });

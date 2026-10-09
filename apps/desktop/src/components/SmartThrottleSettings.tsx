@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { actions } from "../actions";
-import { api, normalizeError } from "../api";
-import { act, store, useStore } from "../hooks";
+import { useStore } from "../hooks";
 import { formatSpeed } from "../format";
 import { useT } from "../i18n";
 import {
@@ -9,10 +8,11 @@ import {
   THROTTLE_MODES,
   throttleStatus,
   throttleStore,
+  useThrottle,
   useThrottleHistory,
   type ThrottlePoint,
 } from "../throttle";
-import type { SetSmartThrottle, SmartThrottle } from "../types";
+import type { SetSmartThrottle } from "../types";
 import { Panel } from "../ui/primitives";
 
 const KB = 1024;
@@ -120,39 +120,24 @@ function BandwidthGraph({
  */
 export function SmartThrottleSettings() {
   const t = useT();
-  const [s, setS] = useState<SmartThrottle | null>(null);
+  // The one shared state (polled every 3 s by the app shell): this panel, the dashboard card and the status bar
+  // always show the same thing.
+  const s = useThrottle();
   const [apps, setApps] = useState("");
+  const [appsLoaded, setAppsLoaded] = useState(false);
   const history = useThrottleHistory();
   const globalLimit = useStore((st) => st.metrics.globalLimit);
 
-  const refresh = useCallback(async (resetApps = false) => {
-    try {
-      const next = await api.getSmartThrottle();
-      setS(next);
-      throttleStore.set(next);
-      if (resetApps) setApps(next.apps.join("\n"));
-    } catch (e) {
-      store.toast("error", normalizeError(e).message);
-    }
-  }, []);
-
   useEffect(() => {
-    void refresh(true);
-    // The status line follows what happens on the network.
-    const timer = setInterval(
-      () => document.visibilityState === "visible" && void refresh(),
-      3000,
-    );
-    return () => clearInterval(timer);
-  }, [refresh]);
-
-  const save = async (patch: SetSmartThrottle, done?: string) => {
-    const next = await act(() => api.setSmartThrottle(patch), done);
-    if (next) {
-      setS(next);
-      throttleStore.set(next); // the HUD, the status bar and the accent colours follow at once
+    if (!s) void throttleStore.refresh();
+    else if (!appsLoaded) {
+      setApps(s.apps.join("\n"));
+      setAppsLoaded(true);
     }
-  };
+  }, [s, appsLoaded]);
+
+  const save = (patch: SetSmartThrottle, done?: string) =>
+    void throttleStore.save(patch, done);
 
   const list = apps
     .split("\n")
@@ -181,7 +166,7 @@ export function SmartThrottleSettings() {
           checked={on}
           disabled={!s}
           onChange={(e) =>
-            void save(
+            save(
               { enabled: e.target.checked },
               e.target.checked ? t("smart.on") : t("smart.off"),
             )
@@ -214,7 +199,7 @@ export function SmartThrottleSettings() {
             checked={s?.auto ?? true}
             disabled={!s}
             onChange={(e) =>
-              void save({ auto: e.target.checked }, t("smart.updated"))
+              save({ auto: e.target.checked }, t("smart.updated"))
             }
           />
           {t("smart.auto")}
@@ -231,10 +216,7 @@ export function SmartThrottleSettings() {
             value={share}
             disabled={!s}
             onChange={(e) =>
-              void save(
-                { sharePercent: Number(e.target.value) },
-                t("smart.updated"),
-              )
+              save({ sharePercent: Number(e.target.value) }, t("smart.updated"))
             }
           >
             {THROTTLE_MODES.map((m) => (
@@ -265,7 +247,7 @@ export function SmartThrottleSettings() {
             value={s?.minBps ?? 256 * KB}
             disabled={!s}
             onChange={(e) =>
-              void save({ minBps: Number(e.target.value) }, t("smart.updated"))
+              save({ minBps: Number(e.target.value) }, t("smart.updated"))
             }
           >
             {minimums.map((v) => (
@@ -305,7 +287,7 @@ export function SmartThrottleSettings() {
             className="input h-28 py-2 font-mono text-xs"
             value={apps}
             onChange={(e) => setApps(e.target.value)}
-            onBlur={() => edited && void save({ apps: list }, t("smart.saved"))}
+            onBlur={() => edited && save({ apps: list }, t("smart.saved"))}
             spellCheck={false}
           />
         </label>
@@ -314,7 +296,7 @@ export function SmartThrottleSettings() {
             className="btn"
             data-testid="smart-save"
             disabled={!edited}
-            onClick={() => void save({ apps: list }, t("smart.saved"))}
+            onClick={() => save({ apps: list }, t("smart.saved"))}
           >
             {t("smart.save")}
           </button>

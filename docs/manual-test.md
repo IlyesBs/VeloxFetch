@@ -179,7 +179,15 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    the browser: within ~6 s the status says "Reducing speed — active browsing detected" and the graph's dashed limit line
    appears; stop: a few seconds later "Bandwidth optimized — speeding back up", then "Full speed — network idle". Leave the
    computer alone for 2+ minutes: "Full speed — computer idle". The speed never drops below "Downloads always keep at least".
-   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the connection while browsing.
+   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the download's speed while browsing.
+4. Steadiness (the October 2026 fixes): with Smart throttle on and nothing else using the network, a large download stays
+   at full speed ("Full speed — nothing else is using the connection"), it is not slowed at start. Start a second download
+   in the browser: within ~6 s the speed visibly drops to about half; stop it: full speed again within about 30 s, the
+   status never sticks on "browsing". While capped, click Aggressive / Balanced / Conservative and the switch quickly
+   several times: the download never shows 0 B/s, the switch never flicks back, the gauge's centre stays in the middle and
+   "Conservative" is written in full. Choosing a mode while it is off turns it on.
+5. Speed without Smart throttle: a large download from a server that limits connections (many mirrors do) keeps a steady
+   speed and connection count, instead of swinging between full and nearly nothing every ~15 s.
 
 ## N. Fresh computer (once per release, on a PC without developer tools)
 1. Install on a Windows PC that never had Visual Studio or the "Visual C++ Redistributable". Connect Brave / Chrome in Settings >
@@ -265,3 +273,12 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 7. A browser download whose session expires mid-way (sign out on the site, then Retry): "Your sign-in or session
    has likely expired" and "Start the download again from the page…".
 8. French and Arabic: every line is translated, and the panel is mirrored in Arabic.
+
+## S. Smoothness and start-up (once per OS, on a high-refresh screen if there is one)
+1. Start VeloxFetch: the window appears with the interface drawn almost at once, in the theme's colours (light theme: no
+   dark frame first). Linux may show the empty window in the theme's colour for about a third of a second.
+2. Start four or more large downloads, watch the dashboard and scroll it up and down: no stutter. Linux: about 60 fps (the
+   web view's own ceiling there, whatever the screen); Windows / macOS: the screen's rate.
+3. Linux: cards and panels have no shadows; the selected tab, the current page in the side menu, the chosen Smart throttle
+   mode and a focused field still show a clear ring. Switch the theme and turn Smart throttle on (amber): the soft light in
+   the background follows within half a second.
