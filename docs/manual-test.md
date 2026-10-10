@@ -358,3 +358,14 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 8. Restart the app: the active profile and your profiles are still there.
 9. Switch profiles from the status bar: the same as from Settings.
 
+## X. Download again (once per OS)
+1. Download a file to the end. Delete it in the system's file manager and switch back to the app: the card and the
+   Completed view say "The file is no longer on disk", and the main button is **Download again** (Open is gone).
+2. Press it: the same entry downloads from 0 % and finishes; the file is back in the same folder with the same name
+   and opens.
+3. Without deleting the file, choose "…" > **Download again**: a second file `name (1).ext` appears; the first one
+   is untouched.
+4. Cancel a running download: its main button is **Download again**; press it: it starts from 0 % and finishes.
+5. A failed download: Retry is still the main button; "…" > **Download again** starts it from 0 %.
+6. A running or paused download has no "Download again" in its menu.
+7. Repeat 1–2 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.

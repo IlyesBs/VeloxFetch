@@ -73,6 +73,7 @@ command!(pause_download, PauseDownload, (id: i64) -> DownloadDto, |m| m.pause_do
 command!(resume_download, ResumeDownload, (id: i64) -> DownloadDto, |m| m.resume_download(id));
 command!(cancel_download, CancelDownload, (id: i64) -> DownloadDto, |m| m.cancel_download(id));
 command!(retry_download, RetryDownload, (id: i64) -> DownloadDto, |m| m.retry_download(id));
+command!(redownload, Redownload, (id: i64) -> DownloadDto, |m| m.redownload(id));
 command!(delete_download, DeleteDownload, (id: i64, delete_file: bool) -> (), |m| m.delete_download(id, delete_file));
 command!(get_download, GetDownload, (id: i64) -> DownloadDto, |m| m.get_download(id));
 command!(list_downloads, ListDownloads, (filter: ListFilter) -> Vec<DownloadDto>, |m| m.list_downloads(filter));
@@ -850,6 +851,7 @@ pub fn run() {
             resume_download,
             cancel_download,
             retry_download,
+            redownload,
             delete_download,
             get_download,
             list_downloads,

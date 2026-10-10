@@ -127,6 +127,10 @@ presets over the speed limit, the downloads at once, the connections and Smart t
 applies at once without restarting downloads, keeps their progress and never undoes a pause. See
 [`docs/download-profiles.md`](docs/download-profiles.md).
 
+**Download again**: a finished, cancelled or failed download can be fetched once more from the start, from its own
+entry (same link, folder and name). A finished file deleted by mistake shows as missing, and "Download again"
+becomes its main button. A file that is still there is never overwritten. See [`docs/redownload.md`](docs/redownload.md).
+
 **Smart Duplicate Detection**: adding a link the app already has says so before anything happens. It tells you
 whether that download is running, paused, failed or finished, and whether the finished file is still there. It
 offers what fits: view it, resume it, open the file, or download another copy. A file that only has the same name is

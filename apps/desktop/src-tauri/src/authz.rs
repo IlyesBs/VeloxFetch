@@ -18,6 +18,7 @@ pub enum Command {
     ResumeDownload,
     CancelDownload,
     RetryDownload,
+    Redownload,
     DeleteDownload,
     GetDownload,
     ListDownloads,
@@ -96,13 +97,14 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 80] = [
+    pub const ALL: [Command; 81] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
         Command::ResumeDownload,
         Command::CancelDownload,
         Command::RetryDownload,
+        Command::Redownload,
         Command::DeleteDownload,
         Command::GetDownload,
         Command::ListDownloads,
@@ -188,6 +190,7 @@ impl Command {
             Command::ResumeDownload => "resume_download",
             Command::CancelDownload => "cancel_download",
             Command::RetryDownload => "retry_download",
+            Command::Redownload => "redownload",
             Command::DeleteDownload => "delete_download",
             Command::GetDownload => "get_download",
             Command::ListDownloads => "list_downloads",
@@ -333,6 +336,7 @@ mod tests {
             Command::CreateDownload,
             Command::DeleteDownload,
             Command::StartDownload,
+            Command::Redownload,
             Command::ListDownloads,
             Command::ListHistory,
             Command::GetMetrics,

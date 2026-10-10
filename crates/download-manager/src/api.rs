@@ -163,6 +163,8 @@ pub struct DownloadDto {
     /// Download Doctor: why it failed (or what the engine is retrying), where the problem is, whether retrying
     /// helps, and what the user can do. `None` when nothing is wrong.
     pub doctor: Option<crate::doctor::Diagnosis>,
+    /// Completed, but its file is no longer on disk (deleted or moved by hand): the UI offers "Download again".
+    pub file_missing: bool,
 }
 
 /// One chunk of a download, for the segment monitor.

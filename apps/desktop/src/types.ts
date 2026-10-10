@@ -53,6 +53,8 @@ export interface Download {
   held: boolean;
   /** Download Doctor: why it failed (or what the engine retries), where the problem is, what to do. */
   doctor: Diagnosis | null;
+  /** Completed, but its file is no longer on disk (deleted or moved by hand): offer "Download again". */
+  fileMissing?: boolean;
 }
 
 /** Download Doctor (crates/download-manager/src/doctor.rs): every field comes from observed evidence. */

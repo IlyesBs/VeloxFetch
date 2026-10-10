@@ -76,6 +76,7 @@ export const api = {
   resumeDownload: (id: number) => call<Download>("resume_download", { id }),
   cancelDownload: (id: number) => call<Download>("cancel_download", { id }),
   retryDownload: (id: number) => call<Download>("retry_download", { id }),
+  redownload: (id: number) => call<Download>("redownload", { id }),
   deleteDownload: (id: number, deleteFile: boolean) => call<void>("delete_download", { id, deleteFile }),
   getDownload: (id: number) => call<Download>("get_download", { id }),
   getDownloadDetail: (id: number) => call<DownloadDetail>("get_download_detail", { id }),

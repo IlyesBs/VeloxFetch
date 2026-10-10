@@ -12,6 +12,7 @@
     "allow-resume-download",
     "allow-cancel-download",
     "allow-retry-download",
+    "allow-redownload",
     "allow-delete-download",
     "allow-get-download",
     "allow-list-downloads",

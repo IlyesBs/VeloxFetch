@@ -466,3 +466,20 @@ Results (Linux):
 
 Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
 
+
+## Download again (October 2026)
+
+See `docs/redownload.md` §5. Tests:
+
+* `tests/integration/tests/redownload.rs` (4; 3 runs in a row green);
+* `apps/desktop/src/redownload.test.ts` (3);
+* e2e `desktop-views.mjs`: a file deleted outside the app is shown missing after returning to the window; Download
+  again is the main button and brings it back on the same entry; a second time gives `echo (1).pdf`; an unknown id
+  is refused.
+
+Results (Linux):
+* Rust: 723 passed;
+* vitest: 118;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: `desktop-views`, `desktop-ipc` and `desktop-ui` all pass.
