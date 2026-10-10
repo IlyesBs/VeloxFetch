@@ -483,3 +483,25 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 
 `PRAGMA user_version` tracks schema migrations (currently v6: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places). A database from a newer build is
 refused rather than corrupted.
+
+## Download Profiles
+
+Presets over existing settings (full description: `docs/download-profiles.md`).
+
+* **`crates/download-manager/src/profiles.rs`** holds the pure rules:
+  * the built-ins (`default`, `fast`, `balanced`, `lowResource`);
+  * `resolve(base, profile)`: a profile's value where it has one, the user's own otherwise;
+  * validation, the saved format (`Saved`, one `profiles` setting) and its lifecycle.
+* **`manager/profiles.rs`**: `ProfilesState` (saved profiles, the user's global limit, the last applied values) and
+  `apply_profile`, the only place profile values are put in force:
+  * `RateLimits::set_global`;
+  * `SlotScheduler::set_max_slots`;
+  * `Downloader::set_max_connections`;
+  * `SmartState::set_profile`.
+
+  `set_speed_limit(Global)` and `set_queue_config` now store the user's own value and call `apply_profile`.
+  Smart throttle reads `on()` / `automatic()`.
+* **Engine:** `spawn_sampler` reads the connection ceiling (`Downloader::max_connections`) every tick and calls
+  `AdaptiveController::set_ceiling`, so running transfers follow a changed setting without a restart.
+* **IPC:** `get_profiles`, `profile_action` (main window only). Event `profiles`.
+

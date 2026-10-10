@@ -614,3 +614,19 @@ No new command, permission, setting, file, listening socket or network destinati
   information about the user). The connection count drops to what the limit needs.
 * Window: `<html data-throttle>` is written only when it changes; no new data reaches the page.
 
+## Download Profiles (October 2026)
+
+* **Presets only.** A profile can set the global speed limit, downloads at once, connections per download and Smart
+  throttle's automatic mode, nothing else. Paths, TLS, integrity checks, credentials, network settings and the
+  browser link are not profile fields. `deny_unknown_fields` refuses anything else.
+* **Checked in Rust** (`profiles::validate_settings`, `validate_name`): the same ranges as Settings, names 1–40
+  characters without control characters, at most 20 of your own. An invalid request changes and saves nothing.
+* **Lowest limit wins.** A profile only sets the limiter's global layer: per-download and per-type limits, Smart
+  throttle's cap and its reserved minimum are separate layers it cannot lift.
+* **No surprise actions.** A profile never starts, resumes, pauses, cancels or restarts a download, and never
+  touches partial files.
+* **Bad saved data** (unreadable, newer, partly invalid) never stops the app. Default (your settings) is used, and
+  no other setting is changed.
+* **IPC:** `get_profiles` / `profile_action` are main window only (`authz`, capability file, build manifest,
+  destructive-commands test list).
+

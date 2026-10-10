@@ -327,3 +327,17 @@ capped never stop the download, Settings and the card agree, off = full speed at
 `tests/e2e/desktop-preview.mjs` (real WebView2: a WAV plays while downloading through the protocol, seeking, CSP blocks
 scripts; the real process scan finds a listed program, the status line, a held-back download, full speed at once),
 policy tests "live preview: ..." and "smart throttle: ...".
+
+## Download Profiles and Smart throttle (October 2026)
+
+A Download Profile may set Smart throttle's automatic mode (`SmartState::profile`):
+
+* `Some(true)` (Balanced) turns it on;
+* `Some(false)` (Fast) turns the automatic mode off but leaves Smart throttle itself, and a gaming policy, as you
+  set them;
+* `None` leaves everything as you set it.
+
+What is in force: `on() = enabled || profile == Some(true)`, `automatic() = profile.unwrap_or(auto)`. Every place
+that used `enabled` / `auto` for behaviour now uses them. The DTO keeps `enabled` / `auto` as your switches and adds
+`profileAdaptive`. A profile change is applied at once (`smart_profile_changed`). See `docs/download-profiles.md`.
+

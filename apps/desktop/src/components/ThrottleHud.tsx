@@ -6,6 +6,7 @@ import {
   gaugeShare,
   keepWhileActive,
   THROTTLE_MODES as MODES,
+  throttleOn,
   throttleStatus,
   throttleStore,
   useThrottle,
@@ -42,7 +43,9 @@ export function ThrottleHud({
   const s = useThrottle();
   const speed = useStore((st) => st.metrics.speedBps);
   const grad = `hud-${useId().replace(/:/g, "")}`;
-  const on = !!s?.enabled;
+  const on = throttleOn(s);
+  // The active profile turned it on: the switch is the profile's while it is active (change the profile instead).
+  const byProfile = s?.profileAdaptive === true && !s.enabled;
   const limiting = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   // Live: the cap against the speed downloads usually get (the share they keep right now).
@@ -132,8 +135,8 @@ export function ThrottleHud({
         className={`hud-core absolute grid place-items-center rounded-full text-accent ${side ? "inset-[30px]" : "inset-[26px] border border-line bg-raised"} ${limiting ? "hud-live" : ""}`}
         aria-pressed={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
-        title={t("hud.gauge", { p: pct })}
-        disabled={!s}
+        title={byProfile ? t("prof.smartByProfile") : t("hud.gauge", { p: pct })}
+        disabled={!s || byProfile}
         data-testid="hud-toggle"
         onClick={toggle}
       >
@@ -210,7 +213,8 @@ export function ThrottleHud({
         aria-checked={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
         className="switch"
-        disabled={!s}
+        title={byProfile ? t("prof.smartByProfile") : undefined}
+        disabled={!s || byProfile}
         data-testid="hud-switch"
         onClick={toggle}
       />

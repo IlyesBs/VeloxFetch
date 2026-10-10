@@ -122,6 +122,11 @@ and the Add dialog's **Check link** show:
 "Why?" shows what the server actually did. The check downloads nothing, writes nothing and can be cancelled. If it
 fails, you can still download. See [`docs/download-intelligence.md`](docs/download-intelligence.md).
 
+**Download Profiles**: Default (your settings), Fast, Balanced, Low resource, and profiles of your own. They are
+presets over the speed limit, the downloads at once, the connections and Smart throttle's automatic mode. Switching
+applies at once without restarting downloads, keeps their progress and never undoes a pause. See
+[`docs/download-profiles.md`](docs/download-profiles.md).
+
 **Smart Duplicate Detection**: adding a link the app already has says so before anything happens. It tells you
 whether that download is running, paused, failed or finished, and whether the finished file is still there. It
 offers what fits: view it, resume it, open the file, or download another copy. A file that only has the same name is

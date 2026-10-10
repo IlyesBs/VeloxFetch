@@ -28,13 +28,16 @@ export const THROTTLE_MODES: {
 export const keepWhileActive = (share: number) =>
   Math.round(Math.min(0.9, Math.max(0.25, share / 100 + 0.25)) * 100);
 
+/** Smart throttle is on: the user's switch, or the active Download Profile's automatic mode. */
+export const throttleOn = (s: SmartThrottle | null): boolean => !!s && (s.enabled || s.profileAdaptive === true);
+
 /** The one-line explanation of what Smart throttle is doing now. */
 export function throttleStatus(
   t: (k: Key, v?: Record<string, string | number>) => string,
   s: SmartThrottle | null,
 ): string {
   if (!s) return t("hud.unavailable");
-  if (!s.enabled) return t("thr.off");
+  if (!throttleOn(s)) return t("thr.off");
   const speed = formatSpeed(s.limitBps ?? 0);
   switch (s.reason) {
     case "app":
@@ -58,7 +61,7 @@ export function throttleStatus(
 
 /** How much of their usual speed downloads may use now (0.04-1): the cap against the reference speed. */
 export function gaugeShare(s: SmartThrottle | null): number {
-  if (!s?.enabled || s.limitBps === null) return 1;
+  if (!throttleOn(s) || !s || s.limitBps === null) return 1;
   const ref = s.referenceBps ?? s.peakBps;
   if (!ref) {
     // No speed seen yet: the share the mode keeps (a game or a call: the mode's share; browsing: a little more).
@@ -89,7 +92,7 @@ const subs = new Set<() => void>();
 function apply(next: SmartThrottle | null) {
   state = next;
   const root = document.documentElement;
-  const mark = next?.enabled
+  const mark = throttleOn(next) && next
     ? next.limitBps !== null
       ? "limiting"
       : "on"
@@ -154,7 +157,7 @@ export const throttleStore = {
         ...history,
         {
           speed: store.getState().metrics.speedBps,
-          cap: next.enabled ? next.limitBps : null,
+          cap: throttleOn(next) ? next.limitBps : null,
         },
       ].slice(-HISTORY_LEN);
       apply(next);

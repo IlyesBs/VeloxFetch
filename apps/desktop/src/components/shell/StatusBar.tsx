@@ -1,8 +1,9 @@
 import { formatBytes, formatSpeed } from "../../format";
 import { useStore } from "../../hooks";
 import { useT } from "../../i18n";
-import { throttleStatus, useThrottle } from "../../throttle";
+import { throttleOn, throttleStatus, useThrottle } from "../../throttle";
 import { Icon } from "../../ui/icons";
+import { ProfileSwitch } from "../ProfilesSettings";
 
 /** The footer across the window: engine state, counts, the total, live speed, Smart throttle and free space. */
 export function StatusBar() {
@@ -40,7 +41,11 @@ export function StatusBar() {
         <Icon name="arrowDown" size={13} className="text-accent" />
         {formatSpeed(m.speedBps)}
       </span>
-      {throttle?.enabled && (
+      <span className="sep hidden sm:block" />
+      <span className="hidden sm:flex">
+        <ProfileSwitch />
+      </span>
+      {throttle && throttleOn(throttle) && (
         <span
           className="flex min-w-0 items-center gap-1 truncate font-medium text-accent"
           data-testid="status-throttle"

@@ -478,6 +478,10 @@ pub enum ManagerEvent {
     MediaRemoved {
         id: u64,
     },
+    /// The Download Profiles changed (another one selected, one created, changed or deleted).
+    Profiles {
+        profiles: crate::profiles::ProfilesDto,
+    },
 }
 
 /// What the UI may specify to download a stream (HLS / DASH). Ids come from an earlier analysis;
@@ -602,6 +606,9 @@ pub struct SmartThrottleDto {
     pub game_limit_bps: u64,
     /// [`GamePolicy::Pause`] holds the queue right now (running downloads paused, none started).
     pub game_hold: bool,
+    /// The active Download Profile sets the automatic mode (`true` also turns Smart throttle on); `None`: it leaves
+    /// Smart throttle as the user set it (`enabled` / `auto` are always the user's own switches).
+    pub profile_adaptive: Option<bool>,
 }
 
 /// What downloads do while a listed program (a game, a call) runs. Nothing the user set is changed: the policy is

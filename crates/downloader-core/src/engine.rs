@@ -504,7 +504,8 @@ pub struct Downloader {
     /// Transfers already running keep the client they started with.
     client: Arc<std::sync::RwLock<HttpClient>>,
     cfg: DownloadConfig,
-    /// Live copy of `cfg.max_connections`; changes apply to transfers planned or resumed afterwards.
+    /// Live copy of `cfg.max_connections`: transfers planned afterwards start with it, and running ones follow it
+    /// (their sampler reads it every tick: fewer connections at once, or room to probe for more).
     max_connections: Arc<AtomicUsize>,
     store: Option<Arc<dyn DownloadStore>>,
     limits: Arc<RateLimits>,
@@ -1222,8 +1223,12 @@ impl Downloader {
         let gate = AdaptiveGate::new(start);
         // Shared by the periodic sampler and by workers that see a 429/503 (which react immediately).
         let controller = adaptive.then(|| Arc::new(Mutex::new(AdaptiveController::new(self.cfg.adaptive.clone(), start, ceiling))));
-        let _sampler =
-            controller.clone().map(|ctl| spawn_sampler(self.cfg.adaptive.interval, ctl, gate.clone(), progress.clone(), throttle.clone()));
+        let _sampler = controller.clone().map(|ctl| {
+            // The connection ceiling follows the user's settings while the download runs (see `set_max_connections`).
+            let (max, min_segment) = (self.max_connections.clone(), self.cfg.min_segment_size);
+            let ceiling = move || planner::connection_limits(total, max.load(Ordering::Relaxed), min_segment).1;
+            spawn_sampler(self.cfg.adaptive.interval, ctl, gate.clone(), progress.clone(), throttle.clone(), ceiling)
+        });
 
         let group = cancel.child_token();
         let mut set = JoinSet::new();
@@ -1693,6 +1698,7 @@ fn spawn_sampler(
     gate: Arc<AdaptiveGate>,
     progress: ProgressHandle,
     throttle: Throttle,
+    ceiling: impl Fn() -> usize + Send + 'static,
 ) -> AbortOnDrop {
     AbortOnDrop(tokio::spawn(tracing::Instrument::instrument(
         async move {
@@ -1724,7 +1730,8 @@ fn spawn_sampler(
                 }
                 let (decision, free) = {
                     let mut c = ctl.lock().unwrap();
-                    (c.observe(sample), c.limit())
+                    let lowered = c.set_ceiling(ceiling());
+                    (c.observe(sample).or(lowered), c.limit())
                 };
                 if let Some(n) = decision {
                     tracing::debug!(connections = n, throughput = sample.throughput, errors = sample.errors, "adaptive resize");

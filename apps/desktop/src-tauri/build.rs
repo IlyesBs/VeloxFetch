@@ -70,6 +70,8 @@ const COMMANDS: &[&str] = &[
     "get_diagnostics_report",
     "open_log_folder",
     "get_smart_throttle",
+    "get_profiles",
+    "profile_action",
     "set_smart_throttle",
     "set_preview_mode",
     "get_preview_info",

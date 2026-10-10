@@ -76,6 +76,8 @@
     "allow-get-diagnostics-report",
     "allow-open-log-folder",
     "allow-get-smart-throttle",
+    "allow-get-profiles",
+    "allow-profile-action",
     "allow-set-smart-throttle",
     "allow-set-preview-mode",
     "allow-get-preview-info",

@@ -184,6 +184,8 @@ export interface SmartThrottle {
   gameLimitBps: number;
   /** The "pause" policy holds the queue right now. */
   gameHold: boolean;
+  /** The active Download Profile sets the automatic mode (true also turns Smart throttle on); null: it leaves it. */
+  profileAdaptive: boolean | null;
 }
 
 export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
@@ -572,7 +574,52 @@ export type ManagerEvent =
   | { type: "pending"; pending: PendingDownload }
   | { type: "pendingRemoved"; token: number }
   | { type: "media"; job: MediaJob }
-  | { type: "mediaRemoved"; id: number };
+  | { type: "mediaRemoved"; id: number }
+  | { type: "profiles"; profiles: Profiles };
+
+/** Download Profiles: presets over the existing settings (null: the user's own setting stays). */
+export interface ProfileSettings {
+  /** Bytes/s; 0 = no limit. */
+  speedLimitBps?: number | null;
+  maxActive?: number | null;
+  maxConnections?: number | null;
+  /** Smart throttle's automatic mode. */
+  adaptive?: boolean | null;
+}
+
+export interface EffectiveSettings {
+  speedLimitBps: number | null;
+  maxActive: number;
+  maxConnections: number;
+  smartOn: boolean;
+  adaptive: boolean;
+}
+
+export type BuiltInProfile = "default" | "fast" | "balanced" | "lowResource";
+
+export interface ProfileInfo {
+  id: string;
+  /** Custom profiles only; built-in ones are named in the user's language. */
+  name: string | null;
+  builtIn: boolean;
+  settings: ProfileSettings;
+}
+
+export interface Profiles {
+  active: string;
+  profiles: ProfileInfo[];
+  /** The user's own settings (what Default uses, and what a profile leaves alone). */
+  base: EffectiveSettings;
+  /** What is in force now. */
+  effective: EffectiveSettings;
+}
+
+export type ProfileAction =
+  | { kind: "select"; id: string }
+  | { kind: "create"; name: string; settings: ProfileSettings }
+  | { kind: "duplicate"; id: string; name: string }
+  | { kind: "update"; id: string; name?: string; settings?: ProfileSettings }
+  | { kind: "delete"; id: string };
 
 /** A quality of a stream (HLS / DASH). */
 export interface StreamOption {

@@ -341,3 +341,20 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 4. macOS: the same on a downloading MP4 (H.264): it plays while downloading. A WebM / MKV that the system cannot
    decode says "cannot be played here" after a few seconds; the download continues.
 5. Windows: unchanged; the same checks pass.
+
+## W. Download Profiles (once per OS)
+1. Fresh install or existing user: Settings > Speed > Download profiles shows Default active; "In force now" equals
+   your settings; nothing else changed.
+2. Start two large downloads with 3 at once. Choose **Low resource**: the running ones keep going (no restart, the
+   progress does not jump back); the connection count drops to 4 or fewer within seconds; a third one added waits.
+3. Pause one download by hand, choose **Fast**, then a profile of your own with 6 at once: it stays paused.
+4. Choose **Balanced**: the dashboard's Smart throttle shows it working (automatic mode), its switch says the
+   profile turned it on; your own switch in Settings is unchanged. Browse a heavy page: downloads give way.
+5. Change "downloads at once" in the Queue view while Low resource is active: the note says the profile uses 1;
+   choose Default: your new value is in force.
+6. Duplicate Fast, rename it, set "Speed limit: Limit to 1 MB/s": the speed holds near 1 MB/s; a per-download
+   limit of 300 KB/s on one download still applies to it.
+7. Delete the active profile of your own: Default is active, downloads continue.
+8. Restart the app: the active profile and your profiles are still there.
+9. Switch profiles from the status bar: the same as from Settings.
+

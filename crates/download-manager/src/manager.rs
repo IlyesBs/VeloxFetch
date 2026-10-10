@@ -23,6 +23,7 @@ mod media;
 mod network;
 mod pending;
 mod preview;
+mod profiles;
 mod queue;
 mod queues;
 mod smart_throttle;
@@ -128,6 +129,8 @@ struct Inner {
     /// Smart throttle (`smart_throttle.rs`) and live preview (`preview.rs`): isolated features.
     smart: Mutex<smart_throttle::SmartState>,
     preview: Mutex<preview::PreviewState>,
+    /// Download Profiles (`profiles.rs`): presets over the settings above, applied in one place.
+    profiles: Mutex<profiles::ProfilesState>,
     /// yt-dlp / Deno / ffmpeg fetched on first use (`tools.rs`).
     tools: tools::ToolsState,
     /// Replaced when the network settings change (see `network.rs`).
@@ -219,9 +222,9 @@ impl DownloadManager {
         .map_err(|e| ManagerError::Internal(e.to_string()))??;
 
         let limits = RateLimits::new();
-        if let Some(v) = store.get_setting(GLOBAL_LIMIT_KEY)?.and_then(|s| s.parse().ok()) {
-            limits.set_global(Some(v));
-        }
+        let base_global: Option<u64> = store.get_setting(GLOBAL_LIMIT_KEY)?.and_then(|s| s.parse().ok());
+        limits.set_global(base_global);
+        let profiles = profiles::ProfilesState::load(&store, base_global);
         for (k, v) in store.settings_with_prefix(CATEGORY_LIMIT_PREFIX)? {
             if let (Some(name), Ok(v)) = (k.strip_prefix(CATEGORY_LIMIT_PREFIX), v.parse::<u64>()) {
                 limits.set_category(name, Some(v));
@@ -282,6 +285,7 @@ impl DownloadManager {
             media: Mutex::new(Default::default()),
             smart: Mutex::new(smart),
             preview: Mutex::new(Default::default()),
+            profiles: Mutex::new(profiles),
             tools: Default::default(),
             media_http,
             sealer: settings_sealer,
@@ -299,6 +303,8 @@ impl DownloadManager {
             roots,
         });
         let mgr = Self { inner };
+        // The active Download Profile's values over the user's settings, in force before anything starts.
+        mgr.apply_profile();
         mgr.apply_saved_logging();
         mgr.spawn_ticker();
         // First evaluation happens here, not in the background loop, so "what to do at launch" is
@@ -638,8 +644,9 @@ impl DownloadManager {
         let limit = validate::speed_limit(req.bytes_per_sec)?;
         match req.target {
             SpeedTarget::Global => {
-                self.inner.limits.set_global(limit);
+                // The user's own limit; the active profile may set another one (see `profiles.rs`).
                 self.save_setting(GLOBAL_LIMIT_KEY.to_string(), limit).await?;
+                self.set_base_global(limit);
             }
             SpeedTarget::Category { name } => {
                 let name = validate::category(&name)?;

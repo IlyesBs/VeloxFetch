@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use authz::Command;
 use download_manager::intelligence::{AnalysisDto, AnalyzeLink, CheckDuplicate, DuplicateDto};
+use download_manager::profiles::{ProfileAction, ProfilesDto};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, NetworkDto,
@@ -303,6 +304,9 @@ command!(open_log_folder, OpenLogFolder, () -> (), |m| m.open_log_folder());
 command!(get_smart_throttle, GetSmartThrottle, () -> SmartThrottleDto, |m| async {
     Ok::<_, download_manager::ManagerError>(m.smart_throttle())
 });
+// Download Profiles: presets over the existing settings (see download-manager `profiles.rs`), main window only.
+command!(get_profiles, GetProfiles, () -> ProfilesDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_profiles()) });
+command!(profile_action, ProfileAction, (request: ProfileAction) -> ProfilesDto, |m| m.profile_action(request));
 command!(set_smart_throttle, SetSmartThrottle, (request: SetSmartThrottle) -> SmartThrottleDto, |m| m.set_smart_throttle(request));
 command!(set_preview_mode, SetPreviewMode, (id: i64, enabled: bool) -> PreviewDto, |m| m.set_preview_mode(id, enabled));
 command!(get_preview_info, GetPreviewInfo, (id: i64) -> PreviewDto, |m| m.preview_info(id));
@@ -910,6 +914,8 @@ pub fn run() {
             get_diagnostics_report,
             open_log_folder,
             get_smart_throttle,
+            get_profiles,
+            profile_action,
             set_smart_throttle,
             set_preview_mode,
             get_preview_info,

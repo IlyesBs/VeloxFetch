@@ -55,6 +55,7 @@ const base: SmartThrottle = {
   gamePolicy: "adaptive",
   gameLimitBps: 524288,
   gameHold: false,
+  profileAdaptive: null,
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 

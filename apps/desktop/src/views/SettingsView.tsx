@@ -10,6 +10,7 @@ import { DesktopSettings } from "../components/DesktopSettings";
 import { DiagnosticsSettings } from "../components/DiagnosticsSettings";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { PowerSettings } from "../components/PowerSettings";
+import { ProfilesSettings } from "../components/ProfilesSettings";
 import { ScheduleSettings } from "../components/ScheduleSettings";
 import { SmartThrottleSettings } from "../components/SmartThrottleSettings";
 import { SpeedSettings } from "../components/SpeedSettings";
@@ -156,6 +157,7 @@ export function SettingsView() {
         </Group>
 
         <Group id="set-speed">
+          <ProfilesSettings />
           <SpeedSettings />
           <SmartThrottleSettings />
         </Group>

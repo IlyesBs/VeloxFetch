@@ -77,6 +77,8 @@ pub enum Command {
     GetDiagnosticsReport,
     OpenLogFolder,
     GetSmartThrottle,
+    GetProfiles,
+    ProfileAction,
     SetSmartThrottle,
     SetPreviewMode,
     GetPreviewInfo,
@@ -94,7 +96,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 78] = [
+    pub const ALL: [Command; 80] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -160,6 +162,8 @@ impl Command {
         Command::GetDiagnosticsReport,
         Command::OpenLogFolder,
         Command::GetSmartThrottle,
+        Command::GetProfiles,
+        Command::ProfileAction,
         Command::SetSmartThrottle,
         Command::SetPreviewMode,
         Command::GetPreviewInfo,
@@ -243,6 +247,8 @@ impl Command {
             Command::GetDiagnosticsReport => "get_diagnostics_report",
             Command::OpenLogFolder => "open_log_folder",
             Command::GetSmartThrottle => "get_smart_throttle",
+            Command::GetProfiles => "get_profiles",
+            Command::ProfileAction => "profile_action",
             Command::SetSmartThrottle => "set_smart_throttle",
             Command::SetPreviewMode => "set_preview_mode",
             Command::GetPreviewInfo => "get_preview_info",
@@ -386,6 +392,8 @@ mod tests {
             Command::GetDiagnosticsReport,
             Command::OpenLogFolder,
             Command::GetSmartThrottle,
+            Command::GetProfiles,
+            Command::ProfileAction,
             Command::SetSmartThrottle,
             Command::SetPreviewMode,
             Command::GetPreviewInfo,

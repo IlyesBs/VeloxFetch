@@ -433,3 +433,23 @@ Results (Linux):
 
 macOS and Windows run in CI. A macOS type-check could not run here (it needs Apple's SDK). The macOS code path is
 the Linux code under a wider `cfg`, with no new platform calls.
+
+## Download Profiles (October 2026)
+
+See `docs/download-profiles.md` §9. Tests:
+
+* `profiles::tests` (7);
+* `adaptive::tests::the_ceiling_follows_the_settings_while_running`;
+* `tests/integration/tests/profiles.rs` (6; 3 runs in a row green);
+* `apps/desktop/src/profiles.test.ts` (5);
+* the profile checks in `desktop-throttle.mjs`.
+
+Results (Linux):
+* Rust: 719 passed;
+* vitest: 115;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: all 18 suites pass. Once, `desktop-throttle.mjs` aborted on a WebDriver call ("Session terminated without a
+  reply") as the first suite right after a build. It was not reproduced in 4 runs in a row, all 32 checks passing,
+  and no crash dump was found.
+

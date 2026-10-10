@@ -157,6 +157,32 @@ impl AdaptiveController {
         self.limit
     }
 
+    /// The most connections the user's settings allow now (a profile or Settings changed while the download runs).
+    /// Lowering takes the limit down at once (the connections over it give way, nothing restarts); raising lets the
+    /// controller probe up to it again, still only while more connections bring more speed. `Some(limit)` when the
+    /// limit itself changed.
+    pub fn set_ceiling(&mut self, ceiling: usize) -> Option<usize> {
+        let ceiling = ceiling.max(1);
+        if ceiling == self.ceiling {
+            return None;
+        }
+        let raised = ceiling > self.ceiling;
+        self.ceiling = ceiling;
+        if raised {
+            self.soft_ceiling = ceiling;
+            if self.phase == Phase::Holding && self.cooldown > 1 {
+                self.cooldown = 1; // probe soon, not after a long backoff
+            }
+            return None;
+        }
+        self.soft_ceiling = self.soft_ceiling.min(ceiling);
+        (self.limit > ceiling).then(|| {
+            self.limit = ceiling;
+            self.changed_at = Instant::now();
+            ceiling
+        })
+    }
+
     fn step_down(&mut self) -> usize {
         (self.limit / 2).max(1)
     }
@@ -997,5 +1023,17 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         drop(held);
         assert!(tokio::time::timeout(Duration::from_secs(1), next).await.is_ok(), "the slot went to the next in line");
+    }
+
+    #[test]
+    fn the_ceiling_follows_the_settings_while_running() {
+        let mut c = AdaptiveController::new(AdaptiveConfig::default(), 8, 16);
+        assert_eq!(c.set_ceiling(16), None, "unchanged");
+        assert_eq!(c.set_ceiling(4), Some(4), "lowered below the limit: down at once");
+        assert_eq!(c.limit(), 4);
+        assert_eq!(c.set_ceiling(6), None, "raised: the limit stays, the controller may probe up to it");
+        assert_eq!(c.limit(), 4);
+        assert_eq!(c.set_ceiling(5), None, "lowered but still above the limit: nothing to shed");
+        assert_eq!(c.set_ceiling(0), Some(1), "never below one connection");
     }
 }

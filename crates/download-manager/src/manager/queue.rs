@@ -136,16 +136,16 @@ impl DownloadManager {
         };
         let max_active = req.max_active.map(|v| check("max active downloads", v, MAX_LIMIT)).transpose()?;
         let max_connections = req.max_connections.map(|v| check("max connections per download", v, MAX_CONNECTIONS_LIMIT)).transpose()?;
+        // The user's own values; the active Download Profile may set others (applied below, see `profiles.rs`).
         if let Some(n) = max_active {
-            self.inner.scheduler.set_max_slots(n);
-            self.inner.queue.lock().unwrap().max_active = n;
             self.save_text(MAX_ACTIVE_KEY, Some(n.to_string())).await?;
+            self.inner.queue.lock().unwrap().max_active = n;
         }
         if let Some(n) = max_connections {
-            self.inner.downloader.set_max_connections(n);
-            self.inner.queue.lock().unwrap().max_connections = n;
             self.save_text(MAX_CONNECTIONS_KEY, Some(n.to_string())).await?;
+            self.inner.queue.lock().unwrap().max_connections = n;
         }
+        self.apply_profile();
         self.emit_queue();
         Ok(self.queue_dto())
     }

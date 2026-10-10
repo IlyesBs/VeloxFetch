@@ -9,6 +9,8 @@ export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "
 import type {
   Analysis,
   DuplicateMatch,
+  ProfileAction,
+  Profiles,
   PreviewInfo,
   SmartThrottle,
   VideoTools,
@@ -104,6 +106,8 @@ export const api = {
   reviewLink: (url: string) => call<unknown>("review_link", { url }),
   /** Download Intelligence for the Add dialog: a read-only check of a link. `null` cancels the check that runs. */
   analyzeLink: (url: string | null) => call<Analysis | null>("analyze_link", { request: { url } }),
+  getProfiles: () => call<Profiles>("get_profiles"),
+  profileAction: (request: ProfileAction) => call<Profiles>("profile_action", { request }),
   /** A download the app already has for this link (or checksum): read-only, no network. */
   checkDuplicate: (url: string, checksum?: string) => call<DuplicateMatch | null>("check_duplicate", { request: { url, ...(checksum && { checksum }) } }),
   getClipboardWatch: () => call<ClipboardState>("get_clipboard_watch"),

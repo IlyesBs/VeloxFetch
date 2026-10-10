@@ -99,7 +99,10 @@ const HEADER_OVERHEAD: f64 = 1.06;
 
 #[derive(Debug, Default)]
 pub(super) struct SmartState {
+    /// The user's own switch (Settings); see [`SmartState::on`] for what is in force.
     enabled: bool,
+    /// The active Download Profile's automatic mode (`None`: the profile leaves Smart throttle as the user set it).
+    profile: Option<bool>,
     apps: Vec<String>,
     share: u8,
     /// The best total speed seen while not throttled (slowly forgotten while downloading).
@@ -110,7 +113,8 @@ pub(super) struct SmartState {
     limit: Option<u64>,
     /// The last scan worked (`false` = the desktop app could not list programs: full speed).
     scan_ok: bool,
-    /// Automatic mode: follow the computer's other traffic and the user's presence.
+    /// Automatic mode: follow the computer's other traffic and the user's presence (the user's own choice; see
+    /// [`SmartState::automatic`]).
     auto: bool,
     /// The least downloads keep, whatever happens (bytes/s).
     floor: u64,
@@ -192,6 +196,31 @@ impl SmartState {
                 .unwrap_or(DEFAULT_GAME_LIMIT_BPS),
             ..Default::default()
         }
+    }
+
+    /// Smart throttle is on: the user's switch, or a profile that asks for its automatic mode.
+    pub(super) fn on(&self) -> bool {
+        self.enabled || self.profile == Some(true)
+    }
+
+    /// The automatic mode is on: the profile's choice where it makes one, the user's otherwise.
+    pub(super) fn automatic(&self) -> bool {
+        self.profile.unwrap_or(self.auto)
+    }
+
+    /// Set the active profile's automatic mode; `true` when that changes anything.
+    pub(super) fn set_profile(&mut self, adaptive: Option<bool>) -> bool {
+        let changed = self.profile != adaptive;
+        self.profile = adaptive;
+        changed
+    }
+
+    pub(super) fn user_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    pub(super) fn user_auto(&self) -> bool {
+        self.auto
     }
 }
 
@@ -576,8 +605,24 @@ fn idle_or_free(away: bool) -> Reason {
 }
 
 impl DownloadManager {
+    /// The active Download Profile changed Smart throttle's automatic mode: in force now, not at the next scan.
+    pub(super) fn smart_profile_changed(&self) {
+        let on = {
+            let mut s = self.inner.smart.lock().unwrap();
+            if !s.on() || !s.automatic() {
+                s.ctl.reset();
+            }
+            s.on()
+        };
+        if on {
+            self.reapply_smart_cap();
+        } else {
+            self.smart_throttle_observe(Some(&[]));
+        }
+    }
+
     pub fn smart_throttle_enabled(&self) -> bool {
-        self.inner.smart.lock().unwrap().enabled
+        self.inner.smart.lock().unwrap().on()
     }
 
     pub fn smart_throttle(&self) -> SmartThrottleDto {
@@ -591,7 +636,7 @@ impl DownloadManager {
             scan_ok: s.scan_ok,
             auto: s.auto,
             min_bps: s.floor,
-            reason: if s.enabled { s.reason.code() } else { "off" }.to_string(),
+            reason: if s.on() { s.reason.code() } else { "off" }.to_string(),
             other_bps: s.other_bps,
             user_idle: s.user_idle,
             peak_bps: (s.peak_bps >= 1.0).then_some(s.peak_bps as u64),
@@ -599,6 +644,7 @@ impl DownloadManager {
             game_policy: s.policy,
             game_limit_bps: s.game_limit,
             game_hold: s.hold,
+            profile_adaptive: s.profile,
         }
     }
 
@@ -662,10 +708,10 @@ impl DownloadManager {
             if let Some(l) = req.game_limit_bps {
                 s.game_limit = l;
             }
-            if !s.enabled || !s.auto {
+            if !s.on() || !s.automatic() {
                 s.ctl.reset();
             }
-            !s.enabled
+            !s.on()
                 || req.auto == Some(false)
                 || req.min_bps.is_some()
                 || req.share_percent.is_some()
@@ -674,7 +720,7 @@ impl DownloadManager {
         };
         if release {
             // Off (or a new mode / minimum): applied now, not at the next scan. Off means full speed at once.
-            let enabled = self.inner.smart.lock().unwrap().enabled;
+            let enabled = self.inner.smart.lock().unwrap().on();
             if !enabled {
                 self.smart_throttle_observe(Some(&[]));
             } else {
@@ -716,7 +762,7 @@ impl DownloadManager {
     /// Smart Throttle is slowing downloads right now (the queue lets Low-priority downloads wait meanwhile).
     pub(super) fn smart_is_limiting(&self) -> bool {
         let s = self.inner.smart.lock().unwrap();
-        s.enabled && s.limit.is_some()
+        s.on() && s.limit.is_some()
     }
 
     fn velox_download_bps(&self) -> f64 {
@@ -731,7 +777,7 @@ impl DownloadManager {
         let (changed, limit, reason, save_peak) = {
             let mut s = self.inner.smart.lock().unwrap();
             s.scan_ok = running.is_some();
-            let found = if s.enabled {
+            let found = if s.on() {
                 let scan = running.map(|r| find_running(&s.apps, r).map(str::to_string));
                 s.watch.update(scan, Instant::now()).map(str::to_string)
             } else {
@@ -742,14 +788,14 @@ impl DownloadManager {
             s.user_idle = sig.idle.map(|i| i >= IDLE_AFTER);
             let (share, floor, peak) = (s.share, s.floor, s.peak_bps);
             let reference = reference_speed(peak, s.recent_bps);
-            let (limit, reason) = if !s.enabled {
+            let (limit, reason) = if !s.on() {
                 s.ctl.reset();
                 (None, Reason::Off)
             } else if found.is_some() {
                 // A listed program wins; the automatic cap starts over when it closes.
                 s.ctl.reset();
                 (Some(game_cap(s.policy, reference, share, floor, s.game_limit)), Reason::App)
-            } else if s.auto {
+            } else if s.automatic() {
                 s.ctl.step_with(sig, peak, reference, share, floor)
             } else {
                 (None, if sig.idle.is_some_and(|i| i >= IDLE_AFTER) { Reason::FullIdle } else { Reason::FullFree })
@@ -807,7 +853,7 @@ impl DownloadManager {
             let limit = match s.reason {
                 Reason::App => Some(game_cap(s.policy, reference, share, floor, s.game_limit)),
                 // The automatic cap follows the new settings now, and keeps its state (no lift-then-slow).
-                _ if s.limit.is_some() && s.auto => s.ctl.retarget(reference, share, floor),
+                _ if s.limit.is_some() && s.automatic() => s.ctl.retarget(reference, share, floor),
                 _ => None,
             };
             s.limit = limit;
@@ -820,7 +866,7 @@ impl DownloadManager {
     /// The pause policy wants the queue held right now.
     pub(super) fn smart_holds_queue(&self) -> bool {
         let s = self.inner.smart.lock().unwrap();
-        s.enabled && s.hold
+        s.on() && s.hold
     }
 
     /// Bring the queue in line with the pause policy, in the background (the observation runs on a blocking thread
