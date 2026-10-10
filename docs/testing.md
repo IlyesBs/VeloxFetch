@@ -483,3 +483,19 @@ Results (Linux):
 * policy: 42/42;
 * clippy and fmt: clean;
 * e2e: `desktop-views`, `desktop-ipc` and `desktop-ui` all pass.
+
+## Video download details (October 2026)
+
+See `docs/video-details.md` §5. Tests:
+* `clock_tests::the_details_clock_counts_running_time_only`;
+* `apps/desktop/src/mediaDetail.test.ts` (4);
+* the details-page checks in `desktop-media.mjs`. Two runs in a row green. A first run failed two checks that
+  compared against "Time taken" / "Running for", while the labels are drawn in capitals (`.label` is uppercase,
+  and `innerText` follows that). The checks now ignore case; the app was right.
+
+Results (Linux):
+* Rust: 724 passed;
+* vitest: 122;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: `desktop-media`, `desktop-views`, `desktop-ui` and `desktop-ipc` pass.

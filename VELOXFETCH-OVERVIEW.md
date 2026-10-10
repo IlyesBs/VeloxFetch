@@ -82,6 +82,16 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   the Doctor never retries or changes anything by itself.
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
 
+### Video download details
+Details: `docs/video-details.md`.
+
+- Clicking a video download (site or stream) opens its own details page, like a file's.
+- **Shows:** overview (percent, size or estimate, speed, time left, remaining, time taken), network (live chart,
+  average, peak, retries), player, pieces, and metadata (link, site, type, quality, file type, subtitles, added /
+  finished, folder, saved files).
+- **Actions:** all of the list's.
+- Live; returns to the list if the job is removed.
+
 ### Download again
 Details: `docs/redownload.md`.
 
@@ -626,7 +636,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything); Download Profiles (Default / Fast / Balanced / Low resource and your own: presets over existing settings, one precedence rule, applied live without restarts); Download again (a finished, cancelled or failed download fetched again from the start on its own entry; a deleted file shown as missing; never overwrites) |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything); Download Profiles (Default / Fast / Balanced / Low resource and your own: presets over existing settings, one precedence rule, applied live without restarts); Download again (a finished, cancelled or failed download fetched again from the start on its own entry; a deleted file shown as missing; never overwrites); Video download details (a details page for every video download, like a file's) |
 | + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux and macOS (private local address, growing-file answers, start first under a speed limit, media plugins installed with the Linux packages); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
@@ -732,6 +742,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Smart Duplicate Detection | `docs/smart-duplicate-detection.md` |
 | Download Profiles | `docs/download-profiles.md` |
 | Download again | `docs/redownload.md` |
+| Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |

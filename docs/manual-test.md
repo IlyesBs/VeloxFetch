@@ -369,3 +369,13 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 5. A failed download: Retry is still the main button; "…" > **Download again** starts it from 0 %.
 6. A running or paused download has no "Download again" in its menu.
 7. Repeat 1–2 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.
+
+## Y. Video download details (once per OS)
+1. Download a video from a site page, and an HLS stream. While each runs, click its row: the details page opens.
+   Percent, speed, the live chart, time left and "Running for" move; the status follows Pause / Resume pressed on
+   the page.
+2. For the stream: the Segments strip fills. For the site page: it says only the percent applies.
+3. When finished: 100 %, size in bytes, Time taken, Average, Finished time, folder and the full path of every saved
+   file (copy buttons work); the player plays; Open and Show in folder work.
+4. Remove the job from the list while its page is open: the page returns to the list.
+5. Repeat in French and Arabic (right to left): every text is translated, and no tool name appears anywhere.

@@ -334,6 +334,17 @@ impl DownloadManager {
                 eta_secs: None,
                 resumable: false,
                 playable: false,
+                url: page.clone(),
+                quality: req.stream.clone(),
+                format: format.map(|f| f.extension().to_string()),
+                audio_only: format.is_some_and(OutputFormat::is_audio),
+                subtitles: req.subtitles.len(),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                active_ms: 0,
+                running_since_ms: Some(now_ms()),
+                file_size: None,
+                retries: 0,
             };
             (id, dto, work_dir)
         };
@@ -466,6 +477,7 @@ impl DownloadManager {
                         }
                     }
                     self.media_update(id, |d| {
+                        d.retries += 1;
                         d.status = MediaStatus::Preparing;
                         d.speed_bps = 0;
                         d.notes = vec![format!("It stopped ({e}). Trying again ({} of {TRIES})…", attempt + 1)];
@@ -499,6 +511,7 @@ impl DownloadManager {
                     d.error = None;
                     d.resumable = false;
                     d.playable = o.files.first().is_some_and(|f| super::preview::media_type(&f.to_string_lossy()).is_some());
+                    d.file_size = Some(o.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum());
                     saved = Some(o.files.clone());
                 }
                 Err(media_engine::MediaError::Cancelled) if pausing => {
@@ -723,6 +736,7 @@ impl DownloadManager {
             m.jobs.iter_mut().find(|j| j.dto.id == id).and_then(|j| {
                 let before = j.dto.clone();
                 f(&mut j.dto);
+                track_time(&mut j.dto, now_ms());
                 (j.dto != before).then(|| j.dto.clone())
             })
         };
@@ -828,6 +842,7 @@ impl DownloadManager {
             j.dto.error = None;
             j.dto.notes.clear();
             j.dto.resumable = false;
+            track_time(&mut j.dto, now_ms());
             j.dto.clone()
         };
         self.emit(ManagerEvent::Media { job: dto.clone() });
@@ -855,6 +870,7 @@ impl DownloadManager {
                     j.dto.status = MediaStatus::Cancelled;
                     j.dto.resumable = false;
                     j.dto.playable = false;
+                    track_time(&mut j.dto, now_ms());
                     Act::Drop(Box::new(j.dto.clone()))
                 } else {
                     Act::Nothing
@@ -986,6 +1002,27 @@ fn looks_outdated(e: &media_engine::MediaError) -> bool {
 }
 
 /// Remove a job's work folder (only ever a `.velox-media-` folder the job created).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// Keep the job's clock right after any change: a run starts when it becomes active, and its time is added
+/// (and the stop time noted) when it stops. Paused time does not count.
+fn track_time(d: &mut MediaJobDto, now: u64) {
+    match (d.status.is_active(), d.running_since_ms) {
+        (true, None) => {
+            d.running_since_ms = Some(now);
+            d.ended_at_ms = None;
+        }
+        (false, Some(since)) => {
+            d.active_ms += now.saturating_sub(since);
+            d.running_since_ms = None;
+            d.ended_at_ms = Some(now);
+        }
+        _ => {}
+    }
+}
+
 fn remove_work_dir(j: &Job) {
     if j.dto.status == MediaStatus::Completed {
         return; // the engine removed it already
@@ -1035,5 +1072,65 @@ mod restart_tests {
         assert!(!limit_needs_restart(Some(4 * mb), Some(3 * mb)));
         assert!(limit_needs_restart(Some(mb), Some(2 * mb)));
         assert!(limit_needs_restart(Some(10 * mb), Some(mb)));
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::{track_time, MediaJobDto, MediaStatus};
+
+    fn job() -> MediaJobDto {
+        MediaJobDto {
+            id: 1,
+            title: "v".into(),
+            host: "h".into(),
+            status: MediaStatus::Preparing,
+            bytes: 0,
+            segments_done: 0,
+            segments_total: 0,
+            percent: None,
+            folder: String::new(),
+            files: Vec::new(),
+            notes: Vec::new(),
+            error: None,
+            site: true,
+            speed_bps: 0,
+            eta_secs: None,
+            resumable: false,
+            playable: false,
+            url: "https://example.com/watch".into(),
+            quality: None,
+            format: None,
+            audio_only: false,
+            subtitles: 0,
+            started_at_ms: 1_000,
+            ended_at_ms: None,
+            active_ms: 0,
+            running_since_ms: Some(1_000),
+            file_size: None,
+            retries: 0,
+        }
+    }
+
+    #[test]
+    fn the_details_clock_counts_running_time_only() {
+        let mut d = job();
+        d.status = MediaStatus::Downloading;
+        track_time(&mut d, 3_000);
+        assert_eq!((d.running_since_ms, d.active_ms, d.ended_at_ms), (Some(1_000), 0, None), "still the same run");
+        d.status = MediaStatus::Paused;
+        track_time(&mut d, 5_000);
+        assert_eq!((d.running_since_ms, d.active_ms, d.ended_at_ms), (None, 4_000, Some(5_000)));
+        track_time(&mut d, 9_000);
+        assert_eq!(d.active_ms, 4_000, "paused time does not count");
+        d.status = MediaStatus::Preparing; // Resume
+        track_time(&mut d, 20_000);
+        assert_eq!((d.running_since_ms, d.ended_at_ms), (Some(20_000), None));
+        d.status = MediaStatus::Completed;
+        track_time(&mut d, 26_000);
+        assert_eq!((d.active_ms, d.ended_at_ms, d.running_since_ms), (10_000, Some(26_000), None));
+        d.status = MediaStatus::Failed;
+        track_time(&mut d, 99_000);
+        assert_eq!(d.ended_at_ms, Some(26_000), "an end is noted once");
     }
 }

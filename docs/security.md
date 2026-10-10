@@ -641,3 +641,9 @@ No new command, permission, setting, file, listening socket or network destinati
 * **No surprise actions:** refused for running, paused, waiting and not-started downloads, with no change.
 * Browser cookies are not brought back (they were cleared when the download ended).
 * `file_missing` uses `symlink_metadata`: a link is never followed.
+
+## Video download details (October 2026)
+
+* No new command or capability. The page reads the job list the main window already gets, and its buttons call the
+  existing media commands.
+* It shows the job's own link, folder and file names, as the list does. No tool names (checked by e2e).

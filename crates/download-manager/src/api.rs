@@ -571,6 +571,29 @@ pub struct MediaJobDto {
     pub resumable: bool,
     /// The video can be watched now (`velox-preview://localhost/m<id>`): the part downloaded so far, or the file.
     pub playable: bool,
+    // ---- for the details page (like a file download's) ----
+    /// The video page or stream link.
+    pub url: String,
+    /// The quality chosen (an id from the analysis); `None` = the best.
+    pub quality: Option<String>,
+    /// The file type asked for (`mp4`, `mp3`...); `None` = the default (MP4, or MP3 for only the sound).
+    pub format: Option<String>,
+    /// Only the sound was asked for.
+    pub audio_only: bool,
+    /// Subtitle tracks asked for.
+    pub subtitles: usize,
+    /// When it was added (ms since 1970).
+    pub started_at_ms: u64,
+    /// When it last stopped (finished, failed, cancelled or paused); `None` while it runs.
+    pub ended_at_ms: Option<u64>,
+    /// Time spent running before the current run (ms): with `running_since_ms`, the time it took and the average.
+    pub active_ms: u64,
+    /// The current run started at (ms since 1970); `None` when not running.
+    pub running_since_ms: Option<u64>,
+    /// Size of the saved file(s) on disk, once completed.
+    pub file_size: Option<u64>,
+    /// How many times the app tried again on its own after the site or the network failed part-way.
+    pub retries: u32,
 }
 
 /// Smart throttle: slow downloads down while a game or a call runs (see `manager/smart_throttle.rs`).

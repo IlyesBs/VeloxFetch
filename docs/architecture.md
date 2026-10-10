@@ -524,3 +524,17 @@ Full description: `docs/redownload.md`.
   * `PrimaryAction` / `downloadMenu` in `DownloadCard.tsx`, and `CompletedView`;
   * `bootstrap` also resyncs on window focus (throttled to 3 s).
 * **IPC:** `redownload` (main window only).
+
+## Video download details
+
+Full description: `docs/video-details.md`.
+
+* **`MediaJobDto`** gains:
+  * `url`, `quality`, `format`, `audioOnly`, `subtitles`;
+  * a clock (`startedAtMs`, `endedAtMs`, `activeMs`, `runningSinceMs`, kept by `track_time` on every change);
+  * `fileSize`, `retries`.
+* **UI:**
+  * route `media`, opened by the `velox:open-media` event from `MediaJobs`;
+  * `MediaDetailView` reuses the file details page's `Card` / `Stat` / `Meta`;
+  * `MediaControls` and `MediaPlayer` are shared with the row.
+* No new command.

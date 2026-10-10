@@ -20,12 +20,14 @@ import { Toasts } from "./ui/primitives";
 import { ActiveView } from "./views/ActiveView";
 import { CompletedView } from "./views/CompletedView";
 import { DetailView } from "./views/DetailView";
+import { MediaDetailView } from "./views/MediaDetailView";
+import { OPEN_MEDIA } from "./components/MediaJobs";
 import { DownloadsView, FOCUS_SEARCH, type Filter } from "./views/DownloadsView";
 import { HistoryView } from "./views/HistoryView";
 import { QueueView } from "./views/QueueView";
 import { SettingsView } from "./views/SettingsView";
 
-type Route = { name: RouteName } | { name: "detail"; id: number };
+type Route = { name: RouteName } | { name: "detail"; id: number } | { name: "media"; id: number };
 
 /** http(s) links in some text (a paste, a drop), in order, without repeats; at most 1000. */
 export function linksIn(text: string): string[] {
@@ -97,7 +99,16 @@ export default function App() {
   const home = useCallback(() => setRoute({ name: "downloads" }), []);
   // every sidebar row has its own view (Downloads is the dashboard, Active the work in progress, Completed the files)
   const nav = useCallback((target: NavTarget) => setRoute({ name: target }), []);
-  const current: NavTarget | "detail" = route.name;
+  // A video download's details page counts as a details page (the sidebar lights Downloads).
+  const current: NavTarget | "detail" = route.name === "media" ? "detail" : route.name;
+  useEffect(() => {
+    const onMedia = (e: Event) => {
+      const id = (e as CustomEvent<number>).detail;
+      if (typeof id === "number") setRoute({ name: "media", id });
+    };
+    window.addEventListener(OPEN_MEDIA, onMedia);
+    return () => window.removeEventListener(OPEN_MEDIA, onMedia);
+  }, []);
 
   /** Go to the Downloads view, then send it an event once it is mounted. */
   const toDownloads = useCallback((event: string, detail?: string) => {
@@ -179,7 +190,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar current={current} folded={folded} canUnfold={wide} onNav={nav} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <TitleBar route={route.name} />
+          <TitleBar route={current} />
           <PowerBanner />
           <ClipboardBanner onReviewMany={(links) => setBatch({ links: links.join("\n") })} onStream={(url) => setStream({ url })} />
           <main className="flex-1 overflow-y-auto" data-testid="main">
@@ -203,6 +214,7 @@ export default function App() {
               {route.name === "history" && <HistoryView />}
               {route.name === "settings" && <SettingsView />}
               {route.name === "detail" && <DetailView key={route.id} id={route.id} onBack={home} />}
+              {route.name === "media" && <MediaDetailView key={route.id} id={route.id} onBack={home} />}
             </div>
           </main>
         </div>

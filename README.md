@@ -127,6 +127,10 @@ presets over the speed limit, the downloads at once, the connections and Smart t
 applies at once without restarting downloads, keeps their progress and never undoes a pause. See
 [`docs/download-profiles.md`](docs/download-profiles.md).
 
+**Video download details**: clicking a video download opens a details page like a file's. It shows progress,
+speed (live chart, average, peak), time, size, pieces, the player, quality, file type, link, folder and saved files,
+with every action. See [`docs/video-details.md`](docs/video-details.md).
+
 **Download again**: a finished, cancelled or failed download can be fetched once more from the start, from its own
 entry (same link, folder and name). A finished file deleted by mistake shows as missing, and "Download again"
 becomes its main button. A file that is still there is never overwritten. See [`docs/redownload.md`](docs/redownload.md).

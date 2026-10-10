@@ -20,7 +20,7 @@ import { ProgressBar, Sparkline, StatusChip } from "../ui/primitives";
 /** No diagnosis (a download that failed before Download Doctor): the Retry button keeps its usual label. */
 const NO_DOCTOR: Diagnosis = { category: "unknown", code: "other", source: "unknown", httpStatus: null, retry: "unknown", retryAfterSecs: null, retryAtMs: null, severity: "recoverable", factors: [], actions: [], neededBytes: null, freeBytes: null };
 
-function Stat({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
+export function Stat({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
   return (
     <div className="rounded-xl border border-line bg-raised px-3.5 py-3">
       <div className="label">{label}</div>
@@ -31,7 +31,7 @@ function Stat({ label, value, testId }: { label: string; value: ReactNode; testI
   );
 }
 
-function Card({ title, right, children, testId }: { title: string; right?: ReactNode; children: ReactNode; testId?: string }) {
+export function Card({ title, right, children, testId }: { title: string; right?: ReactNode; children: ReactNode; testId?: string }) {
   return (
     <section className="card p-4" data-testid={testId}>
       <div className="mb-3 flex items-center justify-between">
@@ -43,7 +43,7 @@ function Card({ title, right, children, testId }: { title: string; right?: React
   );
 }
 
-function Meta({ k, v, mono = false, copy }: { k: string; v: string | null | undefined; mono?: boolean; copy?: boolean }) {
+export function Meta({ k, v, mono = false, copy }: { k: string; v: string | null | undefined; mono?: boolean; copy?: boolean }) {
   return (
     <div className="grid grid-cols-[7rem_1fr_auto] items-baseline gap-3 py-1.5">
       <dt className="text-xs text-dim">{k}</dt>
