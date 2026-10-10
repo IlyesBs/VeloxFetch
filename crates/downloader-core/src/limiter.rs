@@ -59,14 +59,23 @@ impl TokenBucket {
             // Raised: the connections waiting under the old limit are let go now (see `take`), so what they owed is
             // settled; kept, it would be paid twice (a burst, then everyone stopped).
             (Some(old), Some(r)) if b.tokens < 0.0 && r > old => 0.0,
-            // Lowered: a debt owed to the old limit keeps its length in time: owed in bytes, a 0.2 s wait at a high
-            // limit would become seconds at a much lower one, and every connection would stop that long.
-            (Some(old), Some(r)) if b.tokens < 0.0 && old > 0 => b.tokens * r as f64 / old as f64,
+            // Lowered: what was owed to the old limit is settled too. Those bytes have already arrived; owed in
+            // bytes, a 0.2 s wait at a high limit became seconds at a much lower one, and even owed in time, the
+            // connections that stay all stopped for it (a second and more, measured) the moment the limit went down.
+            (Some(_), Some(_)) if b.tokens < 0.0 => 0.0,
             (Some(_), Some(r)) => b.tokens.min(burst(r)),
         };
         b.rate = rate;
         b.last = Instant::now();
         self.changes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Give back `n` bytes taken by [`Self::reserve`] whose wait was not served (the connection left).
+    fn refund(&self, n: usize) {
+        let mut b = self.inner.lock().unwrap();
+        if let Some(rate) = b.rate.filter(|r| *r > 0) {
+            b.tokens = (b.tokens + n as f64).min(burst(rate));
+        }
     }
 
     /// Take `n` bytes and return how long the caller must wait before using them.
@@ -114,6 +123,34 @@ impl Throttle {
     /// tightest limit. A limit far above what the line gives changes nothing and does not count.
     pub fn is_holding(&self, throughput: f64) -> bool {
         self.min_rate().is_some_and(|r| throughput >= r as f64 * 0.8)
+    }
+
+    /// [`Self::take`], unless `leave` says the connection stops meanwhile (asked every [`RECHECK`]): then the wait
+    /// ends at once and what it would have paid is given back, so the connections that stay do not wait for it (a
+    /// limit that just came finds every connection's buffered bytes read at once: paid in full, they would stop
+    /// every download for seconds). Returns `Ok(true)` when it left.
+    pub async fn take_or_leave(&self, n: usize, cancel: &CancellationToken, leave: &(dyn Fn() -> bool + Sync)) -> Result<bool> {
+        if self.min_rate().is_none() {
+            return Ok(false); // no limit: nothing to wait for
+        }
+        let wait = std::pin::pin!(self.take(n, cancel));
+        let left = async {
+            loop {
+                tokio::time::sleep(RECHECK).await;
+                if leave() {
+                    return;
+                }
+            }
+        };
+        tokio::select! {
+            r = wait => r.map(|()| false),
+            () = left => {
+                for b in &self.buckets {
+                    b.refund(n);
+                }
+                Ok(true)
+            }
+        }
     }
 
     /// Wait until `n` bytes may be used. Every bucket is debited, and the *longest* wait applies
@@ -278,9 +315,9 @@ mod tests {
 
     #[tokio::test]
     async fn lowering_a_limit_never_stops_downloads_for_long() {
-        // 32 connections pace themselves under 4 MB/s; the cap drops to 256 KB/s. The debt they owed is owed in
-        // time, not bytes, and nobody is let go early: bytes keep coming, one connection after the other, at about
-        // the new speed (owed in bytes, the old debt stopped every connection for seconds at once).
+        // 32 connections pace themselves under 4 MB/s; the cap drops to 256 KB/s. What they owed the old cap is
+        // settled, and nobody is let go early: bytes keep coming, one connection after the other, at about the new
+        // speed (owed in bytes, the old debt stopped every connection for seconds at once).
         let limits = RateLimits::new();
         limits.set_smart(Some(4_000_000));
         let t = limits.throttle_for(None, TokenBucket::new(None));
@@ -324,6 +361,36 @@ mod tests {
         // What was already granted under the old cap (32 x 16 KB) still arrives on time, then 256 KB/s.
         let most = 32 * 16 * 1024 + 256 * 1024 * 5 / 2 + 64 * 1024;
         assert!(got_after <= most && got_after >= 600 * 1024, "the new cap holds: {got_after} bytes in 2.5 s");
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_leaves_while_waiting_hands_its_share_back() {
+        // Four connections each read 400 KB at once when a 400 KB/s limit comes (bytes the system had buffered): a
+        // four-second queue. Three leave: their waits end at once and the one that stays does not wait for their bytes.
+        let limits = RateLimits::new();
+        limits.set_smart(Some(400_000));
+        let t = limits.throttle_for(None, TokenBucket::new(None));
+        let c = CancellationToken::new();
+        t.take(100_000, &c).await.unwrap(); // the burst
+        let leaving = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut waits = Vec::new();
+        for _ in 0..3 {
+            let (t, c, leaving) = (t.clone(), c.clone(), leaving.clone());
+            waits.push(tokio::spawn(async move {
+                let s = Instant::now();
+                let left = t.take_or_leave(400_000, &c, &|| leaving.load(Ordering::Relaxed)).await.unwrap();
+                (left, s.elapsed())
+            }));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        leaving.store(true, Ordering::Relaxed);
+        for w in waits {
+            let (left, took) = w.await.unwrap();
+            assert!(left && took < Duration::from_millis(400), "left at once: {took:?}");
+        }
+        let s = Instant::now();
+        assert!(!t.take_or_leave(400_000, &c, &|| false).await.unwrap());
+        assert!(s.elapsed() < Duration::from_millis(1400), "only its own second, not four: {:?}", s.elapsed());
     }
 
     #[tokio::test]

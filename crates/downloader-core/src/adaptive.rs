@@ -10,10 +10,13 @@
 //!   doubles each time it says no again), a probe that brings nothing doubles the wait before the next one,
 //!   and a speed that merely dips (the network, a busy server) never cuts the connections below
 //!   [`COLLAPSE_FLOOR`]: with few connections, fewer only means slower. Only errors and explicit throttling go lower.
-//! * [`AdaptiveGate`]: a concurrency limit that can be raised and lowered while in flight.
+//! * [`AdaptiveGate`]: a concurrency limit that can be raised and lowered while in flight. After the server said
+//!   "too many connections", it also holds back *new* requests for a while (see [`AdaptiveGate::server_refused`]):
+//!   the connections already transferring go on, but no part asks again at once (one refusal freeing a slot for the
+//!   next part, refused too, made dozens of refused requests in a row and seconds without a byte).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
@@ -25,6 +28,13 @@ const MAX_BACKOFF: u32 = 5;
 /// While holding, the best speed seen fades by this much per interval, so one lucky burst does not stand as the
 /// reference for ever.
 const BEST_FADE: f64 = 0.995;
+/// After a "too many connections" answer, new requests wait this long; each refusal in a row doubles it, up to
+/// [`REFUSED_MAX_WAIT`]. A request the server accepts starts the series again.
+pub const REFUSED_WAIT: Duration = Duration::from_secs(1);
+pub const REFUSED_MAX_WAIT: Duration = Duration::from_secs(16);
+/// A refusal after the connection count has worked this long without one is a passing hiccup: new requests wait
+/// (the gate's hold) but the count stays (halving 2 -> 1 for one refusal halved the speed for minutes).
+pub const STABLE_FOR: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone)]
 pub struct AdaptiveConfig {
@@ -110,6 +120,10 @@ pub struct AdaptiveController {
     throttle_hits: u32,
     /// Probes upward in a row that brought nothing.
     probe_fails: u32,
+    /// When `limit` last changed.
+    changed_at: Instant,
+    /// The last "too many connections" answer, lowering or not.
+    last_refusal: Option<Instant>,
 }
 
 impl AdaptiveController {
@@ -134,11 +148,39 @@ impl AdaptiveController {
             last_throttle_drop: None,
             throttle_hits: 0,
             probe_fails: 0,
+            changed_at: Instant::now(),
+            last_refusal: None,
         }
     }
 
     pub fn limit(&self) -> usize {
         self.limit
+    }
+
+    /// The most connections the user's settings allow now (a profile or Settings changed while the download runs).
+    /// Lowering takes the limit down at once (the connections over it give way, nothing restarts); raising lets the
+    /// controller probe up to it again, still only while more connections bring more speed. `Some(limit)` when the
+    /// limit itself changed.
+    pub fn set_ceiling(&mut self, ceiling: usize) -> Option<usize> {
+        let ceiling = ceiling.max(1);
+        if ceiling == self.ceiling {
+            return None;
+        }
+        let raised = ceiling > self.ceiling;
+        self.ceiling = ceiling;
+        if raised {
+            self.soft_ceiling = ceiling;
+            if self.phase == Phase::Holding && self.cooldown > 1 {
+                self.cooldown = 1; // probe soon, not after a long backoff
+            }
+            return None;
+        }
+        self.soft_ceiling = self.soft_ceiling.min(ceiling);
+        (self.limit > ceiling).then(|| {
+            self.limit = ceiling;
+            self.changed_at = Instant::now();
+            ceiling
+        })
     }
 
     fn step_down(&mut self) -> usize {
@@ -160,6 +202,7 @@ impl AdaptiveController {
         self.prev_limit = self.limit;
         self.prev_throughput = throughput;
         self.limit = (self.limit * factor.max(2)).min(cap);
+        self.changed_at = Instant::now();
         self.raised = true;
         self.settle = self.cfg.settle_intervals;
         Some(self.limit)
@@ -169,6 +212,7 @@ impl AdaptiveController {
         self.probed = true;
         self.soft_ceiling = new; // do not immediately climb back into the trouble
         self.limit = new;
+        self.changed_at = Instant::now();
         self.best_throughput = throughput;
         self.hold();
         Some(new)
@@ -181,10 +225,18 @@ impl AdaptiveController {
         if self.limit <= 1 {
             return None;
         }
-        if self.last_throttle_drop.is_some_and(|t| now.duration_since(t) < self.cfg.interval) {
+        if self.last_throttle_drop.is_some_and(|t| now.saturating_duration_since(t) < self.cfg.interval) {
             return None;
         }
+        // Not right after a change (a probe, the start), and the first refusal in a long while: a hiccup, keep the count.
+        let hiccup = !self.raised
+            && now.saturating_duration_since(self.changed_at) >= STABLE_FOR
+            && self.last_refusal.is_none_or(|t| now.saturating_duration_since(t) >= STABLE_FOR);
+        self.last_refusal = Some(now);
         self.last_throttle_drop = Some(now);
+        if hiccup {
+            return None;
+        }
         self.throttle_hits = self.throttle_hits.saturating_add(1);
         let new = self.step_down();
         let best = self.best_throughput;
@@ -236,6 +288,7 @@ impl AdaptiveController {
                     }
                     let back = self.prev_limit;
                     self.limit = back;
+                    self.changed_at = Instant::now();
                     self.soft_ceiling = back;
                     self.best_throughput = self.prev_throughput.max(s.throughput);
                     self.hold();
@@ -294,11 +347,27 @@ pub struct AdaptiveGate {
     /// The next first-connection turn allowed to queue (see [`AdaptiveGate::acquire_in_turn`]).
     next_turn: AtomicUsize,
     turn_taken: Notify,
+    /// No new request before this (the server refused one: see [`AdaptiveGate::server_refused`]).
+    hold_until: Mutex<Option<tokio::time::Instant>>,
+    /// Refusals in a row (reset by an accepted request).
+    refusals: AtomicU32,
+    /// Connections that are stopping because the limit went down (their slot not given back yet).
+    shedding: AtomicUsize,
+    /// Under a speed limit: the most one request asks for (0 = no limit, see [`AdaptiveGate::set_request_cap`]).
+    request_cap: std::sync::atomic::AtomicU64,
+    /// Parts waiting for a slot again, by rank (see [`AdaptiveGate::acquire_ranked`]); the second number keeps equal
+    /// ranks apart.
+    ranked: Mutex<std::collections::BTreeSet<(usize, u64)>>,
+    ticket: std::sync::atomic::AtomicU64,
+    /// The first of `ranked` changed.
+    head_changed: Notify,
 }
 
 pub struct GatePermit {
     permit: Option<OwnedSemaphorePermit>,
     gate: Arc<AdaptiveGate>,
+    /// This connection stops: one too many for the limit (see [`GatePermit::give_way`]).
+    leaving: std::sync::atomic::AtomicBool,
 }
 
 impl AdaptiveGate {
@@ -312,11 +381,77 @@ impl AdaptiveGate {
             peak: AtomicUsize::new(0),
             next_turn: AtomicUsize::new(0),
             turn_taken: Notify::new(),
+            hold_until: Mutex::new(None),
+            refusals: AtomicU32::new(0),
+            shedding: AtomicUsize::new(0),
+            request_cap: Default::default(),
+            ranked: Mutex::default(),
+            ticket: Default::default(),
+            head_changed: Notify::new(),
         })
+    }
+
+    /// The server refused a request ("too many connections": HTTP 429 / 503). New requests of this download wait
+    /// 1 s, 2 s, 4 s... while it keeps refusing (a shorter `Retry-After` is taken as said); the ones already
+    /// transferring are not touched. Returns the wait.
+    pub fn server_refused(&self, retry_after: Option<Duration>) -> Duration {
+        let now = tokio::time::Instant::now();
+        let mut h = self.hold_until.lock().unwrap_or_else(|p| p.into_inner());
+        // Refusals of requests already on their way while a wait runs are the same "no" (a burst of them must not
+        // make the wait grow to its longest at once); only a refusal after waiting counts as one more.
+        if let Some(until) = h.filter(|until| *until > now) {
+            return until - now;
+        }
+        let n = self.refusals.fetch_add(1, Ordering::SeqCst).min(8);
+        let backoff = REFUSED_WAIT.saturating_mul(1 << n).min(REFUSED_MAX_WAIT);
+        // A long `Retry-After` is for the refused request (its own retry honours it); holding every new request that
+        // long would let the connections still running dwindle away one by one as they finish.
+        let wait = retry_after.map_or(backoff, |ra| ra.clamp(REFUSED_WAIT, backoff));
+        *h = Some(now + wait);
+        wait
+    }
+
+    /// The server accepted a request: the next refusal waits the shortest time again.
+    pub fn server_accepted(&self) {
+        self.refusals.store(0, Ordering::SeqCst);
+    }
+
+    /// How long new requests still have to wait after a refusal (zero: none).
+    pub fn held_for(&self) -> Duration {
+        let h = *self.hold_until.lock().unwrap_or_else(|p| p.into_inner());
+        h.map_or(Duration::ZERO, |t| t.saturating_duration_since(tokio::time::Instant::now()))
+    }
+
+    /// Wait out a refusal's hold (it may be extended while waiting). The caller holds its slot meanwhile, so when
+    /// the hold ends, no more requests go than the limit allows.
+    async fn wait_hold(&self) {
+        loop {
+            let left = self.held_for();
+            if left.is_zero() {
+                return;
+            }
+            tokio::time::sleep(left).await;
+        }
     }
 
     pub fn limit(&self) -> usize {
         self.limit.load(Ordering::SeqCst)
+    }
+
+    /// Under a speed limit, each request asks for at most `bytes` and closes its connection when done (`None`: no
+    /// limit, requests as usual). A connection that downloads slowly for long has the system grow its receive
+    /// buffer all the same, read in big bites again; short requests on new connections keep it small.
+    pub fn set_request_cap(&self, bytes: Option<u64>) {
+        self.request_cap.store(bytes.unwrap_or(0), Ordering::SeqCst);
+    }
+
+    pub fn request_cap(&self) -> Option<u64> {
+        Some(self.request_cap.load(Ordering::SeqCst)).filter(|b| *b > 0)
+    }
+
+    /// Connections in use right now.
+    pub fn active(&self) -> usize {
+        self.active.load(Ordering::SeqCst)
     }
 
     /// Most connections that were ever in use at the same time.
@@ -324,11 +459,9 @@ impl AdaptiveGate {
         self.peak.load(Ordering::SeqCst)
     }
 
+    /// A slot with no particular place (after every ranked part).
     pub async fn acquire(self: &Arc<Self>) -> GatePermit {
-        let permit = self.sem.clone().acquire_owned().await.expect("gate semaphore is never closed");
-        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-        self.peak.fetch_max(now, Ordering::SeqCst);
-        GatePermit { permit: Some(permit), gate: self.clone() }
+        self.acquire_ranked(usize::MAX).await
     }
 
     /// A segment's first connection: queue for a slot in plan order (`turn` 0, 1, 2, ...), whatever order the tasks
@@ -344,19 +477,74 @@ impl AdaptiveGate {
             }
             taken.await;
         }
-        let mut wait = std::pin::pin!(self.sem.clone().acquire_owned());
-        // The first poll takes the place in the semaphore's queue (or the permit); only then the next turn may queue.
-        let first = futures_util::poll!(wait.as_mut());
-        self.next_turn.fetch_max(turn + 1, Ordering::SeqCst);
-        self.turn_taken.notify_waiters();
-        let permit = match first {
-            std::task::Poll::Ready(p) => p,
-            std::task::Poll::Pending => wait.await,
+        // Queued among the parts by rank (its turn); only then the next turn may queue.
+        self.ranked_after(turn, || {
+            self.next_turn.fetch_max(turn + 1, Ordering::SeqCst);
+            self.turn_taken.notify_waiters();
+        })
+        .await
+    }
+
+    /// A part queuing for a slot again (the first try queues with [`acquire_in_turn`](Self::acquire_in_turn)):
+    /// slots go to the waiting part of the lowest `rank` (its plan order), not to whoever queued first. So a part
+    /// that had to wait (another connection's run had it, its connection gave way, it switched to short requests)
+    /// keeps its place: the start of a video being watched never waits behind the middle of the file.
+    pub async fn acquire_ranked(self: &Arc<Self>, rank: usize) -> GatePermit {
+        self.ranked_after(rank, || {}).await
+    }
+
+    /// [`acquire_ranked`](Self::acquire_ranked), calling `queued` once the place is taken. Every slot of the gate is
+    /// handed out here, so only the first in line ever waits on the semaphore.
+    async fn ranked_after(self: &Arc<Self>, rank: usize, queued: impl FnOnce()) -> GatePermit {
+        let me = (rank, self.ticket.fetch_add(1, Ordering::Relaxed));
+        let first = {
+            let mut q = self.ranked_queue();
+            q.insert(me);
+            q.first() == Some(&me)
+        };
+        queued();
+        if first {
+            self.head_changed.notify_waiters();
         }
-        .expect("gate semaphore is never closed");
+        /// Leaves the queue however the wait ends (a slot, or cancelled).
+        struct Leave<'a>(&'a AdaptiveGate, (usize, u64));
+        impl Drop for Leave<'_> {
+            fn drop(&mut self) {
+                let mut q = self.0.ranked_queue();
+                let was_first = q.first() == Some(&self.1);
+                q.remove(&self.1);
+                drop(q);
+                if was_first {
+                    self.0.head_changed.notify_waiters();
+                }
+            }
+        }
+        let leave = Leave(self, me);
+        let permit = loop {
+            let changed = self.head_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let first = self.ranked_queue().first() == Some(&me);
+            if !first {
+                changed.await;
+                continue;
+            }
+            // First in line: wait for a slot, unless a lower rank arrives meanwhile.
+            tokio::select! {
+                biased;
+                p = self.sem.clone().acquire_owned() => break p.expect("gate semaphore is never closed"),
+                _ = &mut changed => {}
+            }
+        };
+        drop(leave);
+        self.wait_hold().await;
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
-        GatePermit { permit: Some(permit), gate: self.clone() }
+        GatePermit { permit: Some(permit), gate: self.clone(), leaving: Default::default() }
+    }
+
+    fn ranked_queue(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeSet<(usize, u64)>> {
+        self.ranked.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn set_limit(&self, new: usize) {
@@ -382,8 +570,44 @@ impl AdaptiveGate {
     }
 }
 
+impl GatePermit {
+    /// More connections are open than the limit now allows (it went down): `true` once, for as many connections as
+    /// are one too many, which then stop where they are and give their slot back. Without this a lower limit would
+    /// only apply as parts finish, which under a low speed limit can take minutes.
+    /// [`give_way`](Self::give_way) picked this connection to stop.
+    pub fn is_leaving(&self) -> bool {
+        self.leaving.load(Ordering::SeqCst)
+    }
+
+    /// Before a kept slot makes its next request: wait out a hold after refusals, as a new slot would.
+    pub async fn rest(&self) {
+        self.gate.wait_hold().await;
+    }
+
+    pub fn give_way(&self) -> bool {
+        if self.leaving.load(Ordering::SeqCst) {
+            return true;
+        }
+        let g = &self.gate;
+        #[allow(deprecated)] // fetch_update = try_update on newer Rust; the old name builds everywhere
+        let picked = g
+            .shedding
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |leaving| {
+                (g.active.load(Ordering::SeqCst) > g.limit.load(Ordering::SeqCst) + leaving).then_some(leaving + 1)
+            })
+            .is_ok();
+        if picked {
+            self.leaving.store(true, Ordering::SeqCst);
+        }
+        picked
+    }
+}
+
 impl Drop for GatePermit {
     fn drop(&mut self) {
+        if self.leaving.load(Ordering::SeqCst) {
+            self.gate.shedding.fetch_sub(1, Ordering::SeqCst);
+        }
         self.gate.active.fetch_sub(1, Ordering::SeqCst);
         #[allow(deprecated)] // fetch_update = try_update on newer Rust; the old name builds everywhere
         let shrink = self.gate.pending_forget.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| p.checked_sub(1)).is_ok();
@@ -418,6 +642,69 @@ mod tests {
             while set.join_next().await.is_some() {}
             assert_eq!(*order.lock().unwrap(), (0..6).collect::<Vec<_>>(), "round {round}");
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_refusal_holds_new_requests_back_and_the_wait_grows_while_refused() {
+        let g = AdaptiveGate::new(4);
+        let running = g.acquire().await; // a transfer in progress: never touched
+        assert_eq!(g.server_refused(None), Duration::from_secs(1));
+        let t = tokio::time::Instant::now();
+        let p = g.acquire().await;
+        assert!(t.elapsed() >= Duration::from_secs(1), "a new request waited out the refusal");
+        drop(p);
+        // Refused again after waiting: twice as long. A burst of refusals during a wait is one refusal.
+        let again = |g: &Arc<AdaptiveGate>, ra| {
+            let w = g.server_refused(ra);
+            for _ in 0..30 {
+                g.server_refused(ra);
+            }
+            assert_eq!(g.held_for(), w, "the burst left the wait as it was");
+            w
+        };
+        assert_eq!(again(&g, None), Duration::from_secs(2), "refused again: twice as long");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(again(&g, None), Duration::from_secs(4));
+        for _ in 0..10 {
+            tokio::time::sleep(g.held_for()).await;
+            g.server_refused(None);
+        }
+        tokio::time::sleep(g.held_for()).await;
+        assert_eq!(g.server_refused(None), REFUSED_MAX_WAIT, "never longer than the cap");
+        tokio::time::sleep(REFUSED_MAX_WAIT).await;
+        g.server_accepted();
+        assert_eq!(g.server_refused(None), Duration::from_secs(1), "an accepted request starts the series again");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        g.server_accepted();
+        assert_eq!(g.server_refused(Some(Duration::ZERO)), Duration::from_secs(1), "at least the shortest wait");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        g.server_accepted();
+        assert_eq!(g.server_refused(Some(Duration::from_secs(30))), Duration::from_secs(1), "a long wait is the refused part's");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(g.server_refused(Some(Duration::from_millis(1500))), Duration::from_millis(1500), "a shorter one is taken");
+        drop(running);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_a_refusal_only_the_limit_goes_when_the_hold_ends_not_a_storm() {
+        // Limit 1, many parts waiting: the hold ends and exactly one request goes, not one after the other at once.
+        let g = AdaptiveGate::new(1);
+        g.server_refused(None);
+        let went = Arc::new(AtomicUsize::new(0));
+        let mut set = tokio::task::JoinSet::new();
+        for turn in 0..20usize {
+            let (g, went) = (g.clone(), went.clone());
+            set.spawn(async move {
+                let _p = g.acquire_in_turn(turn).await;
+                went.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_secs(3600)).await; // the transfer
+            });
+        }
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert_eq!(went.load(Ordering::SeqCst), 0, "nobody asks during the hold");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(went.load(Ordering::SeqCst), 1, "one request when it ends");
+        set.abort_all();
     }
 
     fn cfg() -> AdaptiveConfig {
@@ -489,6 +776,19 @@ mod tests {
         assert_eq!(c.on_throttled(t0 + Duration::from_secs(9)), None, "cannot go below 1");
         assert_eq!(c.observe(s(100.0)), None, "does not ramp straight back up");
         assert_eq!(c.limit(), 1);
+    }
+
+    #[test]
+    fn a_single_refusal_after_a_long_steady_run_keeps_the_connections() {
+        let mut c = AdaptiveController::new(cfg(), 2, 2);
+        let later = Instant::now() + STABLE_FOR + Duration::from_secs(5);
+        assert_eq!(c.on_throttled(later), None, "2 worked for a long time: one refusal is a hiccup");
+        assert_eq!(c.limit(), 2);
+        assert_eq!(c.on_throttled(later + Duration::from_secs(5)), Some(1), "refused again soon: really too many");
+        // Right after a probe upward, the first refusal already lowers.
+        let mut p = AdaptiveController::new(cfg(), 2, 8);
+        assert_eq!(p.observe(s(10.0)), Some(4));
+        assert_eq!(p.on_throttled(Instant::now() + STABLE_FOR * 2), Some(2));
     }
 
     #[test]
@@ -637,6 +937,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_lower_limit_makes_exactly_the_extra_connections_give_way() {
+        let g = AdaptiveGate::new(6);
+        let held: Vec<GatePermit> = futures_util::future::join_all((0..6).map(|_| g.acquire())).await;
+        assert!(held.iter().all(|p| !p.give_way()), "within the limit: nobody leaves");
+        g.set_limit(2);
+        let leaving: Vec<bool> = held.iter().map(|p| p.give_way()).collect();
+        assert_eq!(leaving.iter().filter(|l| **l).count(), 4, "four of six stop: {leaving:?}");
+        assert!(held.iter().zip(&leaving).all(|(p, l)| p.give_way() == *l), "the same ones, asked again");
+        let mut held = held;
+        let stay: Vec<GatePermit> = held.drain(..).zip(leaving).filter_map(|(p, l)| (!l).then_some(p)).collect();
+        assert_eq!((g.active(), stay.len()), (2, 2));
+        assert!(stay.iter().all(|p| !p.give_way()), "the limit is met: the others stay");
+        assert!(tokio::time::timeout(Duration::from_millis(50), g.acquire()).await.is_err(), "no third slot");
+    }
+
+    #[tokio::test]
     async fn gate_limits_concurrency_and_resizes_live() {
         let g = AdaptiveGate::new(2);
         let a = g.acquire().await;
@@ -656,5 +972,68 @@ mod tests {
         drop(d);
         g.set_limit(4);
         let _x = (g.acquire().await, g.acquire().await, g.acquire().await, g.acquire().await);
+    }
+
+    #[tokio::test]
+    async fn a_part_queuing_again_keeps_its_place() {
+        let g = AdaptiveGate::new(1);
+        let held = g.acquire_in_turn(0).await;
+        // Later parts queue for their first try...
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut waiting = Vec::new();
+        for turn in 1..4 {
+            let (g, order) = (g.clone(), order.clone());
+            waiting.push(tokio::spawn(async move {
+                let p = g.acquire_in_turn(turn).await;
+                order.lock().unwrap().push(turn);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                drop(p);
+            }));
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // ...then part 0 has to queue again (another connection's run had it, or it gave way): it goes first.
+        let again = {
+            let (g, order) = (g.clone(), order.clone());
+            tokio::spawn(async move {
+                let p = g.acquire_ranked(0).await;
+                order.lock().unwrap().push(0);
+                drop(p);
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        again.await.unwrap();
+        for w in waiting {
+            w.await.unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), [0, 1, 2, 3], "the start first, then plan order");
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_wait_leaves_the_line() {
+        let g = AdaptiveGate::new(1);
+        let held = g.acquire().await;
+        // The first in line gives up (its download was paused): the next one is not stuck behind it.
+        assert!(tokio::time::timeout(Duration::from_millis(30), g.acquire_ranked(0)).await.is_err());
+        let next = tokio::spawn({
+            let g = g.clone();
+            async move { g.acquire_ranked(5).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        assert!(tokio::time::timeout(Duration::from_secs(1), next).await.is_ok(), "the slot went to the next in line");
+    }
+
+    #[test]
+    fn the_ceiling_follows_the_settings_while_running() {
+        let mut c = AdaptiveController::new(AdaptiveConfig::default(), 8, 16);
+        assert_eq!(c.set_ceiling(16), None, "unchanged");
+        assert_eq!(c.set_ceiling(4), Some(4), "lowered below the limit: down at once");
+        assert_eq!(c.limit(), 4);
+        assert_eq!(c.set_ceiling(6), None, "raised: the limit stays, the controller may probe up to it");
+        assert_eq!(c.limit(), 4);
+        assert_eq!(c.set_ceiling(5), None, "lowered but still above the limit: nothing to shed");
+        assert_eq!(c.set_ceiling(0), Some(1), "never below one connection");
     }
 }

@@ -90,6 +90,13 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
 ## Performance model
 
 * The file is cut into ~4 segments per possible connection; a gate limits how many run at once.
+* Runs of parts (October 2026): a connection's request carries its part and the untouched parts right after it
+  (`Claims::run_after` in `engine.rs`), read one after the other from the same answer (`disk::pump_keep` keeps the
+  bytes past a part's end for the next one). Runs are at most 16 parts and shrink as the work left shrinks (work
+  left / twice the connections), so the last parts still spread over every connection. A part inside another
+  connection's run waits for it (without a slot), and continues on its own if the run stops early. A request per
+  part, on a server that limits requests (Hetzner), was refused again and again with seconds without a byte; now
+  it is ~16 times fewer requests and no pause between parts.
 * An adaptive controller starts on 4 connections (gentle with servers that cap connections per client)
   and climbs in big steps, 4 → 16 → 64, while extra connections still increase throughput (≥5 % gain);
   each step is judged one interval after it is taken, once the new connections are up to speed, and is
@@ -100,6 +107,13 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   limit: global, category, per download or Smart throttle), the controller changes nothing: a capped speed
   says nothing about the network. HTTP 429 / 503 reduce connections *immediately* and have their own retry
   budget.
+* A refused request ("too many connections") holds back the download's *new* requests: 1 s, then 2, 4… up to
+  16 s while the server keeps refusing after each wait (`AdaptiveGate::server_refused`; a shorter `Retry-After`
+  is taken, a longer one only for the refused part's own retry). Refusals that arrive during a wait are the same
+  "no" and do not lengthen it. The connections already transferring go on. Before, a refused request freed its
+  slot for the next part, refused too: up to 40 refusals in a row and seconds without a byte. One refusal after
+  the count has worked for 20 s (`STABLE_FOR`) is a hiccup: the hold, but the count stays (halving 2 → 1 for one
+  refusal halved the speed for minutes); right after a change, or twice within 20 s, it lowers as before.
 * Steadiness (the speed must not swing between full and nearly nothing): a falling speed alone never cuts the
   connections below 4 (`COLLAPSE_FLOOR`; with few connections, fewer only means slower; errors still go lower);
   the retries that follow a 429 / 503 are not counted again as errors (that halved twice: 4 → 2 → 1 on a
@@ -108,15 +122,29 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   the best speed seen fades slowly so one lucky burst is not the reference for ever. Measured on a real
   server that allows 2 connections: before, the count cycled 4 → 2 → 1 → 2 → 4 every ~17 s and the speed
   between ~0.9 and ~2 MB/s; after, 2 connections for the whole run.
-* Limits that change while downloads wait: a limit lowered keeps the debt the connections owed *in time*
-  (owed in bytes, a 0.2 s wait at 5 MB/s became more than a second for every connection at 1 MB/s) and keeps
-  their waits; a limit raised or lifted lets the waiting connections go at once and forgives what they owed
-  the old limit (kept, it was paid twice: a burst, then every connection stopped for about a second).
+* Limits that change while downloads wait: any change settles what the connections owed the old limit (those
+  bytes have already arrived). Lowered, the waits already running are kept; raised or lifted, the waiting
+  connections go at once. (Kept in time, the debt still stopped every connection for 1.4 s the moment a cap went
+  from 4.5 to 0.9 MB/s.)
+* Connections under a speed limit (October 2026): a download held by a limit keeps only the connections the
+  limit needs, 1.5 times what one connection gets while free, at least 2 (`capped_connections` in `engine.rs`;
+  started under the limit, 2 until they fall short of it and one connection's speed is known), and all of them
+  again the moment the limit lifts. The extra ones stop where they are at their next chunk
+  (`GatePermit::give_way`, also while waiting for the limit: their unpaid bytes are handed back, `take_or_leave`).
+  Each connection that stays then asks in short requests
+  (about 4 s of its share, `Connection: close`, `AdaptiveGate::set_request_cap`), switching one after the other
+  (closing all at once made servers refuse the new ones). Why: every connection's system receive buffer, grown
+  at full speed, kept filling at line speed above the cap; the HTTP library then hands over up to 408 KB at
+  once, and a limit paid after reading let the speed run 30–90 % over the cap for 10+ s, then made everyone wait
+  for the backlog (3.5 s queues, "the download stops a while"). The line itself got bursts at full speed, which
+  is what a game must not see, and the system's extra intake looked like someone else's traffic to Smart
+  throttle. Measured on a real line, 800 KB/s cap: before, 14–22 connections, reads of 408 KB, a 7 MB burst
+  when the cap lifted; after, 3–6 connections, reads of 30–100 KB, ~800 KB/s steady, no stop at the start.
 * Bytes count (progress, speed) when they are written. A partly filled write buffer is written after 200 ms
-  anyway, and under a speed limit what a connection holds is written before it waits: at a low limit shared
-  by many connections, a full 64 KB buffer took seconds, so the progress stood still and then jumped.
-* The speed shown for each download is smoothed over ~2 s, whatever the tick rate (the short pause between two
-  parts of a connection no longer shows as a dip).
+  anyway, and under a speed limit a chunk is written and paid for in pieces of 64 KB (`PACED_PIECE`): at a low
+  limit a full chunk took seconds to pay, so the progress stood still and then jumped.
+* The speed shown for each download is smoothed over ~3 s, whatever the tick rate (the short pause between two
+  parts of a connection no longer shows as a dip), and never above a limit it is held to.
 * The dashboard's Network and Disk panels show real system counters (`manager/sysio.rs`, through `sysinfo`):
   the whole computer's download and upload speed (interfaces without a hardware address, such as loopback,
   tunnels and capture filter drivers, are skipped; each adapter counts once) and the read / write speed of
@@ -204,12 +232,20 @@ The read-only check before a download (full description: `docs/download-intellig
 
 * **`crates/download-manager/src/intelligence.rs`** holds the rules. They are pure: no I/O, the clock and the connection
   plan are passed in. `assess(Observed) -> AnalysisDto`, `expiring(url)`, `display_url(url)` and
-  `find_duplicate(url, info, known)`.
+  `find_duplicate(url, info, checksum, known)` (with a confidence, version comparison and `file_state`; see
+  `docs/smart-duplicate-detection.md`).
 * **`manager/intelligence.rs`** gathers the inputs:
   * `probe_quick` (`HEAD` + 1-byte range, no retry) under `ANALYSIS_TIMEOUT` = 20 s;
   * `fs4::available_space` on the nearest existing parent of `predicted_dir`;
   * `sysinfo::Disks` (`DiskRefreshKind::nothing()`, through `sysio::disk_for`), only for files ≥ 4 GiB;
-  * `store.list()` plus `store.history(500)`.
+  * `store.list()` plus `store.history(500)`;
+  * for a finished match, one `metadata` call on its file (inside the download folders only), and `name_conflict`:
+    whether the file name is taken in `predicted_dir` (a file, or an unfinished download's destination) and the
+    numbered name it would get (`downloader_core::numbered_name`, the engine's rule).
+* **`check_duplicate`** (Smart Duplicate Detection): the same matching for the Add bar, with no network request. The
+  link is prepared as `create_download` stores it (credentials split, share links made direct). It returns
+  `DuplicateDto | null`; the UI's `duplicates.ts` turns that into a prompt for each state. It is advisory: nothing
+  existing is changed, and the engine's `claim_name` still keeps every copy in its own file.
 * **`Downloader::connection_plan(size)`** is `planner::connection_limits` with the engine's current settings, so the
   recommended start is the engine's own; the adaptive controller still tunes it while the download runs.
 * **Confirmation dialog:** `add_pending` spawns `analyze`, keeps its `AbortHandle` in the entry (`take_pending`
@@ -435,12 +471,37 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
   queue's `hold_running` / `release_held`, so only what the game paused resumes. Gate = not user-paused and in the
   schedule window and not held for a game. `manager/preview.rs` reads the written bytes of a download for `src-tauri/src/preview_server.rs`, a Tauri v2
   asynchronous custom protocol (`velox-preview`); `DownloadControl::set_preview` makes the engine start the last
-  segment second, and `AdaptiveGate::acquire_in_turn` makes first connections take their slots in that order. On
-  Linux (WebKitGTK cannot play from a custom protocol) the same reader is served on a private 127.0.0.1 address
-  (`preview_server::loopback`, rule 12.2), whose exact origin joins `media-src` at start-up. The speed shown per
+  segment second, and the gate hands out every slot by part order (`AdaptiveGate::acquire_ranked`; first tries via
+  `acquire_in_turn`), so a part that queues again keeps its place and the start of a watched video never waits behind
+  the middle. A part's next short request keeps its slot. On Linux and macOS (WebKitGTK cannot play from a custom
+  protocol; WKWebView cannot stream a growing file through one) the same reader is served on a private 127.0.0.1
+  address (`preview_server::loopback`, rule 12.2), whose exact origin joins `media-src` at start-up. A running
+  download is answered as a growing file (`preview_head`, `stream_growing`): headers at once, bytes as written. The speed shown per
   download is smoothed but never above the limits it is held to (`shown_speed`).
 
 ## State and versioning
 
 `PRAGMA user_version` tracks schema migrations (currently v6: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places). A database from a newer build is
 refused rather than corrupted.
+
+## Download Profiles
+
+Presets over existing settings (full description: `docs/download-profiles.md`).
+
+* **`crates/download-manager/src/profiles.rs`** holds the pure rules:
+  * the built-ins (`default`, `fast`, `balanced`, `lowResource`);
+  * `resolve(base, profile)`: a profile's value where it has one, the user's own otherwise;
+  * validation, the saved format (`Saved`, one `profiles` setting) and its lifecycle.
+* **`manager/profiles.rs`**: `ProfilesState` (saved profiles, the user's global limit, the last applied values) and
+  `apply_profile`, the only place profile values are put in force:
+  * `RateLimits::set_global`;
+  * `SlotScheduler::set_max_slots`;
+  * `Downloader::set_max_connections`;
+  * `SmartState::set_profile`.
+
+  `set_speed_limit(Global)` and `set_queue_config` now store the user's own value and call `apply_profile`.
+  Smart throttle reads `on()` / `automatic()`.
+* **Engine:** `spawn_sampler` reads the connection ceiling (`Downloader::max_connections`) every tick and calls
+  `AdaptiveController::set_ceiling`, so running transfers follow a changed setting without a restart.
+* **IPC:** `get_profiles`, `profile_action` (main window only). Event `profiles`.
+

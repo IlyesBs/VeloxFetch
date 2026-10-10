@@ -71,14 +71,33 @@ export function readPalette(): Palette {
   };
 }
 
-/** Call `cb` whenever the effective theme may have changed (attribute flip or OS preference). */
+/**
+ * What the colours depend on: the theme, whether Smart throttle is on (any value: "on" and "limiting" share one
+ * palette) and the system's dark mode.
+ */
+export function paletteKey(theme: string | null, throttle: string | null, systemDark: boolean): string {
+  return `${theme ?? "system"}|${throttle !== null}|${theme ? "" : systemDark}`;
+}
+
+/** Call `cb` whenever the colours really changed (theme, Smart throttle on or off, the system's dark mode). */
 export function onThemeChange(cb: () => void): () => void {
-  const mo = new MutationObserver(cb);
-  mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-throttle"] });
+  const root = document.documentElement;
   const mq = matchMedia("(prefers-color-scheme: dark)");
-  mq.addEventListener("change", cb);
+  const key = () => paletteKey(root.getAttribute("data-theme"), root.getAttribute("data-throttle"), mq.matches);
+  let last = key();
+  // Repaints (the window background is a full-size picture) only when the palette changes: Smart throttle slowing
+  // downloads or not, or an attribute written again with the same value, keeps the same colours.
+  const changed = () => {
+    const now = key();
+    if (now === last) return;
+    last = now;
+    cb();
+  };
+  const mo = new MutationObserver(changed);
+  mo.observe(root, { attributes: true, attributeFilter: ["data-theme", "data-throttle"] });
+  mq.addEventListener("change", changed);
   return () => {
     mo.disconnect();
-    mq.removeEventListener("change", cb);
+    mq.removeEventListener("change", changed);
   };
 }

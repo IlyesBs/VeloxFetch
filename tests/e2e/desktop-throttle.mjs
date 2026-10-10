@@ -136,6 +136,46 @@ try {
   check("full speed came back (more than the cap allowed)", after - before > s2.limitBps * 2, `${after - before} bytes in 2 s, cap was ${s2.limitBps}`);
 
   await invoke("cancel_download", { id: d.id });
+
+  // ---- Download Profiles -----------------------------------------------------------------------------------------
+  const profiles = async () => (await invoke("get_profiles")).ok;
+  await invoke("set_smart_throttle", { request: { enabled: false } });
+  const p0 = await profiles();
+  check("profiles: Default by default, in force = your own settings", p0.active === "default" && JSON.stringify(p0.effective) === JSON.stringify(p0.base), JSON.stringify(p0));
+  await click("[data-testid=nav-settings]");
+  await waitFor(() => q("[data-testid=profile-lowResource]"), "Settings > Download profiles");
+  check("Settings lists the four built-in profiles", (await ev(`["default","fast","balanced","lowResource"].every((id) => !!document.querySelector('[data-testid=profile-' + id + ']'))`)) === true);
+  await click("[data-testid=profile-lowResource] [role=radio]");
+  await waitFor(async () => (await profiles()).active === "lowResource", "Low resource selected");
+  const low = await profiles();
+  check("Low resource: one at a time, few connections; your settings unchanged", low.effective.maxActive === 1 && low.effective.maxConnections === 4 && low.base.maxActive === p0.base.maxActive, JSON.stringify(low));
+  await waitFor(() => ev(`document.querySelector('[data-testid=profile-lowResource]').dataset.active === 'true'`), "marked active");
+  check("the status bar shows the active profile", (await ev(`document.querySelector('[data-testid=profile-switch]').value`)) === "lowResource");
+  await page(`(() => { const el = document.querySelector('[data-testid=profile-switch]'); el.value = 'balanced'; el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await waitFor(async () => (await profiles()).active === "balanced", "Balanced from the status bar");
+  await waitFor(async () => (await state()).profileAdaptive === true, "Smart throttle follows");
+  check("Balanced turns Smart throttle's automatic mode on, your switch stays off", (await state()).enabled === false && (await q("[data-testid=smart-profile-note]")));
+  const bad = await invoke("profile_action", { request: { kind: "create", name: "Bad", settings: { maxConnections: 999 } } });
+  check("an invalid profile is refused by the app", !!bad.err, JSON.stringify(bad));
+  const sneaky = await invoke("profile_action", { request: { kind: "delete", id: "fast" } });
+  check("a built-in profile cannot be deleted", !!sneaky.err);
+  const unknown = await invoke("profile_action", { request: { kind: "create", name: "X", settings: { maxActive: 2, skipTls: true } } });
+  check("unknown settings are refused", !!unknown.err);
+  await click("[data-testid=profile-dup-fast]");
+  await waitFor(async () => (await profiles()).profiles.some((x) => !x.builtIn), "a copy of Fast");
+  const copy = (await profiles()).profiles.find((x) => !x.builtIn);
+  await h.page("document.documentElement.setAttribute('data-theme','dark')");
+  await page(`(() => { document.querySelector('[data-testid=profiles]').scrollIntoView({ block: 'start' }); return true; })()`);
+  await sleep(500);
+  await h.screenshot(path.join(SHOTS, "profiles-dark.png"), { width: 1240, height: 860 });
+  await h.page("document.documentElement.removeAttribute('data-theme')");
+  await invoke("profile_action", { request: { kind: "select", id: copy.id } });
+  await click(`[data-testid=profile-del-${copy.id}]`);
+  await click(`[data-testid=profile-del-${copy.id}]`);
+  await waitFor(async () => (await profiles()).active === "default", "back to Default after deleting the active profile");
+  check("deleting the active profile falls back to Default", JSON.stringify((await profiles()).effective) === JSON.stringify(p0.base));
+  await click("[data-testid=nav-downloads]");
+
   const csp = (await page("window.__csp")).ok;
   const errs = (await page("window.__errs")).ok;
   check("no CSP violations or script errors", csp.length === 0 && errs.length === 0, JSON.stringify({ csp, errs }));

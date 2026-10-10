@@ -297,3 +297,64 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 3. Linux: cards and panels have no shadows; the selected tab, the current page in the side menu, the chosen Smart throttle
    mode and a focused field still show a clear ring. Switch the theme and turn Smart throttle on (amber): the soft light in
    the background follows within half a second.
+
+## T. Steady speed and a smooth Smart throttle (once per OS, on a real internet connection)
+1. Download a large file (1 GB test file) with nothing else on the line: the speed shown stays near the line's speed
+   (within about a sixth either way), never drops to a few hundred KB/s for seconds. Details > Timeline: few or no
+   "failed" lines.
+2. Same from a server that allows only a couple of connections (a public speed-test file host): a steady speed on 1–2
+   connections; a refused part waits a moment, the others keep going; no long stretch at 0.
+3. Turn Smart throttle on (automatic mode on, nobody else using the line): the window does not flash or flicker (once
+   amber, it stays still), the status says full speed and stays so for a minute; downloads keep their speed.
+4. Start a listed program (or add a running one to the list): within ~3 s downloads drop to the share, smoothly, with no
+   stop; the speed stays near the cap; the connection count drops to a few. Play or run a speed test meanwhile: no
+   bursts of lag every second.
+5. Close the program: after two scans (~6 s) downloads climb back to full speed in a few seconds, no burst far above the
+   line's speed.
+6. With the program running, switch modes on the card every few seconds: the download never stops, the window never
+   flashes.
+
+## U. Smart Duplicate Detection (once per OS)
+1. Download a small document. Paste the same link and press Add: "You already downloaded this file" (or "appears to
+   have been downloaded already"), with Open file, Show in folder, View, Download again. Open works.
+2. Download again: a second copy `name (1).ext`; the first file is untouched.
+3. Paste the link with `#something` at the end, or the host in capitals: same prompt. Change a query value (`?v=2`):
+   no prompt.
+4. Start a large download, paste its link: "This file is already downloading" (View / Download another copy). Pause it,
+   paste again: "paused", Resume it resumes the same download (no new one in the list).
+5. Delete the finished file in the file manager, paste its link: "the file is no longer in its folder"; Open is not
+   offered.
+6. Remove a finished download from the list (keep the file), paste its link: still found (from the history); Open and
+   Show in folder work.
+7. Put a file of your own named `test.zip` in the Compressed folder. Add dialog > Check link on another link whose file
+   is `test.zip`: the "File name" row says another file of that name is there (contents may differ), and gives the new
+   name. Download: saved as `test (1).zip`; your file is untouched.
+8. Restart the app: steps 1 and 6 still find the downloads.
+
+## V. Live preview on each OS (once per OS, after installing the release package)
+1. Linux: install the `.deb` (or `.rpm`) on a clean system. The package manager also installs the GStreamer
+   plugins it lists (`apt` / `dnf` shows them). The AppImage runs without them.
+2. Start downloading a large MP4 (and an MP3), press **Watch while downloading** at once: picture or sound within a
+   few seconds; it keeps playing as the download goes on, never stops with an error; seeking back works.
+3. Throttle the download (a low speed limit), then press Watch: the start still comes first (the "ready from the
+   start" figure grows), playback starts and continues.
+4. macOS: the same on a downloading MP4 (H.264): it plays while downloading. A WebM / MKV that the system cannot
+   decode says "cannot be played here" after a few seconds; the download continues.
+5. Windows: unchanged; the same checks pass.
+
+## W. Download Profiles (once per OS)
+1. Fresh install or existing user: Settings > Speed > Download profiles shows Default active; "In force now" equals
+   your settings; nothing else changed.
+2. Start two large downloads with 3 at once. Choose **Low resource**: the running ones keep going (no restart, the
+   progress does not jump back); the connection count drops to 4 or fewer within seconds; a third one added waits.
+3. Pause one download by hand, choose **Fast**, then a profile of your own with 6 at once: it stays paused.
+4. Choose **Balanced**: the dashboard's Smart throttle shows it working (automatic mode), its switch says the
+   profile turned it on; your own switch in Settings is unchanged. Browse a heavy page: downloads give way.
+5. Change "downloads at once" in the Queue view while Low resource is active: the note says the profile uses 1;
+   choose Default: your new value is in force.
+6. Duplicate Fast, rename it, set "Speed limit: Limit to 1 MB/s": the speed holds near 1 MB/s; a per-download
+   limit of 300 KB/s on one download still applies to it.
+7. Delete the active profile of your own: Default is active, downloads continue.
+8. Restart the app: the active profile and your profiles are still there.
+9. Switch profiles from the status bar: the same as from Settings.
+

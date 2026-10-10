@@ -6,6 +6,7 @@ import { useT } from "../i18n";
 import {
   keepWhileActive,
   THROTTLE_MODES,
+  throttleOn,
   throttleStatus,
   throttleStore,
   useThrottle,
@@ -151,7 +152,9 @@ export function SmartThrottleSettings() {
     .map((a) => a.trim())
     .filter(Boolean);
   const edited = !!s && list.join("\n") !== s.apps.join("\n");
-  const on = !!s?.enabled;
+  // The user's own switch (the checkbox) and what is in force (a Download Profile may turn the automatic mode on).
+  const userOn = !!s?.enabled;
+  const on = throttleOn(s);
   const slowed = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   const named = THROTTLE_MODES.some((m) => m.share === share);
@@ -175,7 +178,7 @@ export function SmartThrottleSettings() {
         <input
           type="checkbox"
           data-testid="smart-enabled"
-          checked={on}
+          checked={userOn}
           disabled={!s}
           onChange={(e) =>
             save(
@@ -186,6 +189,11 @@ export function SmartThrottleSettings() {
         />
         {t("smart.enable")}
       </label>
+      {s?.profileAdaptive != null && (
+        <p className="mt-1 text-[11px] text-accent" data-testid="smart-profile-note">
+          {t(s.profileAdaptive ? "prof.smartAutoOn" : "prof.smartAutoOff")}
+        </p>
+      )}
 
       {s && (
         <p

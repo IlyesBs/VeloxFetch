@@ -105,6 +105,24 @@ The tests were run on Windows; the same tests run in CI on Linux and macOS (the 
   that appears under the name while downloading is never replaced. Tests: `usability.rs` (same name at once, a file appearing
   mid-download, a paused download keeps its name), `downloader-core/tests/download.rs`.
 
+* **Smart Duplicate Detection** (`docs/smart-duplicate-detection.md`). Before, the Add bar only compared the exact text of
+  a link with the list, said the same thing whatever the state, and a same-link match was claimed even when the server's
+  file had changed. Tests:
+  * `download-manager` `intelligence::tests` (6 new): normalisation, version rules, checksums, order, file state.
+  * `tests/integration/tests/duplicates.rs` (9): states, file gone or edited, history and restart, checksum, name
+    conflict vs. duplicate, identical requests at once, secrets, malformed links.
+  * `apps/desktop/src/duplicates.test.ts` (9) and `intelligence.test.ts`: prompt per state, name-conflict lines, keys
+    in en/fr/ar.
+  * e2e `desktop-usability.mjs`: the real prompt for a finished file offers Open, Show in folder, Download again.
+  * Results (Linux, 2026-10-10):
+    * Rust workspace: 702 passed, 0 failed (`duplicates.rs` 3 runs in a row, all green);
+    * vitest: 110;
+    * policy: 42/42;
+    * clippy and fmt: clean;
+    * e2e: 17 of 18 suites passed then. `desktop-preview.mjs` failed on the base commit too. It was first thought to
+      be the machine, but it was an app bug (a 503 for bytes not written yet, and the file's start not fetched first),
+      fixed right after: see "Preview on Linux and macOS".
+
 * **A full or failing disk hung the download** (found by the fault-injection tests): when the writer of a segment stopped on a disk error, the reader kept waiting on a full channel for a writer that no longer
   existed, so the download stayed "downloading" forever. The writer now hands the channel back when it stops; the download fails at once with the disk's message and the retry resumes.
 * **A killed stream download left an empty placeholder file** (the finished name was reserved with an empty file before the real one was renamed over it) **and a hidden working folder for ever**. The file is now put in
@@ -204,8 +222,7 @@ WebView2's DevTools port. Needs `WebKitWebDriver` (package `webkit2gtk-driver`) 
 virtual display, and KWin (when installed) as window manager in a private D-Bus session, so nothing appears on, or changes, the
 user's desktop. `VELOX_E2E_DISPLAY=:0` runs on the real display instead; `VELOX_E2E_WM=0` skips the window manager. Windows are
 closed like a user would (`x11-close-window.py`, WM_DELETE_WINDOW). Not ported yet: `desktop-browser.mjs` (Windows registry checks)
-and the `real-*` scripts. Known Linux gaps they show: live preview does not play (WebKitGTK cannot stream media from a custom
-protocol). (`desktop-ui.mjs` used to measure ~20 fps while downloading; since the paint fixes of `docs/ui-performance.md` it holds
+and the `real-*` scripts. (Live preview on Linux: fixed, see "Preview on Linux and macOS" below.) (`desktop-ui.mjs` used to measure ~20 fps while downloading; since the paint fixes of `docs/ui-performance.md` it holds
 60 fps and passes.) On a machine without root, both tools can be unpacked from their packages into
 a user folder (`dpkg -x`) and put on `PATH`. Still failing on Linux, before and after the Smart Download Queue (checked on the previous
 commit too): `desktop-queue.mjs` waits in vain for the second dry-run power action at its very end.
@@ -364,3 +381,88 @@ queue, throttle, ipc, views, redesign, usability, perf, ui, smart-queue, intelli
 folders. `desktop-preview.mjs` skips "it plays while downloading" when this computer's sound server takes no stream
 (it checks with `paplay`; on the development machine the PulseAudio layer of PipeWire hangs every client, `paplay`
 included); everything else in it, bytes arriving while downloading included, is checked.
+
+## Steady speed and a smooth Smart throttle (October 2026)
+
+Found by measuring on a real line (3 MB/s; Hetzner, which refuses above ~2 connections, and thinkbroadband, which
+allows ~32 and answers `Retry-After: 30`) with temporary probes printing every tick (deleted before the commit).
+Details: `docs/smart-throttle-and-preview.md` > "Steady speed…", `docs/architecture.md` > Performance model.
+
+| Where | Test | Fails without |
+|---|---|---|
+| `adaptive.rs` | `a_refusal_holds_new_requests_back_and_the_wait_grows_while_refused` (the wait, its growth, a burst counts once, `Retry-After`) | the hold |
+| `adaptive.rs` | `after_a_refusal_only_the_limit_goes_when_the_hold_ends_not_a_storm` | the hold (20 requests at once) |
+| `adaptive.rs` | `a_single_refusal_after_a_long_steady_run_keeps_the_connections` | the 20 s rule (2 → 1) |
+| `adaptive.rs` | `a_lower_limit_makes_exactly_the_extra_connections_give_way` | `give_way` |
+| `limiter.rs` | `a_connection_that_leaves_while_waiting_hands_its_share_back` | the refund (4 s instead of 1) |
+| `engine.rs` | `a_limit_keeps_only_the_connections_it_needs` | `capped_connections` |
+| `smart_throttle.rs` | `what_the_system_still_takes_in_right_after_slowing_down_is_not_someone_else`, `a_window_a_few_percent_off_at_full_speed_is_not_browsing`; the browsing tests confirm on 3 readings | settle / the 10 % allowance |
+| `tests/integration/tests/phase3.rs` | `a_connection_limited_server_gets_runs_of_parts_not_a_request_per_part` (≤ ⅓ of the parts in requests, ≤ 6 refusals) | runs, the hold |
+| `phase3.rs` | `runs_still_spread_the_last_parts_over_every_connection` (8 connections used, < 2.5 s instead of ~6) | shrinking runs |
+| `phase3.rs` | `a_cap_keeps_few_connections_holds_its_speed_and_never_stops_the_download` (≤ 4 connections, no 0.5 s without bytes, within 12 % of the cap, all back on lift) | trimming, pieces, settling the debt (it overshot by 15–50 % or stopped) |
+| `phase3.rs` | `a_download_started_under_a_cap_keeps_few_connections_and_its_speed` (≤ 3 connections, within 15 % of the cap) | starting on 2 when the free speed is unknown |
+| `smart_preview.rs` | `changing_modes_while_capped_never_stops_a_running_download` now passes every time (it stopped 0.6–1.3 s when the cap went 4.5 → 0.9 MB/s) | settling the debt on a lower limit |
+| `phase2.rs` | `mid_body_disconnects_resume_from_the_written_offset`: a connection lost inside a run counts as a retry of that part | |
+| `apps/desktop/src/throttle.test.ts` | `polls that bring the same state never touch <html> again`, `slowing downloads or not keeps the same colours (no repaint)` | the flash fix |
+
+## Preview on Linux and macOS (October 2026)
+
+`desktop-preview.mjs` failed on Linux before this fix, on the base commit too. GStreamer said
+`R2: Received 503 HTTP error code`, and once the start of the file was not ready after 20 s. Full analysis:
+`docs/smart-throttle-and-preview.md`, "Linux and macOS: why the preview stopped". Tests added:
+
+* `smart_preview.rs::watching_a_download_already_running_gets_its_start_first`. A real download at 200 KB/s, with
+  "Watch" pressed while it runs:
+  * the start is playable within 8 s (about 2 s now; it never was before);
+  * the first unfinished part never sits idle for 4 s while others download;
+  * 15 runs in a row green.
+* `adaptive.rs`:
+  * `a_part_queuing_again_keeps_its_place`: part 0 queuing again goes before parts 1–3;
+  * `a_cancelled_wait_leaves_the_line`: a paused part does not block the line.
+* `policy.test.mjs`: the private address on Linux and macOS only (Windows keeps the protocol); `Info.plist` allows
+  local networking only.
+* `desktop-preview.mjs`: macOS now expects the private address, and checks the secret, the Host and that scripts
+  cannot read it, as on Linux.
+
+Results (Linux):
+* Rust: 705 passed;
+* vitest: 110;
+* policy: 42/42;
+* clippy: clean;
+* e2e: all 18 suites pass (`desktop-preview.mjs` 3 runs in a row).
+
+macOS and Windows run in CI. A macOS type-check could not run here (it needs Apple's SDK). The macOS code path is
+the Linux code under a wider `cfg`, with no new platform calls.
+
+## Download Profiles (October 2026)
+
+See `docs/download-profiles.md` §9. Tests:
+
+* `profiles::tests` (7);
+* `adaptive::tests::the_ceiling_follows_the_settings_while_running`;
+* `tests/integration/tests/profiles.rs` (6; 3 runs in a row green);
+* `apps/desktop/src/profiles.test.ts` (5);
+* the profile checks in `desktop-throttle.mjs`.
+
+Results (Linux):
+* Rust: 719 passed;
+* vitest: 115;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: all 18 suites pass. Once, `desktop-throttle.mjs` aborted on a WebDriver call ("Session terminated without a
+  reply") as the first suite right after a build. It was not reproduced in 4 runs in a row, all 32 checks passing,
+  and no crash dump was found.
+
+## Release script: AppImage media tools (October 2026)
+
+`build-release.sh` failed at the AppImage on a machine that already had the Tauri libraries
+(`failed to run linuxdeploy`; linuxdeploy's GStreamer plugin said `Error: patchelf not found`). Fixed in the script
+(see `docs/release-process.md`). Checked:
+* `bash -n` passes;
+* the detection, run on this machine, finds the plugins
+  (`/usr/lib/x86_64-linux-gnu/gstreamer-1.0`) and the helper, and reports `patchelf` missing when it is not on the
+  PATH;
+* `patchelf` installed in user space from pip.
+
+Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
+

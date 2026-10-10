@@ -82,8 +82,11 @@ downloaded, and VeloxFetch says so.
 
 Smart throttle (Settings > Speed) lets downloads give way while you browse, watch or play (automatic mode, or while a
 listed game / call runs: give way, a low speed limit or pause, lifted when it closes) and gives them the whole connection when the network or the computer is idle, smoothly and never
-below the reserved minimum; a status line and a speed graph show what it does. The details of a video or audio download
-can **preview** it while it downloads (on Linux too, through a private local address). See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
+below the reserved minimum; a status line and a speed graph show what it does. Under a cap a download keeps only the
+connections it needs and reads in small, even steps, so the line sees no bursts (what a game needs), and it never
+stops when a cap starts, changes or lifts. The details of a video or audio download
+can **preview** it while it downloads (on Linux and macOS through a private local address; the Linux packages
+install the media plugins it needs, and the AppImage carries them). See [`docs/smart-throttle-and-preview.md`](docs/smart-throttle-and-preview.md).
 
 On the desktop: closing the window keeps VeloxFetch in the tray, it can start at login (in the tray), and it notifies when
 a download finishes or fails while the window is hidden (Settings > Appearance > On the desktop). A download sent from the
@@ -118,6 +121,17 @@ and the Add dialog's **Check link** show:
 
 "Why?" shows what the server actually did. The check downloads nothing, writes nothing and can be cancelled. If it
 fails, you can still download. See [`docs/download-intelligence.md`](docs/download-intelligence.md).
+
+**Download Profiles**: Default (your settings), Fast, Balanced, Low resource, and profiles of your own. They are
+presets over the speed limit, the downloads at once, the connections and Smart throttle's automatic mode. Switching
+applies at once without restarting downloads, keeps their progress and never undoes a pause. See
+[`docs/download-profiles.md`](docs/download-profiles.md).
+
+**Smart Duplicate Detection**: adding a link the app already has says so before anything happens. It tells you
+whether that download is running, paused, failed or finished, and whether the finished file is still there. It
+offers what fits: view it, resume it, open the file, or download another copy. A file that only has the same name is
+not a duplicate: the new download gets its own name and nothing is ever replaced. See
+[`docs/smart-duplicate-detection.md`](docs/smart-duplicate-detection.md).
 
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
 

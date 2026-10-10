@@ -53,6 +53,11 @@ export async function bootstrap(): Promise<() => void> {
         api.getQueues().catch(() => null),
       ]);
       store.load(downloads, metrics, queue, pending, media, queues);
+      // Download Profiles: the panel and the status bar degrade on their own if this fails.
+      api.getProfiles().then(
+        (profiles) => store.dispatch({ type: "profiles", profiles }),
+        () => {},
+      );
     } catch (e) {
       store.toast("error", normalizeError(e).message);
     }

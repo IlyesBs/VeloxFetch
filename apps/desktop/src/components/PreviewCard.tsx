@@ -13,6 +13,9 @@ export function previewUrl(id: number): string {
 }
 
 const PLAYABLE: DownloadStatus[] = ["downloading", "queued", "paused", "completed"];
+/** Times the player is reconnected after an error (it reads again from where the download is). */
+const RETRIES = 3;
+const RETRY_MS = 1500;
 
 /**
  * Watch a video (or listen to audio) while it downloads. Preview mode makes the engine fetch the start and the
@@ -24,6 +27,13 @@ export function PreviewCard({ id, status }: { id: number; status: DownloadStatus
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<PreviewInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The player failed: reconnect it a few times (a new element reads again), then say it cannot play here.
+  const [attempt, setAttempt] = useState(0);
+  const [cannotPlay, setCannotPlay] = useState(false);
+  const onPlayerError = () => {
+    if (attempt < RETRIES) setTimeout(() => setAttempt((a) => a + 1), RETRY_MS);
+    else setCannotPlay(true);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -46,6 +56,8 @@ export function PreviewCard({ id, status }: { id: number; status: DownloadStatus
     const i = await act(() => api.setPreviewMode(id, true));
     if (i) {
       setInfo(i);
+      setAttempt(0);
+      setCannotPlay(false);
       setOpen(true);
     }
   };
@@ -78,7 +90,10 @@ export function PreviewCard({ id, status }: { id: number; status: DownloadStatus
         <div className="mt-3 space-y-2">
           {/* No crossOrigin, no download / remote playback: the stream stays inside this window. */}
           <video
+            key={attempt}
             data-testid="preview-video"
+            data-attempt={attempt}
+            onError={onPlayerError}
             className="aspect-video w-full rounded-xl bg-black"
             src={previewUrl(id)}
             controls
@@ -88,7 +103,9 @@ export function PreviewCard({ id, status }: { id: number; status: DownloadStatus
             disablePictureInPicture
           />
           <p className="text-xs text-dim" data-testid="preview-ready">
-            {error
+            {cannotPlay
+              ? t("prev.cantPlay")
+              : error
               ? error
               : info && !info.complete
                 ? t("prev.ready", { got: formatBytes(info.readyFromStart), pct })

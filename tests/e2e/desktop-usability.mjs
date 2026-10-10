@@ -84,6 +84,13 @@ try {
   await click("[data-testid=add-button]");
   await waitFor(() => has("[data-testid=duplicate-dialog]"), "duplicate prompt");
   check("adding a link that is already in the list asks first", (await text("[data-testid=duplicate-dialog]")).includes("report.pdf"));
+  check(
+    "the prompt knows the file is finished and still there: Open, Show in folder, Download again",
+    (await ev(`document.querySelector('[data-testid=duplicate-dialog]').dataset.file`)) === "present" &&
+      (await has("[data-testid=duplicate-open]")) &&
+      (await has("[data-testid=duplicate-folder]")) &&
+      (await has("[data-testid=duplicate-again]")),
+  );
   const before = (await invoke("list_downloads", { filter: {} })).ok.length;
   await h.screenshot(path.join(SHOTS, "duplicate-dark.png"), { width: 1000, height: 640 });
   await click("[data-testid=duplicate-again]");

@@ -205,6 +205,14 @@ impl RequestExtras {
     pub fn is_empty(&self) -> bool {
         self.headers.is_empty()
     }
+
+    /// The same, asking the server to close the connection after the answer (`Connection: close`): the next
+    /// request opens a new one instead of reusing it. (HTTP/2 has no such header; it is left out there.)
+    pub fn closing(&self) -> Self {
+        let mut headers = self.headers.clone();
+        headers.push((header::CONNECTION, HeaderValue::from_static("close")));
+        Self { headers }
+    }
 }
 
 /// Result of resource discovery.

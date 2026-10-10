@@ -184,6 +184,8 @@ export interface SmartThrottle {
   gameLimitBps: number;
   /** The "pause" policy holds the queue right now. */
   gameHold: boolean;
+  /** The active Download Profile sets the automatic mode (true also turns Smart throttle on); null: it leaves it. */
+  profileAdaptive: boolean | null;
 }
 
 export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
@@ -468,9 +470,27 @@ export interface Finding {
 export interface DuplicateMatch {
   /** null: only in the history (downloaded before, removed from the list since). */
   id: number | null;
+  /** The history line of a match that is only in the history (to open or show its file). */
+  historyId: number | null;
   status: DownloadStatus | null;
   filename: string;
-  reason: "sameLink" | "sameFinalLink" | "sameFile";
+  reason: "sameLink" | "sameFinalLink" | "sameFile" | "sameChecksum";
+  /** exact: proven the same version (or checksum); likely: same link, version not compared; possible: the server now describes another version. */
+  confidence: "exact" | "likely" | "possible";
+  /** The server (or the checksum) describes another version than the known download's. */
+  changed: boolean;
+  /** Completed matches only: is the finished file still there (never read, only its metadata). */
+  file: "present" | "missing" | "changed" | "unknown" | null;
+  /** The finished file is there and may be opened from the app (not a program or script). */
+  openable: boolean;
+}
+
+/** The file name is already taken in its folder: a destination conflict, not a duplicate. Nothing is replaced. */
+export interface NameConflict {
+  /** The name it will most likely be saved as instead. */
+  savedAs: string | null;
+  /** The name is the matched duplicate's own file (the same resource). */
+  sameResource: boolean;
 }
 
 export interface Analysis {
@@ -495,6 +515,7 @@ export interface Analysis {
   storage: StorageCheck;
   freeBytes: number | null;
   duplicate: DuplicateMatch | null;
+  nameConflict: NameConflict | null;
   health: Health;
   /** Most serious first. */
   findings: Finding[];
@@ -553,7 +574,52 @@ export type ManagerEvent =
   | { type: "pending"; pending: PendingDownload }
   | { type: "pendingRemoved"; token: number }
   | { type: "media"; job: MediaJob }
-  | { type: "mediaRemoved"; id: number };
+  | { type: "mediaRemoved"; id: number }
+  | { type: "profiles"; profiles: Profiles };
+
+/** Download Profiles: presets over the existing settings (null: the user's own setting stays). */
+export interface ProfileSettings {
+  /** Bytes/s; 0 = no limit. */
+  speedLimitBps?: number | null;
+  maxActive?: number | null;
+  maxConnections?: number | null;
+  /** Smart throttle's automatic mode. */
+  adaptive?: boolean | null;
+}
+
+export interface EffectiveSettings {
+  speedLimitBps: number | null;
+  maxActive: number;
+  maxConnections: number;
+  smartOn: boolean;
+  adaptive: boolean;
+}
+
+export type BuiltInProfile = "default" | "fast" | "balanced" | "lowResource";
+
+export interface ProfileInfo {
+  id: string;
+  /** Custom profiles only; built-in ones are named in the user's language. */
+  name: string | null;
+  builtIn: boolean;
+  settings: ProfileSettings;
+}
+
+export interface Profiles {
+  active: string;
+  profiles: ProfileInfo[];
+  /** The user's own settings (what Default uses, and what a profile leaves alone). */
+  base: EffectiveSettings;
+  /** What is in force now. */
+  effective: EffectiveSettings;
+}
+
+export type ProfileAction =
+  | { kind: "select"; id: string }
+  | { kind: "create"; name: string; settings: ProfileSettings }
+  | { kind: "duplicate"; id: string; name: string }
+  | { kind: "update"; id: string; name?: string; settings?: ProfileSettings }
+  | { kind: "delete"; id: string };
 
 /** A quality of a stream (HLS / DASH). */
 export interface StreamOption {

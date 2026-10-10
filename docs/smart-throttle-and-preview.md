@@ -115,15 +115,35 @@ of their real speed (Balanced), the cap holds while it lasts, then eases back up
 25 s after it stopped; 2 steady connections throughout; switching on / off and modes every 3 s never stops the
 download.
 
+### Steady speed, a cap that holds on the line, no flashing (October 2026)
+
+Reported: the speed swung 3 MB/s → 1 MB/s → 200 KB/s on a 3 MB/s line; turning Smart throttle on made the window
+flash, downloads stopped a while and came back, and the throttle "did not work". Measured on that line with real
+servers (each 200 ms tick, a temporary probe through the manager, as the app runs it):
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Speed falling to almost nothing for seconds on servers that limit connections | a refused request (429) freed its slot for the next part, refused too: 40 refusals in a row, 0 bytes; one refusal at 2 connections halved to 1 for minutes | the download's new requests wait after a refusal (1 s, 2 s… while it keeps refusing; a burst counts once); a single refusal after a steady 20 s keeps the count; a request carries a run of parts (16× fewer requests). See `architecture.md` > Performance model |
+| Under a cap: 30–90 % above it for 10+ s, then everything stopped ("stops a while, then resumes") | every connection's system buffer, grown at full speed, kept filling above the cap; reads of up to 408 KB paid after reading built a 3.5 s backlog everyone waited for | a capped download keeps only the connections the cap needs (the others stop at once, handing back what they had not paid), short requests on fresh connections, chunks paid in 64 KB pieces, what was owed to an old cap settled on any change |
+| Slowed for "browsing" with nobody else on the line, and kept slow | (a) the noise allowance (3 % of the speed) was below what a 3 s window is off by at full speed; (b) right after slowing, the system's intake above the cap looked like someone else | 10 % allowance and 3 confirmations; 2 readings after a cap change are ignored; with few connections the intake is small and short |
+| The next cap a share of the capped speed | the reference was learned the moment the cap lifted | learned again 3 observations later |
+| The window flashed every 3 s while Smart throttle was on | each poll wrote the same value to `<html data-throttle>`; the theme watcher took it as a colour change and painted the full-window background picture again, twice | written only when it changes (`throttle.ts`), and the watcher repaints only when the palette changes (`theme.ts` `paletteKey`: "on" and "limiting" share colours) |
+
+Result on the real line (thinkbroadband, 3 MB/s): free 2.7–3.3 MB/s; a game at 25 % → ~730 KB/s within a second,
+steady (no second without bytes), 6 connections; the game closes → back to full speed in ~5 s; automatic mode on
+for 50 s with nobody else: never slowed. Tests: see `docs/testing.md` > "Steady speed and a smooth Smart throttle".
+
 ### Automatic mode (`Controller`)
 
 | Signal | Rule |
 |---|---|
 | Smoothing | the last two (signed) readings are averaged, then each reading moves the smoothed traffic half way (`SMOOTHING` 0.5); it may go below zero by at most max(96 KB/s, 10 % of VeloxFetch's speed) |
-| Noise | of VeloxFetch's own speed, 3 % (30 % while a limit paces downloads: `paced`) never counts as someone else |
+| Noise | of VeloxFetch's own speed, 10 % (30 % while a limit paces downloads: `paced`) never counts as someone else (3 % until October 2026: a window 5–8 % off at full speed, common on a real line, slowed downloads for nobody right after turning it on) |
 | Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > max(96 KB/s, noise) (off below half) -> **browsing** |
 | Network busy | other traffic > max(512 KB/s, 15 % of the best speed) (off below half) -> **busy** |
-| Slow down | after 2 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Slow down | after 3 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Settle | the 2 readings after the cap was set or lowered (`SETTLE`) change nothing: the system still takes in what was on its way to VeloxFetch's connections faster than the new cap reads it, which the counters show as someone else |
+| Relearn | the reference and the best speed are learned again only 3 observations after a cap lifted (`RELEARN_AFTER`): the speed is still climbing back, and the buffered burst looked like a faster line |
 | Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the reference |
 | New mode / minimum | the cap follows at once (`retarget`), the controller keeps its state |
 | No counters | full speed, the controller starts over (`unknown`) |
@@ -158,8 +178,8 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 ## Live preview
 
 ```text
-<video src="http://velox-preview.localhost/12">            (velox-preview://localhost/12 on macOS;
-                                                            http://127.0.0.1:<port>/<secret>/12 on Linux, below)
+<video src="http://velox-preview.localhost/12">            (Windows; Linux and macOS:
+                                                            http://127.0.0.1:<port>/<secret>/12, below)
   -> src-tauri/src/preview_server.rs   main window only, GET / HEAD only, path = a download id only
   -> manager.read_preview(12, Range)   audio / video only; .part while downloading, the saved file once done;
                                        inside a download folder (AllowedRoots); only written bytes
@@ -167,8 +187,10 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 ```
 
 * Only bytes that are really on disk are served: each unfinished segment holds back its last 512 KB (the writer may
-  still have them in flight). A request for bytes not there yet waits up to 20 s while the download runs (the player
-  shows "loading"), then 503 + `Retry-After`; it never returns the zeros of an unwritten part.
+  still have them in flight). On the custom protocol (Windows), a request for bytes not there yet waits up to 20 s
+  while the download runs, then gets 503 + `Retry-After`. The private address (Linux, macOS) never answers 503 for a
+  running download: the headers go out at once and the bytes follow as they are written (see below). Neither ever
+  returns the zeros of an unwritten part.
 * At most 2 MB per answer; the player asks for the next part. `bytes=a-`, `bytes=a-b`, `bytes=-n` (suffix) are
   understood; a start past the end is 416 with `bytes */total`.
 * Types: mp4 / m4v / webm / mkv / mov / ogv / ts / avi, mp3 / m4a / aac / ogg / opus / wav / flac. Anything else
@@ -200,7 +222,69 @@ blob, data; the page got `FormatError` and nothing played). On Linux the same an
   answering only what was written made WebKit take that for the whole file (a 60 s song showed as 3.7 s and
   stopped). A video job whose size is not known yet is sent from the start without a length until it ends. A quick
   "not written yet" (nothing downloads it any more) or 120 s without progress ends the answer; the player asks again.
-* Windows (WebView2) and macOS keep the custom protocol, unchanged.
+* Windows (WebView2) keeps the custom protocol, unchanged.
+
+### Linux and macOS: why the preview stopped, and the fix (October 2026)
+
+Symptom: on Linux the player loaded and played for a moment, then stopped for good. GStreamer's log said
+`R2: Received 503 HTTP error code` (WebKit's second request). On macOS a downloading video did not play at all.
+Windows was fine. Packages were not the cause: every GStreamer plugin was installed on the test machine.
+
+Causes and fixes:
+
+1. **A 503 for bytes not written yet.** After buffering, WebKit opens a second request at the point where it
+   stopped. When those bytes were not written yet, `stream` waited 20 s and then answered 503. WebKit's source
+   element treats that as fatal.
+
+   Now a request for a download that is still running (`DownloadManager::preview_head`: media type, size, still
+   running, the resolved start) is answered like any web server serving a growing file (`stream_growing`):
+   * `206` / `200` with the full `Content-Length` and `Content-Range` at once;
+   * then the bytes as they are written (`pump`), even if the first byte asked for is not there yet.
+
+   A paused, finished or unknown download keeps the earlier answers (the saved file, `416`, `415`, `404`).
+2. **macOS could not stream a growing file through the custom protocol.** WKWebView's player (AVFoundation) asks
+   for exact byte ranges. It needs a file that is still being written to come as one answer of the full length,
+   and a custom protocol's answer is one finished body. macOS now uses the same private address as Linux:
+   * `#[cfg(any(target_os = "linux", target_os = "macos"))]` on `loopback`, its start-up and `get_preview_base`;
+   * `/dev/urandom` exists there too;
+   * `Info.plist` adds `NSAppTransportSecurity` → `NSAllowsLocalNetworking` (local addresses only; App Transport
+     Security stays on for everything else, and `policy.test.mjs` forbids any wider exception).
+3. **The file's start was not fetched first** once "Watch" was pressed on a running download, mostly under a speed
+   limit. The playable start stayed at 0 for 20 s while 4 of 5 MB arrived, so the player waited for nothing.
+   * A part that had to queue for a slot again went to the back of a first-come queue, behind the middle of the
+     file. This happened when another connection's run had the part, when its connection gave way to a lower
+     limit, or when it switched to short requests.
+   * Every slot of the connection gate is now handed out by part order (`AdaptiveGate::acquire_ranked`; first tries
+     through `acquire_in_turn` go through it too). A part's next short request also keeps its slot instead of
+     queuing again (`GatePermit::is_leaving` / `rest`: a hold after refusals still applies).
+   * Result: the start is playable about 2 s after "Watch" at 200 KB/s, and the first unfinished part never sits
+     idle.
+4. **The player recovers on its own.** If the player errors, `PreviewCard` reconnects it up to 3 times, 1.5 s
+   apart. If it still cannot play (a format this computer's player does not decode), it says so plainly
+   (`prev.cantPlay`) instead of showing a black box. The download is never affected.
+
+**Installed with the app (Linux).** WebKitGTK plays media through GStreamer:
+
+| Package | GStreamer packages |
+|---|---|
+| `.deb` | Depends on `gstreamer1.0-plugins-base` (playback, Ogg/Vorbis/Opus), `gstreamer1.0-plugins-good` (WAV, MP4/MOV, Matroska/WebM, FLAC, MP3, HTTP), `gstreamer1.0-libav` (H.264, AAC, HEVC...). Recommends `gstreamer1.0-plugins-bad` and a sound output (`gstreamer1.0-pulseaudio \| gstreamer1.0-pipewire`). |
+| `.rpm` | Depends on `gstreamer1-plugins-base` and `gstreamer1-plugins-good`. Recommends `gstreamer1-plugin-libav`, `gstreamer1-plugins-bad-free` and `gstreamer1-plugin-openh264` (Fedora ships H.264 that way). |
+| AppImage | `bundleMediaFramework: true`: GStreamer and its plugins travel inside the AppImage, so it plays on a system without them. |
+
+All of this is in `tauri.release.linux.conf.json`. Windows (Media Foundation in WebView2) and macOS (AVFoundation)
+decode with the system's own frameworks: nothing to install.
+
+**What each system's player can decode** (the download itself is never affected):
+
+| | Windows (WebView2) | macOS (WKWebView) | Linux (WebKitGTK + the packages above) |
+|---|---|---|---|
+| MP4 / M4V / MOV (H.264, AAC) | yes | yes | yes |
+| HEVC / H.265 | only with the system's HEVC extension | yes | yes (libav) |
+| WebM / Ogg (VP8/VP9/AV1, Opus/Vorbis) | yes | WebM VP9/Opus on recent macOS; Ogg no | yes |
+| MKV / AVI | often (codec dependent) | no | yes |
+| MP3 / M4A / AAC / WAV / FLAC | yes | yes | yes |
+
+When a format cannot be decoded, the card says so after the retries.
 
 ## Tests
 
@@ -243,3 +327,17 @@ capped never stop the download, Settings and the card agree, off = full speed at
 `tests/e2e/desktop-preview.mjs` (real WebView2: a WAV plays while downloading through the protocol, seeking, CSP blocks
 scripts; the real process scan finds a listed program, the status line, a held-back download, full speed at once),
 policy tests "live preview: ..." and "smart throttle: ...".
+
+## Download Profiles and Smart throttle (October 2026)
+
+A Download Profile may set Smart throttle's automatic mode (`SmartState::profile`):
+
+* `Some(true)` (Balanced) turns it on;
+* `Some(false)` (Fast) turns the automatic mode off but leaves Smart throttle itself, and a gaming policy, as you
+  set them;
+* `None` leaves everything as you set it.
+
+What is in force: `on() = enabled || profile == Some(true)`, `automatic() = profile.unwrap_or(auto)`. Every place
+that used `enabled` / `auto` for behaviour now uses them. The DTO keeps `enabled` / `auto` as your switches and adds
+`profileAdaptive`. A profile change is applied at once (`smart_profile_changed`). See `docs/download-profiles.md`.
+

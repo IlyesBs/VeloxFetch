@@ -161,7 +161,7 @@ async fn automatic_mode_gives_way_to_browsing_and_takes_the_line_back_when_it_is
     // Browsing: after the confirmation, downloads slow down (here to the default 1 MB/s: no speed learned yet).
     let data = random_data(8 * MB, 9);
     let srv = serve(data.clone()).await;
-    for _ in 0..2 {
+    for _ in 0..3 {
         m.smart_throttle_observe_signals(Some(&[]), browsing());
     }
     let s = m.smart_throttle();
@@ -560,4 +560,62 @@ async fn only_audio_and_video_downloads_can_be_previewed() {
         assert!(m.set_preview_mode(id, true).await.is_err());
     }
     assert_eq!(m.read_preview(999_999, None).await.status, 404);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watching_a_download_already_running_gets_its_start_first() {
+    let b = base("preview-running");
+    let m = manager(&b).await;
+    let data = random_data(5 * MB, 12);
+    let srv = serve(data.clone()).await;
+    // Slow (about 200 KB/s overall), as on a slow line: the order is what is checked.
+    m.set_speed_limit(download_manager::SetSpeedLimit { target: download_manager::SpeedTarget::Global, bytes_per_sec: Some(200 * 1024) })
+        .await
+        .unwrap();
+    let d = m.create_download(NewDownload { url: srv.url("/song.wav"), ..Default::default() }).await.unwrap();
+    let t = Instant::now();
+    while m.get_download(d.id).await.unwrap().downloaded < 300 * 1024 {
+        assert!(t.elapsed() < Duration::from_secs(20), "never started");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // "Watch while downloading" pressed now.
+    m.set_preview_mode(d.id, true).await.unwrap();
+    let t = Instant::now();
+    loop {
+        let info = m.preview_info(d.id).await.unwrap();
+        if info.ready_from_start > 0 {
+            eprintln!(
+                "start ready after {:?}: {} bytes ({} downloaded)",
+                t.elapsed(),
+                info.ready_from_start,
+                m.get_download(d.id).await.unwrap().downloaded
+            );
+            break;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(8),
+            "the start of the file is still not playable: {info:?}, {} downloaded",
+            m.get_download(d.id).await.unwrap().downloaded
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let r = m.read_preview(d.id, Some("bytes=0-")).await;
+    assert_eq!(r.status, 206);
+    assert_eq!(r.body, data[..r.body.len()], "the start, exactly");
+    // It keeps leading: the first unfinished part (where the player is) never sits idle while the rest downloads (a
+    // part that has to queue again keeps its place; it never waits behind the middle of the file).
+    let mut idle_since: Option<(usize, u64, Instant)> = None;
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(6) {
+        let det = m.get_download_detail(d.id).await.unwrap();
+        let last = det.segments.len() - 1;
+        let Some(first) = det.segments.iter().find(|s| s.index != last && s.downloaded < s.end - s.start + 1) else { break };
+        match idle_since {
+            Some((i, got, since)) if i == first.index && got == first.downloaded => {
+                assert!(since.elapsed() < Duration::from_secs(4), "part {i} (the start) waits while others download: {:?}", det.segments);
+            }
+            _ => idle_since = Some((first.index, first.downloaded, Instant::now())),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }

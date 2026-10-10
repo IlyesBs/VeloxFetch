@@ -127,8 +127,12 @@ Cancelled downloads never match. A file name alone never matches.
 
 When several downloads match, the order is: running, waiting or paused first, then completed, then failed, then
 history-only. The history adds completed files that are no longer in the list (the last 500 rows), reported with
-`id: null`. Checksums are not compared: the server gives none before the download, and no download is made to
-compute one.
+`id: null`.
+
+Smart Duplicate Detection extended this: `sameChecksum`, a confidence (`exact` / `likely` / `possible`), `changed`
+when the server now describes another version, the finished file's state, the `nameConflict` field (a taken file
+name, told apart from a duplicate), and the `check_duplicate` command used by the Add bar. All rules are in
+[`docs/smart-duplicate-detection.md`](smart-duplicate-detection.md).
 
 ### Findings and health
 Each finding has a `code` and a `level` (`info`, `warning` or `problem`), plus optional values (`detail` = a host,
@@ -245,7 +249,8 @@ Results on Linux, 2026-10-08:
 
 - **Second request.** Whether a browser session is *required* is not tested with a second request without cookies.
   The rule is one quick check only.
-- **Checksums.** Not used for duplicates before the download (the server gives none).
+- **Checksums.** Compared only when the user gives one (see `docs/smart-duplicate-detection.md`). The server gives
+  none before the download, and no download is made to compute one.
 - **Advanced fields.** The Add dialog's check does not send its advanced fields (cookies, referrer, user agent).
   A site that needs them may report `authRequired` or `webPage` while the download itself would work.
 - **Sign-in pages without a redirect** (a 200 HTML page at the file's own address) show as `webPage`, not as a sign-in.

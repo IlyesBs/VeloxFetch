@@ -15,6 +15,13 @@
       </array>
     </dict>
   </array>
+  <!-- Live preview reads from the app's private address on this computer (http://127.0.0.1:<port>/<secret>/):
+       local addresses only, everything else keeps App Transport Security. -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <!-- Notifications and the menu bar icon use the app's own name. -->
   <key>NSUserNotificationAlertStyle</key>
   <string>banner</string>

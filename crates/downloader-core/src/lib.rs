@@ -17,8 +17,8 @@ pub mod store;
 
 pub use adaptive::{AdaptiveConfig, AdaptiveController, AdaptiveGate, Sample};
 pub use engine::{
-    part_path, DownloadConfig, DownloadControl, DownloadOutcome, DownloadRequest, Downloader, Placement, ProgressHandle, ProgressSnapshot,
-    RunEvent, RunEventKind, StopReason,
+    numbered_name, part_path, DownloadConfig, DownloadControl, DownloadOutcome, DownloadRequest, Downloader, Placement, ProgressHandle,
+    ProgressSnapshot, RunEvent, RunEventKind, StopReason,
 };
 pub use error::{DownloadError, Result};
 pub use filetype::{classify as classify_file, FileKind};

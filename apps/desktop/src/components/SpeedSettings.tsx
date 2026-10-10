@@ -8,6 +8,7 @@ import type { FileKind, SpeedLimits } from "../types";
 import { Icon } from "../ui/icons";
 import { Panel } from "../ui/primitives";
 import { FileIcon, KINDS } from "./FileIcon";
+import { activeProfile, overridden, profileName } from "../profiles";
 
 const KIND_PLURAL: Record<FileKind, Key> = {
   video: "kinds.video",
@@ -65,6 +66,9 @@ function TypeLimit({ kind, limit, onChanged }: { kind: FileKind; limit: number |
 export function SpeedSettings({ id }: { id?: string }) {
   const t = useT();
   const limit = useStore((s) => s.metrics.globalLimit);
+  const profiles = useStore((s) => s.profiles);
+  const over = overridden(profiles);
+  const prof = activeProfile(profiles);
   const [value, setValue] = useState("");
   const [unit, setUnit] = useState<"K" | "M">("M");
   const [limits, setLimits] = useState<SpeedLimits | null>(null);
@@ -93,6 +97,14 @@ export function SpeedSettings({ id }: { id?: string }) {
       <p className="mb-3 text-[13px]">
         {t("speed.current")} <strong data-testid="global-limit">{limit ? formatSpeed(limit) : t("common.none")}</strong>
       </p>
+      {over.speed && prof && profiles && (
+        <p className="-mt-2 mb-3 text-[11px] text-accent" data-testid="profile-note">
+          {t("prof.noteLimit", {
+            name: profileName(prof, t),
+            yours: profiles.base.speedLimitBps === null ? t("common.none") : formatSpeed(profiles.base.speedLimitBps),
+          })}
+        </p>
+      )}
       <div className="flex max-w-md gap-2">
         <input
           className="input"

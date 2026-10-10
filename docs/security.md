@@ -297,6 +297,12 @@ and were added with the same rules as everything else (threats 17 and 18 in `doc
 * **Show in folder / Open** for finished downloads and history lines: by id only; programs, scripts, shortcuts and web pages are only shown, never opened.
 * **Speed limits per kind of file** (Settings > Speed); a download without a category of its own shares the limit of its kind.
 * **Errors in plain words** (`download_manager::explain`), with the engine's message kept for the details view.
+* **Smart Duplicate Detection** (`check_duplicate`, main window only, read-only, no network): it answers with the file
+  name, ids, state, confidence and file state, never with the link, its query / signature, credentials or a path. A
+  match never deletes, cancels, pauses or overwrites anything; the prompt's actions are the existing commands with
+  their checks (`FileTarget` ids, download folders, programs never opened). A finished file is only looked at
+  (`metadata`) inside the download folders, and never read or hashed. A taken file name is a separate "name
+  conflict", never a duplicate. Details: `docs/smart-duplicate-detection.md`.
 * **Same file names**: a second download of `setup.exe` becomes `setup (1).exe`; two downloads of the same name running at
   once never share a partial file, and a file that appears under the name while downloading is never replaced.
   (Before, the partial file was shared and the final rename could replace an existing file: fixed, see `docs/testing.md`.)
@@ -578,8 +584,13 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   10 s, at most 16 connections and 40 new requests a second (429), no CORS headers. The CSP gets that exact origin in
   `media-src` at start-up (no wildcard; the static `tauri.conf.json` is unchanged and `csp_is_strict` still holds);
   `connect-src` is unchanged, so scripts cannot read it (checked in `desktop-preview.mjs`). New command
-  `get_preview_base` (main window only; no arguments; `None` on Windows / macOS). Threat 32; policy test
-  "no shipped code opens a TCP or UDP listening socket, except the Linux preview address built to 12.2".
+  `get_preview_base` (main window only; no arguments; `None` on Windows). Threat 32; policy test
+  "no shipped code opens a TCP or UDP listening socket, except the Linux / macOS preview address built to 12.2".
+  **Since the preview fix (October 2026) macOS uses the same address** (WKWebView's player cannot stream a growing
+  file through the custom protocol). Same rules, same code. `Info.plist` allows plain http for local addresses only
+  (`NSAllowsLocalNetworking`); `NSAllowsArbitraryLoads` and per-domain exceptions are forbidden by the policy test.
+  A running download is answered as a growing file (headers at once, bytes as written): still only written
+  audio / video bytes, the same reader.
 * **Program list paths**: an entry may be an absolute executable path (no wildcards, at most 260 characters). The
   scan reads executables' full paths only while such an entry is listed; they are compared and dropped, never
   stored, logged or sent (policy test "smart throttle").
@@ -588,3 +599,34 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * **Browser registration in tests on Linux / macOS**: `VELOX_NMH_SCRATCH_HOME` (debug builds only, like
   `VELOX_NMH_SCRATCH_KEY` on Windows) puts the browsers' manifest folders under a scratch home; release builds never
   read it.
+
+## Steady speed and Smart throttle fixes (October 2026)
+
+No new command, permission, setting, file, listening socket or network destination. What changed on the wire:
+* **Fewer requests to servers that refuse**: after a "too many connections" answer (429 / 503) the download sends no new
+  request for 1 s, then 2, 4… up to 16 s while the server keeps refusing (bounded, reset by the next accepted request),
+  instead of up to 40 refused requests in a row. A long `Retry-After` still delays the refused part itself (capped at
+  300 s as before), never the whole download for longer than 16 s.
+* **Runs**: one ranged request may now cover several consecutive parts (at most 16) of the same file; the answer is
+  checked as before (`206`, a `Content-Range` that matches the request, the strong validator / `If-Range`), and its
+  bytes are written only into the parts that request claimed.
+* **Under a speed limit**, requests ask for a few seconds of data and carry `Connection: close` (a standard header; no
+  information about the user). The connection count drops to what the limit needs.
+* Window: `<html data-throttle>` is written only when it changes; no new data reaches the page.
+
+## Download Profiles (October 2026)
+
+* **Presets only.** A profile can set the global speed limit, downloads at once, connections per download and Smart
+  throttle's automatic mode, nothing else. Paths, TLS, integrity checks, credentials, network settings and the
+  browser link are not profile fields. `deny_unknown_fields` refuses anything else.
+* **Checked in Rust** (`profiles::validate_settings`, `validate_name`): the same ranges as Settings, names 1–40
+  characters without control characters, at most 20 of your own. An invalid request changes and saves nothing.
+* **Lowest limit wins.** A profile only sets the limiter's global layer: per-download and per-type limits, Smart
+  throttle's cap and its reserved minimum are separate layers it cannot lift.
+* **No surprise actions.** A profile never starts, resumes, pauses, cancels or restarts a download, and never
+  touches partial files.
+* **Bad saved data** (unreadable, newer, partly invalid) never stops the app. Default (your settings) is used, and
+  no other setting is changed.
+* **IPC:** `get_profiles` / `profile_action` are main window only (`authz`, capability file, build manifest,
+  destructive-commands test list).
+

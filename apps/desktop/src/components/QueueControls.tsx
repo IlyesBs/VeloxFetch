@@ -4,6 +4,7 @@ import { useStore } from "../hooks";
 import { useT } from "../i18n";
 import { Icon } from "../ui/icons";
 import { formatWhen } from "./when";
+import { activeProfile, overridden, profileName } from "../profiles";
 
 const ACTIVE_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 24, 32];
 const CONNECTION_CHOICES = [1, 2, 4, 8, 16, 24, 32, 48, 64];
@@ -21,7 +22,17 @@ export function QueueControls() {
   const running = useStore((s) => s.groups.active.length);
   const waiting = useStore((s) => s.groups.queued.length);
   const [pauseRunning, setPauseRunning] = useState(true);
+  const profiles = useStore((s) => s.profiles);
   if (!q) return null;
+  const over = overridden(profiles);
+  const prof = activeProfile(profiles);
+  // The active profile sets this value: say so beside the user's own setting (which it leaves as it is).
+  const bySet = (on: boolean, n: number | undefined) =>
+    on && prof && n !== undefined ? (
+      <span className="mt-1 block text-[11px] text-accent" data-testid="profile-note">
+        {t("prof.note", { name: profileName(prof, t), value: n })}
+      </span>
+    ) : null;
 
   const waitingForWindow = q.schedule.enabled && !q.scheduleOpen;
   let status: string;
@@ -85,6 +96,7 @@ export function QueueControls() {
               </option>
             ))}
           </select>
+          {bySet(over.active, profiles?.effective.maxActive)}
         </label>
         <label className="block text-xs text-dim">
           {t("qc.maxConn")}
@@ -100,6 +112,7 @@ export function QueueControls() {
               </option>
             ))}
           </select>
+          {bySet(over.connections, profiles?.effective.maxConnections)}
         </label>
       </div>
       <p className="mt-2 text-xs text-dim">
