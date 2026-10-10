@@ -358,3 +358,33 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 8. Restart the app: the active profile and your profiles are still there.
 9. Switch profiles from the status bar: the same as from Settings.
 
+## X. Download again (once per OS)
+1. Download a file to the end. Delete it in the system's file manager and switch back to the app: the card and the
+   Completed view say "The file is no longer on disk", and the main button is **Download again** (Open is gone).
+2. Press it: the same entry downloads from 0 % and finishes; the file is back in the same folder with the same name
+   and opens.
+3. Without deleting the file, choose "…" > **Download again**: a second file `name (1).ext` appears; the first one
+   is untouched.
+4. Cancel a running download: its main button is **Download again**; press it: it starts from 0 % and finishes.
+5. A failed download: Retry is still the main button; "…" > **Download again** starts it from 0 %.
+6. A running or paused download has no "Download again" in its menu.
+7. Repeat 1–2 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.
+
+## Y. Video download details (once per OS)
+1. Download a video from a site page, and an HLS stream. While each runs, click its row: the details page opens.
+   Percent, speed, the live chart, time left and "Running for" move; the status follows Pause / Resume pressed on
+   the page.
+2. For the stream: the Segments strip fills. For the site page: it says only the percent applies.
+3. When finished: 100 %, size in bytes, Time taken, Average, Finished time, folder and the full path of every saved
+   file (copy buttons work); the player plays; Open and Show in folder work.
+4. Remove the job from the list while its page is open: the page returns to the list.
+5. Repeat in French and Arabic (right to left): every text is translated, and no tool name appears anywhere.
+
+## Z. Drop-down lists (once per OS: Windows, Linux, macOS)
+1. In dark and in light theme, open several lists (status bar profile, Settings > Speed, Add download > priority,
+   the details page's priority): each opens a list in the same colours as the fields, never a grey or black
+   system list.
+2. Pick with the mouse; then focus a list with Tab, press Enter, move with the arrows, type a letter, Enter: the
+   value changes and applies. Escape closes without changing.
+3. Near the bottom of the window the list opens upwards. In Arabic it lines up on the right.
+4. Scroll the page while a list is open: it closes.

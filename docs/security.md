@@ -630,3 +630,20 @@ No new command, permission, setting, file, listening socket or network destinati
 * **IPC:** `get_profiles` / `profile_action` are main window only (`authz`, capability file, build manifest,
   destructive-commands test list).
 
+## Download again (October 2026)
+
+* **`redownload`** is main window only (`authz`, capability file, build manifest, destructive-commands test list).
+  It takes only an id.
+* **Paths:** it deletes only the record's partial file, after `AllowedRoots::check`. The new download's folder is
+  the old one only while it is still allowed; otherwise it is the download folder. The engine confines every path
+  again before writing.
+* **Never overwrites:** a file at that path keeps its content; the new copy takes a free name.
+* **No surprise actions:** refused for running, paused, waiting and not-started downloads, with no change.
+* Browser cookies are not brought back (they were cleared when the download ended).
+* `file_missing` uses `symlink_metadata`: a link is never followed.
+
+## Video download details (October 2026)
+
+* No new command or capability. The page reads the job list the main window already gets, and its buttons call the
+  existing media commands.
+* It shows the job's own link, folder and file names, as the list does. No tool names (checked by e2e).

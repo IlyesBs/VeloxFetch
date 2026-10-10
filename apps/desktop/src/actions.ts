@@ -10,6 +10,8 @@ export const actions = {
   resume: (id: number) => act(() => api.resumeDownload(id)),
   cancel: (id: number) => act(() => api.cancelDownload(id)),
   retry: (id: number) => act(() => api.retryDownload(id)),
+  /** Download it again from the start (same link, folder and name; never overwrites a file that is there). */
+  redownload: (d: Download) => act(() => api.redownload(d.id), t("act.redownloading", { name: d.filename })),
   remove: (id: number, deleteFile = false) => act(() => api.deleteDownload(id, deleteFile)),
   /** Remove a finished download and delete its file from the disk (ask first: see DeleteConfirm). */
   deleteFile: (d: Download) => act(() => api.deleteDownload(d.id, true), t("done.deleted", { name: d.filename })),

@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "resume_download",
     "cancel_download",
     "retry_download",
+    "redownload",
     "delete_download",
     "get_download",
     "list_downloads",

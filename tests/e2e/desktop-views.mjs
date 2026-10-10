@@ -109,6 +109,30 @@ try {
   await waitFor(async () => !(await has(`[data-testid=done-${c.id}]`)), "the file to leave the list");
   check("the question's 'Remove from list only' keeps the file on disk", onDisk(c));
 
+  // ============================================================ Download again (a file deleted by mistake)
+  const e = await get("echo.pdf");
+  fs.rmSync(path.join(h.root, e.filename)); // deleted outside the app
+  await page(`(() => { window.dispatchEvent(new Event('focus')); return true; })()`); // back to the app: the list resyncs
+  await waitFor(() => has(`[data-testid=done-${e.id}] [data-testid=done-file-missing]`), "the missing file to be shown", 8000);
+  check("a finished file deleted outside the app says it is no longer on disk", /no longer on disk/.test(await text(`[data-testid=done-${e.id}]`)));
+  check("Download again is its highlighted button, and Open is gone", (await has(`[data-testid=done-${e.id}] [data-testid=done-redownload].round-primary`)) && !(await has(`[data-testid=done-${e.id}] [data-testid=done-open]`)));
+  await nav("downloads");
+  await waitFor(() => has(`[data-testid=download-${e.id}]`), "the card");
+  check("on the dashboard card too: the note, and Download again as the main button", (await has(`[data-testid=download-${e.id}] [data-testid=card-file-missing]`)) && (await has(`[data-testid=download-${e.id}] [data-testid=card-redownload]`)) && !(await has(`[data-testid=download-${e.id}] [data-testid=open-file]`)));
+  await click(`[data-testid=download-${e.id}] [data-testid=card-redownload]`);
+  await finished(e.id).catch(() => {});
+  await waitFor(async () => onDisk(e), "the file to be back", 15000).catch(() => {});
+  check("Download again brings the file back, same name and folder, on the same entry", onDisk(e) && (await status(e.id)) === "completed" && (await invoke("get_download", { id: e.id })).ok?.fileMissing === false);
+  await waitFor(async () => !(await has(`[data-testid=download-${e.id}] [data-testid=card-file-missing]`)), "the note to go", 5000).catch(() => {});
+  check("the note is gone once the file is back", !(await has(`[data-testid=download-${e.id}] [data-testid=card-file-missing]`)));
+  const twice = await invoke("redownload", { id: e.id });
+  await finished(e.id).catch(() => {});
+  const copy = (await invoke("get_download", { id: e.id })).ok;
+  check("with the file still there, the new copy takes a free name (the file is never overwritten)", twice.ok && /echo \(1\)\.pdf$/.test(copy?.destination ?? "") && onDisk(e), JSON.stringify(copy?.destination));
+  check("an unknown id is refused", !!(await invoke("redownload", { id: 987654 })).err);
+  await invoke("delete_download", { id: e.id, deleteFile: false });
+  await nav("completed");
+
   // ...and from a card's menu on the dashboard
   const d = await get("delta.pdf");
   await nav("downloads");

@@ -17,6 +17,7 @@
 9. [Rules for anyone changing the code](#9-rules-for-anyone-changing-the-code-people-and-ai)
 10. [Glossary](#10-glossary)
 11. [Documentation map](#11-documentation-map)
+12. [Change log](#12-change-log)
 
 ---
 
@@ -82,6 +83,32 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   the Doctor never retries or changes anything by itself.
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
 
+### Drop-down lists
+Every drop-down opens a list drawn by the app in the theme's colours (same as the fields) on Windows, Linux and
+macOS, never the grey system list. Keyboard, right-to-left and screen readers work. Details: `docs/ui-performance.md`.
+
+### Video download details
+Details: `docs/video-details.md`.
+
+- Clicking a video download (site or stream) opens its own details page, like a file's.
+- **Shows:** overview (percent, size or estimate, speed, time left, remaining, time taken), network (live chart,
+  average, peak, retries), player, pieces, and metadata (link, site, type, quality, file type, subtitles, added /
+  finished, folder, saved files).
+- **Actions:** all of the list's.
+- Live; returns to the list if the job is removed.
+
+### Download again
+Details: `docs/redownload.md`.
+
+- **What:** a finished, cancelled or failed download is fetched once more from the start, on the same entry (same
+  link, folder and name, queue, priority and limit).
+- **Where:** the card's main button (cancelled, or finished with its file gone), the "…" menu, and the Completed
+  view.
+- **Missing file:** a finished file deleted outside the app is shown as no longer on disk. The list is checked
+  again when the window comes back.
+- **Safe:** never overwrites (a file still there keeps its name; the copy gets `name (1)`), deletes only partial
+  data inside the download folders, and refuses running, paused or waiting downloads.
+
 ### Download Profiles
 Details: `docs/download-profiles.md`.
 
@@ -89,7 +116,7 @@ Details: `docs/download-profiles.md`.
   Smart throttle's automatic mode. It holds only what it changes, and your own settings are never overwritten, so
   Default is your settings.
 - **Built-ins:**
-  - Fast: up to 32 connections, still adaptive; no giving way.
+  - Fast: up to 64 connections (the most a download uses), still adaptive; no giving way.
   - Balanced: Smart throttle automatic.
   - Low resource: 1 at once, 4 connections.
   - Plus up to 20 profiles of your own (create, duplicate, rename, edit, delete; built-ins protected).
@@ -511,7 +538,7 @@ messages, downloaded files, update data and UI requests.
   - strict CSP: no inline scripts or styles in HTML, no remote origins, no `eval`;
   - the page cannot make network requests.
 - **IPC:**
-  - 76 fixed commands, each its own permission (most are main-window only);
+  - 81 fixed commands, each its own permission (most are main-window only);
   - **no generic** "run / read any file" command;
   - inputs are typed, and unknown fields are refused;
   - a per-window authorization in Rust mirrors the capability files (a test keeps them identical).
@@ -567,7 +594,7 @@ npm --prefix apps/desktop run build
 cargo build -p velox-desktop --features velox-desktop/custom-protocol -p velox-native-host -p velox-integration-tests
 node tests/e2e/desktop-<suite>.mjs
 #   suites: ipc, ui, redesign, views, usability, queue, smart-queue, intelligence, folders, batch, media, video,
-#           preview, diagnostics, browser   (ipc also needs `cargo build --bin velox`)
+#           preview, diagnostics, browser, throttle, gaming, perf   (ipc also needs `cargo build --bin velox`)
 
 # full release for the current OS (installer, portable zip, extension zips, SHA256SUMS, security gate):
 bash scripts/build-release.sh
@@ -581,6 +608,13 @@ bash scripts/build-release.sh
 | Linux | deb, rpm, AppImage |
 | macOS | .app and .dmg |
 | All | 3 extension zips (Chromium, Chrome Store, Firefox) and `SHA256SUMS.txt` |
+
+**Linux AppImage:** the script always checks for, and installs, what the AppImage's media bundle needs:
+* `patchelf`, from the package manager, or else from pip into `~/.local/bin`;
+* the GStreamer plugins, with their folders found on Debian / Ubuntu, Fedora / openSUSE and Arch.
+
+If they still cannot be installed, it builds the AppImage without the bundle and warns; it never fails for this.
+Details: `docs/release-process.md`.
 
 **Signing:** not done yet, because it needs the owner's certificates.
 
@@ -614,8 +648,8 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything); Download Profiles (Default / Fast / Balanced / Low resource and your own: presets over existing settings, one precedence rule, applied live without restarts) |
-| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux and macOS (private local address, growing-file answers, start first under a speed limit, media plugins installed with the Linux packages); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing) |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything); Download Profiles (Default / Fast / Balanced / Low resource and your own: presets over existing settings, one precedence rule, applied live without restarts); Download again (a finished, cancelled or failed download fetched again from the start on its own entry; a deleted file shown as missing; never overwrites); Video download details (a details page for every video download, like a file's) |
+| + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux and macOS (private local address, growing-file answers, start first under a speed limit, media plugins installed with the Linux packages); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing); up to 64 connections everywhere (the Fast profile and files of 10–200 MB were held at 32 or 16); drop-down lists drawn by the app in the theme's colours on every system (the system list was grey on Linux); the release script's AppImage step (patchelf and media plugins always installed, never a failed release for them) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
@@ -714,11 +748,38 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Checks done by hand on each OS | `docs/manual-test.md` |
 | Building and publishing a release | `docs/release-process.md`, `docs/store-publishing.md` |
 | Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
-| Interface smoothness and start-up | `docs/ui-performance.md` |
+| Interface smoothness, start-up, themed drop-down lists | `docs/ui-performance.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
 | Download Intelligence | `docs/download-intelligence.md` |
 | Smart Duplicate Detection | `docs/smart-duplicate-detection.md` |
 | Download Profiles | `docs/download-profiles.md` |
+| Download again | `docs/redownload.md` |
+| Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
+
+---
+
+## 12. Change log
+
+Newest first. Each line is one branch and one commit, with its doc. Every entry came with tests, and the full suite
+was green (Rust, vitest, policy, e2e on Linux).
+
+### October 2026 (second half)
+
+| Date | Branch (commit) | Kind | What changed | Doc |
+|---|---|---|---|---|
+| 2026-10-11 | `fix_select_colors` (55e4736) | Fix | Every drop-down opens a list drawn by the app in the theme's colours (same surface as the fields), on Windows, Linux and macOS. The system list ignored all CSS: grey on Linux. Keyboard, right-to-left, ARIA. The field has the same surface as other fields. No component changed. | `docs/ui-performance.md` |
+| 2026-10-11 | `fix_connections_64` (07c8002) | Fix | Up to 64 connections everywhere: the Fast profile is 64 (was 32). The planner no longer holds files of 50–200 MB at 32 or 10–50 MB at 16: from 10 MB a download may use all 64, still bounded by the setting and the 256 KB minimum piece. | `docs/download-profiles.md`, `docs/testing.md` |
+| 2026-10-10 | `feat_video_details` (2d55185) | Feature | Clicking a video download opens a details page like a file's. It shows the overview, live speed chart, average and peak, retries, time taken, size or estimate, the player, the pieces strip, and the metadata (link, site, type, quality, file type, subtitles, added / finished, folder, saved files), with every action. The job sends a running-time clock that does not count paused time. The row's "left" / "pieces" texts are translated. | `docs/video-details.md` |
+| 2026-10-10 | `feat_redownload` (ba34df2) | Feature | Download again: a finished, cancelled or failed download is fetched again from the start, on its own entry (same link, folder and name). It never overwrites: if the file is there, the copy gets `name (1)`. A finished file deleted outside the app is shown as missing, and the list resyncs when the window comes back. New command `redownload` (main window only). | `docs/redownload.md` |
+| 2026-10-10 | `fix_release_appimage_media` (7c65308) | Fix | `build-release.sh`: the AppImage failed (`failed to run linuxdeploy`, "patchelf not found") on machines that already had the build libraries. The script now always checks and installs `patchelf` (pip fallback) and the GStreamer plugins, tells the bundler where they are on every distribution, and falls back to an AppImage without the media bundle instead of failing. | `docs/release-process.md` |
+| 2026-10-10 | `feat_download_profiles` (8fcc904) | Feature | Download Profiles: Default, Fast, Balanced, Low resource and your own. They are presets over the speed limit, downloads at once, connections and Smart throttle's automatic mode, with one precedence rule. They apply live, with no restarts; progress is kept and a pause respected. Status-bar switch. | `docs/download-profiles.md` |
+| 2026-10-10 | `fix_preview_linux_macos` (04c641e) | Fix | Live preview on Linux and macOS: a running download is answered as a growing file (the player treated "not yet" as fatal), its start is fetched first, macOS uses the private local address, and the Linux packages install the media plugins (the AppImage bundles them). | `docs/smart-throttle-and-preview.md` |
+| 2026-10-10 | `feat_smart_duplicate_detection` (a65e7bd) | Feature | Adding a link the app already has says so before anything happens, by state and confidence, with the finished file's state. A taken file name is kept apart from a duplicate. It is advisory and never replaces anything. | `docs/smart-duplicate-detection.md` |
+| 2026-10-10 | (408fdc8) | Fix | A steady download speed on servers that limit connections. Smart throttle's cap holds on the line, never stops downloads, and the window no longer flashes. | `docs/smart-throttle-and-preview.md` |
+| 2026-10-09 | (8077e0f, 5edc0f3) | Fix / Feature | Smart throttle gaming policy (give way, low limit or pause; videos too; programs by name or path). Every known test failure fixed. | `docs/smart-throttle-and-preview.md` |
+| 2026-10-08 – 09 | (e593bc7, 27b0d90, d5a95f7) | Fix / Perf | Smooth interface on Linux (23 → 62 fps with downloads running), the window shows sooner, and Smart throttle really applies. | `docs/ui-performance.md` |
+
+Earlier work (Phases 0–18 and the extras before them) is in §8 and `docs/`.

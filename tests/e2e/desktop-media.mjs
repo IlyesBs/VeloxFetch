@@ -121,6 +121,24 @@ try {
   await h.screenshot(path.join(SHOTS, "media-jobs-dark.png"), { width: 1000, height: 700 });
   check("a stream is not a row in the ordinary download list", (await downloads()).length === 0);
 
+  // ====================================================================== details page, like a file's
+  await page(`(() => { document.querySelector('[data-testid=media-${done.id}]').click(); return true; })()`);
+  await waitFor(async () => await has("[data-testid=media-detail-view]"), "the video's details page");
+  const det = (await text("[data-testid=media-detail-view]")) ?? "";
+  check("clicking a video download opens its details page", (await text("[data-testid=media-detail-title]")) === done.title, det.slice(0, 200));
+  check("it shows the overview: 100%, downloaded, time taken", (await text("[data-testid=media-detail-percent]")) === "100%" && /Downloaded/i.test(det) && /Time taken/i.test(det));
+  check("network: current, average, peak and retries", /Average/.test(det) && /Peak/.test(det) && /Retries/.test(det));
+  check("the pieces, all done", /(\d+) of \1 complete/.test((await text("[data-testid=media-detail-pieces]")) ?? "") && (await has("[data-testid=media-piece-map]")));
+  const meta = (await text("[data-testid=media-detail-meta]")) ?? "";
+  check("metadata: link, site, type, quality, file type, subtitles, added, finished, folder, saved files", ["/hls/master.m3u8", "Stream", "Quality", "File type", "Subtitles", "Added", "Finished", "Folder", "master.ts", "master.en.vtt"].every((w) => meta.includes(w)), meta);
+  check("the player is there for a finished video", await has("[data-testid=media-detail-player] [data-testid=media-player]"));
+  check("and the same actions as the list (open, show in folder, delete, remove)", (await has("[data-testid=media-detail-view] [data-testid=media-show]")) && (await has("[data-testid=media-detail-view] [data-testid=media-clear-job]")));
+  check("no tool or technology names on the page", !/ffmpeg|yt-dlp|deno/i.test(det));
+  await h.screenshot(path.join(SHOTS, "media-detail-dark.png"), { width: 1100, height: 900 });
+  await click("[data-testid=media-detail-back]");
+  await waitFor(async () => await has("[data-testid=media-jobs]"), "back to the list");
+  check("Back returns to the list", !(await has("[data-testid=media-detail-view]")));
+
   // ====================================================================== routing of stream links
   await fill("[data-testid=url-input]", `${base}/hls/master.m3u8`);
   await click("[data-testid=add-button]");
@@ -169,7 +187,14 @@ try {
   await invoke("start_media", { request: { url: `${base}/hls/master.m3u8`, audio: "none", filename: "slow one" } });
   await waitFor(async () => (await jobs()).some((j) => j.title === "slow one" && ["preparing", "downloading"].includes(j.status)), "the slow job to run");
   const slow = (await jobs()).find((j) => j.title === "slow one");
-  await click(`[data-testid=media-${slow.id}] [data-testid=media-cancel-job]`);
+  await click(`[data-testid=media-${slow.id}] [data-testid=media-details]`);
+  await waitFor(async () => await has("[data-testid=media-detail-view]"), "the running video's details");
+  await waitFor(async () => /Running for/i.test((await text("[data-testid=media-detail-view]")) ?? ""), "the live clock", 5000).catch(() => {});
+  check("a running video's details are live (status, running time)", /Preparing|Downloading/.test((await text("[data-testid=media-detail-status]")) ?? "") && /Running for/i.test((await text("[data-testid=media-detail-view]")) ?? ""));
+  await click("[data-testid=media-detail-view] [data-testid=media-cancel-job]");
+  await waitFor(async () => /Cancelled/.test((await text("[data-testid=media-detail-status]")) ?? ""), "the details to show it cancelled", 10000);
+  check("Cancel works from the details page, which follows the change", /Stopped/.test((await text("[data-testid=media-detail-meta]")) ?? ""));
+  await click("[data-testid=media-detail-back]");
   await waitFor(async () => (await jobs()).find((j) => j.id === slow.id).status === "cancelled", "the job to be cancelled", 10000);
   check("Cancel stops a running stream", true);
   check("and leaves no file or working folder behind", fs.readdirSync(h.root).every((n) => !n.startsWith("slow one") && !n.startsWith(".velox-media")), fs.readdirSync(h.root).join());

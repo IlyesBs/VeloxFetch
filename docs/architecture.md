@@ -505,3 +505,42 @@ Presets over existing settings (full description: `docs/download-profiles.md`).
   `AdaptiveController::set_ceiling`, so running transfers follow a changed setting without a restart.
 * **IPC:** `get_profiles`, `profile_action` (main window only). Event `profiles`.
 
+## Download again
+
+Full description: `docs/redownload.md`.
+
+* **`DownloadManager::redownload(id)`** (`manager.rs`):
+  * accepts completed, cancelled or failed;
+  * deletes the partial file inside the allowed folders;
+  * resets the record to "not started": the destination becomes the folder, and size, parts, progress, version
+    tags and error are cleared;
+  * then calls `start_download`.
+
+  The engine then plans it as a new download (`is_unstarted` path), and `claim_name` gives a free name if the file
+  is still there. No engine change.
+* **`DownloadDto::file_missing`**: a completed download with nothing at its path. Computed in `to_dto`.
+* **UI:**
+  * `redownload.ts` (where it is offered);
+  * `PrimaryAction` / `downloadMenu` in `DownloadCard.tsx`, and `CompletedView`;
+  * `bootstrap` also resyncs on window focus (throttled to 3 s).
+* **IPC:** `redownload` (main window only).
+
+## Video download details
+
+Full description: `docs/video-details.md`.
+
+* **`MediaJobDto`** gains:
+  * `url`, `quality`, `format`, `audioOnly`, `subtitles`;
+  * a clock (`startedAtMs`, `endedAtMs`, `activeMs`, `runningSinceMs`, kept by `track_time` on every change);
+  * `fileSize`, `retries`.
+* **UI:**
+  * route `media`, opened by the `velox:open-media` event from `MediaJobs`;
+  * `MediaDetailView` reuses the file details page's `Card` / `Stat` / `Meta`;
+  * `MediaControls` and `MediaPlayer` are shared with the row.
+* No new command.
+
+## Drop-down lists
+
+`apps/desktop/src/ui/selectMenu.ts`, installed in `main.tsx`: every native `<select>` opens an app-drawn, themed
+list in place of the system one, which no CSS can colour. The value is set through the native setter, followed by
+a real `change` event, so components are unchanged. Details: `docs/ui-performance.md`.

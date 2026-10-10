@@ -42,7 +42,11 @@ const DoneRow = memo(function DoneRow({ id, onOpen }: { id: number; onOpen: (id:
           {d.filename}
         </button>
         <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-dim">
-          <Icon name="checkCircle" size={13} className="shrink-0 text-ok" />
+          {d.fileMissing ? (
+            <Icon name="alert" size={13} className="shrink-0 text-warn" />
+          ) : (
+            <Icon name="checkCircle" size={13} className="shrink-0 text-ok" />
+          )}
           <span className="num ltr shrink-0">{formatBytes(size(d))}</span>
           {ext && <span className="shrink-0 rounded px-1 text-[10px] font-bold uppercase ring-1 ring-line-strong">{ext}</span>}
           <span aria-hidden="true">•</span>
@@ -50,9 +54,23 @@ const DoneRow = memo(function DoneRow({ id, onOpen }: { id: number; onOpen: (id:
             {d.category ?? hostOf(d.url)}
           </span>
         </p>
+        {d.fileMissing && (
+          <p className="text-[12px] text-warn" data-testid="done-file-missing">
+            {t("card.fileMissing")}
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {canOpen(d.filename, d.kind) && (
+        <button
+          className={`round-btn ${d.fileMissing ? "round-primary" : ""}`}
+          aria-label={t("card.redownload")}
+          title={t("card.redownload")}
+          data-testid="done-redownload"
+          onClick={() => void actions.redownload(d)}
+        >
+          <Icon name="download" size={16} />
+        </button>
+        {!d.fileMissing && canOpen(d.filename, d.kind) && (
           <button className="round-btn round-primary" aria-label={t("done.open")} title={t("done.open")} data-testid="done-open" onClick={() => void actions.openFile(target)}>
             <Icon name="play" size={16} />
           </button>

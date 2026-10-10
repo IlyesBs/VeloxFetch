@@ -466,3 +466,64 @@ Results (Linux):
 
 Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
 
+
+## Download again (October 2026)
+
+See `docs/redownload.md` §5. Tests:
+
+* `tests/integration/tests/redownload.rs` (4; 3 runs in a row green);
+* `apps/desktop/src/redownload.test.ts` (3);
+* e2e `desktop-views.mjs`: a file deleted outside the app is shown missing after returning to the window; Download
+  again is the main button and brings it back on the same entry; a second time gives `echo (1).pdf`; an unknown id
+  is refused.
+
+Results (Linux):
+* Rust: 723 passed;
+* vitest: 118;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: `desktop-views`, `desktop-ipc` and `desktop-ui` all pass.
+
+## Video download details (October 2026)
+
+See `docs/video-details.md` §5. Tests:
+* `clock_tests::the_details_clock_counts_running_time_only`;
+* `apps/desktop/src/mediaDetail.test.ts` (4);
+* the details-page checks in `desktop-media.mjs`. Two runs in a row green. A first run failed two checks that
+  compared against "Time taken" / "Running for", while the labels are drawn in capitals (`.label` is uppercase,
+  and `innerText` follows that). The checks now ignore case; the app was right.
+
+Results (Linux):
+* Rust: 724 passed;
+* vitest: 122;
+* policy: 42/42;
+* clippy and fmt: clean;
+* e2e: `desktop-media`, `desktop-views`, `desktop-ui` and `desktop-ipc` pass.
+
+## Up to 64 connections everywhere (October 2026)
+
+The Fast profile was set to 32 connections, and the planner limited files of 50–200 MB to 32 (10–50 MB to 16),
+whatever the setting. Both now reach 64:
+* Fast is 64;
+* `planner::max_useful_connections`: under 1 MB 1, 1–10 MB 8, from 10 MB the full 64.
+
+The setting and the 256 KB minimum piece still bound it, and the adaptive controller still climbs only while it
+pays.
+
+Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece size), `profiles::tests`,
+`profiles.test.ts`. Rust 724 passed.
+
+## Drop-down lists in the theme's colours (October 2026)
+
+See `docs/ui-performance.md`. Tests:
+* `selectMenu.test.ts` (4);
+* the drop-down checks in `desktop-ui.mjs` (light and dark: the app's own list, its colour equal to the theme's;
+  Escape; mouse pick; keyboard pick).
+
+Results (Linux): vitest 126. e2e: `desktop-ui` passed 3 runs in a row; `throttle`, `smart-queue`, `views`, `media`
+and `intelligence` pass. The screenshot `docs/screenshots/select-menu-dark.png` shows the list open. Two test-only
+lessons:
+* a screenshot with a size resizes the window, and a resize (correctly) closes an open list, so the suite waits for
+  it to settle and takes this screenshot without a size;
+* `scrollIntoView` on a row could scroll the page and close the list. The menu now scrolls only itself, and closes
+  on a scroll only if the field really moved.

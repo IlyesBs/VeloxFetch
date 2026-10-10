@@ -15,6 +15,7 @@ export function useDownload(id: number): Download | undefined {
 }
 
 const IDLE_REFRESH_MS = 5000;
+const FOCUS_RESYNC_MS = 3000;
 /** When the last engine tick arrived (ms). Ticks stop while nothing downloads. */
 let lastTick = 0;
 export const lastTickAt = () => lastTick;
@@ -66,6 +67,15 @@ export async function bootstrap(): Promise<() => void> {
   // Events are best-effort (a slow UI can miss some), so resync whenever the window comes back.
   const onVisible = () => document.visibilityState === "visible" && void reload();
   document.addEventListener("visibilitychange", onVisible);
+  // Coming back from another program (a file manager where a finished file was deleted): resync too, at most
+  // every few seconds, so "Download again" shows for a file that is gone.
+  let lastFocus = 0;
+  const onFocus = () => {
+    if (Date.now() - lastFocus < FOCUS_RESYNC_MS) return;
+    lastFocus = Date.now();
+    void reload();
+  };
+  window.addEventListener("focus", onFocus);
   // An idle engine sends no ticks: refresh the dashboard numbers (disk space, totals) now and then anyway.
   const idle = setInterval(() => {
     if (document.visibilityState !== "visible" || Date.now() - lastTick < IDLE_REFRESH_MS) return;
@@ -78,6 +88,7 @@ export async function bootstrap(): Promise<() => void> {
     unlisten();
     clearInterval(idle);
     document.removeEventListener("visibilitychange", onVisible);
+    window.removeEventListener("focus", onFocus);
   };
 }
 

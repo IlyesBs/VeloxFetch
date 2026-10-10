@@ -8,6 +8,7 @@ import type { Density } from "../prefs";
 import type { Download, FileKind } from "../types";
 import { Icon, type IconName } from "../ui/icons";
 import { ContextMenu, Menu, ProgressBar, StatusChip, type MenuItem } from "../ui/primitives";
+import { canRedownload, redownloadIsPrimary } from "../redownload";
 import { canOpen, kindLabel } from "./FileIcon";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { SignInDialog } from "./SignInDialog";
@@ -16,7 +17,7 @@ import { ThreadMatrix } from "./ThreadMatrix";
 /** The one primary button a download offers in its current state. `round`: the card's circular style. */
 export function PrimaryAction({ d, compact = false, round = false, onSignIn }: { d: Download; compact?: boolean; round?: boolean; onSignIn?: () => void }) {
   const t = useT();
-  const btn = (label: string, icon: "pause" | "play" | "retry" | "lock" | "external", onClick: () => void, primary = false, testId?: string) => (
+  const btn = (label: string, icon: "pause" | "play" | "retry" | "lock" | "external" | "download", onClick: () => void, primary = false, testId?: string) => (
     <button
       className={round ? `round-btn ${primary ? "round-primary" : ""}` : `btn ${compact ? "btn-icon" : ""} ${primary ? "btn-primary" : ""}`}
       aria-label={label}
@@ -31,6 +32,7 @@ export function PrimaryAction({ d, compact = false, round = false, onSignIn }: {
       {!compact && !round && label}
     </button>
   );
+  if (redownloadIsPrimary(d)) return btn(t("card.redownload"), "download", () => void actions.redownload(d), true, "card-redownload");
   switch (d.status) {
     case "queued":
       // Added without starting ("Download later"): only the user starts it.
@@ -55,9 +57,10 @@ export function downloadMenu(d: Download, onOpen: (id: number) => void, onSignIn
   const target = { kind: "download", id: d.id } as const;
   return [
     ...(d.status === "queued" && d.idle ? [{ label: t("card.start"), icon: "play" as const, onSelect: () => void actions.start(d.id) }] : []),
-    ...(d.status === "completed" && canOpen(d.filename, d.kind) ? [{ label: t("card.open"), icon: "external" as const, onSelect: () => void actions.openFile(target) }] : []),
+    ...(d.status === "completed" && !d.fileMissing && canOpen(d.filename, d.kind) ? [{ label: t("card.open"), icon: "external" as const, onSelect: () => void actions.openFile(target) }] : []),
     ...(d.status !== "cancelled" ? [{ label: t("card.showFolder"), icon: "folder" as const, onSelect: () => void actions.showInFolder(target) }] : []),
     ...(d.status === "failed" && onSignIn ? [{ label: t("card.signInRetry"), icon: "lock" as const, onSelect: onSignIn }] : []),
+    ...(canRedownload(d) ? [{ label: t("card.redownload"), icon: "download" as const, onSelect: () => void actions.redownload(d) }] : []),
     { label: t("card.details"), icon: "layers", onSelect: () => onOpen(d.id) },
     { label: t("card.copy"), icon: "copy", onSelect: () => void actions.copy(d.url) },
     { label: t("card.cancel"), icon: "x", disabled: !cancellable, onSelect: () => void actions.cancel(d.id) },
@@ -196,6 +199,13 @@ export const DownloadCard = memo(function DownloadCard({ id, onOpen, density = "
             {running && <span className="num hidden sm:inline">{t("card.conn", { n: d.connections })}</span>}
             {done && <span className="truncate">{d.category ?? hostOf(d.url)}</span>}
           </div>
+
+          {d.fileMissing && (
+            <p className="mt-2.5 flex items-center gap-1.5 text-xs text-warn" data-testid="card-file-missing">
+              <Icon name="alert" size={14} className="shrink-0" />
+              {t("card.fileMissing")}
+            </p>
+          )}
 
           {d.error && (
             <p className="mt-2.5 flex items-start gap-1.5 rounded-lg bg-bad/10 px-2.5 py-1.5 text-xs text-bad" role="alert" title={d.errorDetail ?? undefined} data-testid="card-error">

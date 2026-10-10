@@ -581,6 +581,35 @@ impl DownloadManager {
         self.start_download(id).await
     }
 
+    /// Download a finished, cancelled or failed download again from the start, with the same link, folder and
+    /// name (for a file deleted by mistake). Never overwrites: if a file with that name is there, the new copy
+    /// gets a free name ("name (1).ext"). Any partial data is discarded; the record (queue, priority, limits)
+    /// is kept. A download that is running, paused or waiting is refused: it already continues.
+    pub async fn redownload(&self, id: i64) -> Result<DownloadDto, ManagerError> {
+        let mut rec = self.load(id).await?;
+        if self.is_active(id) || !matches!(rec.status, DownloadStatus::Completed | DownloadStatus::Cancelled | DownloadStatus::Failed) {
+            return Err(ManagerError::InvalidState { action: "download again", status: rec.status });
+        }
+        let old_dir = if rec.is_unstarted() { Some(rec.destination.clone()) } else { rec.destination.parent().map(Path::to_path_buf) };
+        if !rec.is_unstarted() && self.inner.roots.check(&rec.destination).is_ok() {
+            let _ = tokio::fs::remove_file(part_path(&rec.destination)).await;
+        }
+        // The same folder while it is still allowed; else the download folder (the engine creates it if needed).
+        rec.destination = old_dir.filter(|d| self.inner.roots.check(d).is_ok()).unwrap_or_else(|| self.download_root());
+        rec.total_size = None;
+        rec.downloaded = 0;
+        rec.segments.clear();
+        rec.etag = None;
+        rec.last_modified = None;
+        rec.resumable = false;
+        rec.last_error = None;
+        rec.status = DownloadStatus::Queued;
+        self.save(&rec).await?;
+        self.remember_diagnosis(id, None);
+        self.note_event(id, "info", "Downloading again from the start").await;
+        self.start_download(id).await
+    }
+
     /// Remove a download from the list. Anything running is cancelled first. The partial `.part`
     /// file is always removed; the finished file is only deleted when `delete_file` is set *and* it
     /// lies inside the download folder.
@@ -907,6 +936,8 @@ impl DownloadManager {
             retrying,
             held: rec.status == DownloadStatus::Paused && self.held_by_queue(id),
             doctor: self.doctor_for(rec, progress.as_ref(), retrying),
+            // A link counts as present (never followed); only an absent path is "missing".
+            file_missing: rec.status == DownloadStatus::Completed && std::fs::symlink_metadata(&rec.destination).is_err(),
         }
     }
 

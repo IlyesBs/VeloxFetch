@@ -24,14 +24,12 @@ pub fn recommended_connections(size: u64) -> usize {
 /// Most connections worth trying for a file of this size (the adaptive controller's ceiling).
 ///
 /// ```text
-/// < 1 MB -> 1      1-10 MB -> 4      10-50 MB -> 16      50-200 MB -> 32      > 200 MB -> 64
+/// < 1 MB -> 1      1-10 MB -> 8      >= 10 MB -> 64 (the user's setting and `min_segment_size` still bound it)
 /// ```
 pub fn max_useful_connections(size: u64) -> usize {
     match size {
         s if s < MB => 1,
-        s if s < 10 * MB => 4,
-        s if s < 50 * MB => 16,
-        s if s < 200 * MB => 32,
+        s if s < 10 * MB => 8,
         _ => MAX_CONNECTIONS,
     }
 }
@@ -108,8 +106,9 @@ mod tests {
         assert_eq!(recommended_connections(500 * MB), 16);
         assert_eq!(recommended_connections(5 * GB), 32);
         assert_eq!(recommended_connections(50 * GB), 32);
-        assert_eq!(max_useful_connections(30 * MB), 16);
-        assert_eq!(max_useful_connections(100 * MB), 32);
+        assert_eq!(max_useful_connections(5 * MB), 8);
+        assert_eq!(max_useful_connections(30 * MB), 64, "the user's 64 is reachable on a mid-size file");
+        assert_eq!(max_useful_connections(100 * MB), 64);
         assert_eq!(max_useful_connections(GB), 64);
     }
 
@@ -118,6 +117,8 @@ mod tests {
         assert_eq!(connection_limits(500 * MB, 3, 256 * 1024), (3, 3));
         assert_eq!(connection_limits(600_000, 16, 256 * 1024), (1, 1));
         assert_eq!(connection_limits(50 * MB, 16, 256 * 1024), (8, 16));
+        assert_eq!(connection_limits(100 * MB, 64, 256 * 1024), (16, 64), "never stuck at 32 when the setting is 64");
+        assert_eq!(connection_limits(12 * MB, 64, 256 * 1024), (8, 48), "bounded by the minimum piece size only");
         assert_eq!(connection_limits(5 * GB, 64, 256 * 1024), (32, 64));
         assert_eq!(connection_limits(100 * GB, 64, 256 * 1024), (32, 64));
         assert_eq!(connection_limits(100 * GB, 128, 256 * 1024), (32, 64), "64 is the hard ceiling");

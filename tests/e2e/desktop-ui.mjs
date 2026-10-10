@@ -226,6 +226,38 @@ try {
   check("global speed limit can be removed", true);
   await h.screenshot(path.join(SHOTS, "settings-dark.png"), { width: 1000, height: 620 });
 
+  // ---- drop-down lists in the theme's colours (never the grey system list) ------------------------
+  const sw = "[data-testid=profile-switch]";
+  const down = (sel) => page(`(() => { document.querySelector(${JSON.stringify(sel)}).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })); return true; })()`);
+  const before = (await page(`document.querySelector('${sw}').value`)).ok;
+  for (const th of ["light", "dark"]) {
+    await theme(th);
+    await sleep(150);
+    await down(sw);
+    await waitFor(() => q("[data-testid=select-menu]"), "the themed list to open");
+    const look = (await page(`(() => { const m = document.querySelector('[data-testid=select-menu]'); const cs = getComputedStyle(m); const solid = getComputedStyle(document.documentElement).getPropertyValue('--solid').trim(); const probe = document.createElement('div'); probe.style.color = solid; document.body.appendChild(probe); const want = getComputedStyle(probe).color; probe.remove(); return { bg: cs.backgroundColor, want, fg: cs.color, img: cs.backgroundImage, rows: m.querySelectorAll('[role=option]').length }; })()`)).ok;
+    check(`${th}: a drop-down opens the app's own list, in the theme's colours`, look.bg === look.want && /gradient/.test(look.img) && look.rows >= 4, JSON.stringify(look));
+    if (th === "dark") await h.screenshot(path.join(SHOTS, "select-menu-dark.png")); // no resize: a resize closes the list
+    await page(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+    await waitFor(async () => !(await q("[data-testid=select-menu]")), "Escape to close it");
+  }
+  await sleep(1500); // the screenshot resized the window: let its late resize events pass (a resize closes the list)
+  check("Escape closes the list and keeps the value", (await page(`document.querySelector('${sw}').value`)).ok === before);
+  await down(sw);
+  await waitFor(() => q("[data-testid=select-menu]"), "the list again");
+  const clicked = (await page(`(() => { const o = [...document.querySelectorAll('[data-testid=select-menu] [role=option]')].find((r) => /Fast/.test(r.textContent)); if (!o) return 'no row'; o.click(); return 'clicked'; })()`)).ok;
+  await waitFor(async () => (await invoke("get_profiles")).ok?.active === "fast", "the pick to apply", 5000).catch(() => {});
+  const picked = { clicked, active: (await invoke("get_profiles")).ok?.active, value: (await page(`document.querySelector('${sw}').value`)).ok, open: await q("[data-testid=select-menu]"), opts: (await page(`[...document.querySelector('${sw}').options].map((o) => o.value + ':' + o.text).join()`)).ok };
+  check("choosing a row works like the system list (the app's state changes)", picked.active === "fast" && picked.value === "fast" && !picked.open, JSON.stringify(picked));
+  await page(`(() => { const s = document.querySelector('${sw}'); s.focus(); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);
+  await waitFor(() => q("[data-testid=select-menu]"), "Enter to open the list");
+  const key = (k) => page(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true, cancelable: true })), true)`);
+  await key("Home");
+  await key("Enter");
+  await waitFor(async () => (await invoke("get_profiles")).ok?.active === "default", "the keyboard pick to apply", 5000).catch(() => {});
+  check("the keyboard works too (Enter opens, Home, Enter picks; it was Fast)", picked.active === "fast" && (await invoke("get_profiles")).ok?.active === "default");
+  await theme("dark");
+
   // ---- hygiene ---------------------------------------------------------------------------------
   const csp = (await page("window.__csp")).ok;
   check("no Content-Security-Policy violations during the whole session", csp.length === 0, JSON.stringify(csp));

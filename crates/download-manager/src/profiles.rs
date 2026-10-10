@@ -61,7 +61,7 @@ pub const MAX_ACTIVE: u32 = 32;
 pub const MIN_CONNECTIONS: u32 = 1;
 pub const MAX_CONNECTIONS: u32 = downloader_core::planner::MAX_CONNECTIONS as u32;
 /// "Fast": a high connection ceiling; the adaptive controller only climbs while it brings more speed.
-pub const FAST_CONNECTIONS: u32 = 32;
+pub const FAST_CONNECTIONS: u32 = 64;
 pub const LOW_ACTIVE: u32 = 1;
 pub const LOW_CONNECTIONS: u32 = 4;
 

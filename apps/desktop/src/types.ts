@@ -53,6 +53,8 @@ export interface Download {
   held: boolean;
   /** Download Doctor: why it failed (or what the engine retries), where the problem is, what to do. */
   doctor: Diagnosis | null;
+  /** Completed, but its file is no longer on disk (deleted or moved by hand): offer "Download again". */
+  fileMissing?: boolean;
 }
 
 /** Download Doctor (crates/download-manager/src/doctor.rs): every field comes from observed evidence. */
@@ -692,6 +694,26 @@ export interface MediaJob {
   resumable: boolean;
   /** Can be watched now (the part downloaded so far, or the finished file). */
   playable: boolean;
+  // ---- the details page (optional: older answers lack them) ----
+  /** The video page or stream link. */
+  url?: string;
+  /** The quality chosen; null = the best. */
+  quality?: string | null;
+  /** The file type asked for; null = the default. */
+  format?: string | null;
+  audioOnly?: boolean;
+  subtitles?: number;
+  startedAtMs?: number;
+  /** When it last stopped (finished, failed, cancelled, paused); null while it runs. */
+  endedAtMs?: number | null;
+  /** Running time before the current run (ms). */
+  activeMs?: number;
+  /** The current run started at; null when not running. */
+  runningSinceMs?: number | null;
+  /** Size of the saved file(s), once completed. */
+  fileSize?: number | null;
+  /** Times the app tried again on its own. */
+  retries?: number;
 }
 
 /** What a downloaded file is, for sorting it into a folder. */
