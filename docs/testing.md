@@ -499,3 +499,16 @@ Results (Linux):
 * policy: 42/42;
 * clippy and fmt: clean;
 * e2e: `desktop-media`, `desktop-views`, `desktop-ui` and `desktop-ipc` pass.
+
+## Up to 64 connections everywhere (October 2026)
+
+The Fast profile was set to 32 connections, and the planner limited files of 50–200 MB to 32 (10–50 MB to 16),
+whatever the setting. Both now reach 64:
+* Fast is 64;
+* `planner::max_useful_connections`: under 1 MB 1, 1–10 MB 8, from 10 MB the full 64.
+
+The setting and the 256 KB minimum piece still bound it, and the adaptive controller still climbs only while it
+pays.
+
+Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece size), `profiles::tests`,
+`profiles.test.ts`. Rust 724 passed.

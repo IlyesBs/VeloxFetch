@@ -111,7 +111,7 @@ Details: `docs/download-profiles.md`.
   Smart throttle's automatic mode. It holds only what it changes, and your own settings are never overwritten, so
   Default is your settings.
 - **Built-ins:**
-  - Fast: up to 32 connections, still adaptive; no giving way.
+  - Fast: up to 64 connections (the most a download uses), still adaptive; no giving way.
   - Balanced: Smart throttle automatic.
   - Low resource: 1 at once, 4 connections.
   - Plus up to 20 profiles of your own (create, duplicate, rename, edit, delete; built-ins protected).

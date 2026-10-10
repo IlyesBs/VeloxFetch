@@ -21,7 +21,7 @@ Your own settings (Settings page, queue limits, Smart throttle switches) are nev
 | Profile | Speed limit | Downloads at once | Connections | Smart throttle |
 |---|---|---|---|---|
 | **Default** | yours | yours | yours | yours |
-| **Fast** | yours | yours | up to **32** | automatic mode **off** (never gives way to other traffic); a gaming policy you set stays |
+| **Fast** | yours | yours | up to **64** (the maximum) | automatic mode **off** (never gives way to other traffic); a gaming policy you set stays |
 | **Balanced** | yours | yours | yours | automatic mode **on** (this also turns Smart throttle on): full speed while the line is free, gives way while you use it |
 | **Low resource** | yours | **1** | **4** | yours |
 
@@ -29,7 +29,8 @@ Notes:
 
 * **Fast** raises the ceiling only. The adaptive controller still starts small and only climbs while more
   connections bring more speed. It still respects a server that refuses connections (refusal hold, give-way). The
-  file size limits it too (`planner::connection_limits`). No speed or time is promised.
+  file size limits it too (`planner::connection_limits`: from 10 MB a download may use all 64; smaller files
+  fewer, never pieces under 256 KB). No speed or time is promised.
 * **Low resource** reduces concurrency only. No CPU, RAM or battery figure is claimed. Integrity, checkpoints,
   pause / resume and crash recovery are unchanged.
 * Built-in profiles cannot be edited, renamed or deleted. **Duplicate** one to make your own version. A "restore

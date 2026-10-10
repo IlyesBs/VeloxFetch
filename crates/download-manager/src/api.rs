@@ -799,7 +799,7 @@ pub struct SetFolderNames {
 pub struct SetQueueConfig {
     /// Downloads running at once (1..=32); the rest wait in priority order.
     pub max_active: Option<u32>,
-    /// Parallel connections per download (1..=32). Applies to downloads started or resumed afterwards.
+    /// Parallel connections per download (1..=64). Applies to downloads started or resumed afterwards.
     pub max_connections: Option<u32>,
 }
 

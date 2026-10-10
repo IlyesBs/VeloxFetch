@@ -10,7 +10,7 @@ const t = (k: string, v?: Record<string, string | number>) =>
 
 const BUILT: ProfileInfo[] = [
   { id: "default", name: null, builtIn: true, settings: {} },
-  { id: "fast", name: null, builtIn: true, settings: { maxConnections: 32, adaptive: false } },
+  { id: "fast", name: null, builtIn: true, settings: { maxConnections: 64, adaptive: false } },
   { id: "balanced", name: null, builtIn: true, settings: { adaptive: true } },
   { id: "lowResource", name: null, builtIn: true, settings: { maxActive: 1, maxConnections: 4 } },
 ];
