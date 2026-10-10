@@ -379,3 +379,12 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    file (copy buttons work); the player plays; Open and Show in folder work.
 4. Remove the job from the list while its page is open: the page returns to the list.
 5. Repeat in French and Arabic (right to left): every text is translated, and no tool name appears anywhere.
+
+## Z. Drop-down lists (once per OS: Windows, Linux, macOS)
+1. In dark and in light theme, open several lists (status bar profile, Settings > Speed, Add download > priority,
+   the details page's priority): each opens a list in the same colours as the fields, never a grey or black
+   system list.
+2. Pick with the mouse; then focus a list with Tab, press Enter, move with the arrows, type a letter, Enter: the
+   value changes and applies. Escape closes without changing.
+3. Near the bottom of the window the list opens upwards. In Arabic it lines up on the right.
+4. Scroll the page while a list is open: it closes.

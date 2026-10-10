@@ -512,3 +512,18 @@ pays.
 
 Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece size), `profiles::tests`,
 `profiles.test.ts`. Rust 724 passed.
+
+## Drop-down lists in the theme's colours (October 2026)
+
+See `docs/ui-performance.md`. Tests:
+* `selectMenu.test.ts` (4);
+* the drop-down checks in `desktop-ui.mjs` (light and dark: the app's own list, its colour equal to the theme's;
+  Escape; mouse pick; keyboard pick).
+
+Results (Linux): vitest 126. e2e: `desktop-ui` passed 3 runs in a row; `throttle`, `smart-queue`, `views`, `media`
+and `intelligence` pass. The screenshot `docs/screenshots/select-menu-dark.png` shows the list open. Two test-only
+lessons:
+* a screenshot with a size resizes the window, and a resize (correctly) closes an open list, so the suite waits for
+  it to settle and takes this screenshot without a size;
+* `scrollIntoView` on a row could scroll the page and close the list. The menu now scrolls only itself, and closes
+  on a scroll only if the field really moved.

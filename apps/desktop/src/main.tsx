@@ -7,6 +7,7 @@ import { applyChrome } from "./chrome";
 import { applyLang } from "./i18n";
 import { applyTheme, getThemePref } from "./theme";
 import { installNativeFeel } from "./nativeFeel";
+import { installSelectMenus } from "./ui/selectMenu";
 import { ErrorBoundary } from "./ui/ErrorBoundary";
 
 // Apply the window frame, the saved theme and the language before the first paint, so there is no
@@ -16,6 +17,8 @@ applyTheme(getThemePref());
 applyLang();
 
 installNativeFeel();
+// Drop-down lists in the theme's colours on every system (the system list ignores the page's colours).
+installSelectMenus();
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

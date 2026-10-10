@@ -82,6 +82,10 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   the Doctor never retries or changes anything by itself.
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
 
+### Drop-down lists
+Every drop-down opens a list drawn by the app in the theme's colours (same as the fields) on Windows, Linux and
+macOS, never the grey system list. Keyboard, right-to-left and screen readers work. Details: `docs/ui-performance.md`.
+
 ### Video download details
 Details: `docs/video-details.md`.
 
@@ -736,7 +740,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Checks done by hand on each OS | `docs/manual-test.md` |
 | Building and publishing a release | `docs/release-process.md`, `docs/store-publishing.md` |
 | Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
-| Interface smoothness and start-up | `docs/ui-performance.md` |
+| Interface smoothness, start-up, themed drop-down lists | `docs/ui-performance.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
 | Download Intelligence | `docs/download-intelligence.md` |
 | Smart Duplicate Detection | `docs/smart-duplicate-detection.md` |

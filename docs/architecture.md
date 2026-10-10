@@ -538,3 +538,9 @@ Full description: `docs/video-details.md`.
   * `MediaDetailView` reuses the file details page's `Card` / `Stat` / `Meta`;
   * `MediaControls` and `MediaPlayer` are shared with the row.
 * No new command.
+
+## Drop-down lists
+
+`apps/desktop/src/ui/selectMenu.ts`, installed in `main.tsx`: every native `<select>` opens an app-drawn, themed
+list in place of the system one, which no CSS can colour. The value is set through the native setter, followed by
+a real `change` event, so components are unchanged. Details: `docs/ui-performance.md`.

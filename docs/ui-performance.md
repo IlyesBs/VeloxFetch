@@ -71,3 +71,39 @@ attribute is written only when it changes, and `onThemeChange` calls back only w
 on or off, the system's dark mode) changes: "on" and "limiting" share one palette, so slowing downloads repaints
 nothing. Tests: `throttle.test.ts`.
 
+## Drop-down lists in the theme's colours (October 2026)
+
+**Problem.** The list a `<select>` opens was drawn by the system, not the page:
+* Linux (WebKitGTK): a grey GTK menu;
+* macOS: the system menu;
+* Windows (WebView2): most styles ignored.
+
+The `option` colours in the CSS could never reach it. The field itself also had its own opaque `--solid` surface,
+not the `.input` surface the other fields use, so it looked different from them in dark mode.
+
+**Fix** (`apps/desktop/src/ui/selectMenu.ts`, installed once in `main.tsx`):
+* **Every `<select>` stays a real `<select>`:** React state, forms, labels and screen readers are untouched.
+* **Opening:** a pointer press or the keys that would open the system list (Enter, Space, F4, Alt+↑/↓) open a menu
+  drawn by the app.
+* **Choosing:** it sets the value with the native setter and sends a real `change` event, so every `onChange` works
+  unchanged. No component changed: all 23 lists get it.
+* **Menu behaviour:**
+  * arrow keys, Home / End, type-to-find; disabled options skipped; group titles;
+  * Escape closes and keeps the value; Tab closes;
+  * a press outside, a scroll elsewhere, a resize or leaving the window closes it;
+  * it opens above the field when there is no room below, and follows the field's direction (right-to-left in
+    Arabic);
+  * `role=listbox` / `option`, `aria-selected`, `aria-activedescendant`, `aria-expanded` on the field.
+* **Look** (`.select-menu`): the fields' own surface over the solid base,
+  `linear-gradient(var(--raised), var(--raised)), var(--solid)`. It is opaque and the same colour as the fields in
+  light, dark, glass and solid. The text is `--fg`, the row under the pointer `--accent-soft`, and the chosen row
+  `--accent`. No fixed colour.
+* **Opt-out:** a `<select data-native-list>` keeps the system list. None uses it today.
+* **The field:** `select.input` now uses the `.input` surface like every other field.
+
+**Tests:**
+* `selectMenu.test.ts`: installed at start-up; only theme tokens in the menu; the field's surface; keyboard skips
+  disabled options.
+* e2e `desktop-ui.mjs`, real app, light and dark: the app's list opens, with a background equal to the theme's
+  `--solid` under the field's surface layer; Escape keeps the value; a click picks (the profile really changes); the
+  keyboard opens and picks.

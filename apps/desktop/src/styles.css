@@ -337,11 +337,8 @@ a {
   .input {
     @apply h-9 w-full rounded-[10px] border border-line bg-raised px-3 text-[13px] text-fg placeholder:text-dim/70 transition-[border-color,box-shadow] duration-150 hover:border-line-strong;
   }
-  /* The list a <select> opens is drawn by the system: give its rows the theme's colours (not a grey or black
-     system list), and the field itself an opaque base so it matches in every theme. */
-  select.input {
-    background-color: var(--solid);
-  }
+  /* A <select> field looks exactly like the other fields (same surface as .input). The list it opens is the app's
+     own themed menu (ui/selectMenu.ts, .select-menu below); these option colours are only the fallback. */
   select.input option,
   select.input optgroup {
     background-color: var(--solid);
@@ -349,6 +346,51 @@ a {
   }
   select.input option:checked {
     background-color: color-mix(in srgb, var(--accent) 22%, var(--solid));
+  }
+  /* The drop-down list (ui/selectMenu.ts): a field's surface over the solid base, so it is opaque and the same
+     colour as the fields in every theme, light or dark, glass or solid. */
+  .select-menu {
+    position: fixed;
+    z-index: 1000;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: linear-gradient(var(--raised), var(--raised)), var(--solid);
+    color: var(--fg);
+    font-size: 13px;
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .select-menu-option {
+    padding: 6px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .select-menu-option.is-active {
+    background: var(--accent-soft);
+  }
+  .select-menu-option[aria-selected="true"] {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .select-menu-option[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .select-menu-group {
+    padding: 6px 10px 2px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--dim, currentColor);
+    opacity: 0.8;
   }
   .input:focus {
     outline: none;
