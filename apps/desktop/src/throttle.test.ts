@@ -33,7 +33,10 @@ vi.mock("./hooks", () => ({
   store: { toast: (_k: string, m: string) => server.toasts.push(m), getState: () => ({ metrics: { speedBps: 0 } }) },
 }));
 
+vi.mock("./chrome", () => ({ syncFrameTheme: () => {} }));
+
 const { throttleStore, gaugeShare, throttleStatus } = await import("./throttle");
+const { paletteKey } = await import("./theme");
 
 const base: SmartThrottle = {
   enabled: false,
@@ -61,6 +64,51 @@ beforeEach(async () => {
   server.gets = [];
   server.toasts = [];
   throttleStore.set({ ...base });
+});
+
+describe("the window does not flash while Smart throttle is on", () => {
+  it("polls that bring the same state never touch <html> again", () => {
+    // Each write to the attribute told the theme watchers to repaint the whole window background (every 3 s).
+    let writes = 0;
+    const marks: Record<string, string> = {};
+    const root = (globalThis as unknown as { document: { documentElement: { dataset: unknown } } }).document.documentElement;
+    const before = root.dataset;
+    root.dataset = new Proxy(marks, {
+      set: (t, k, v) => {
+        writes++;
+        t[k as string] = v;
+        return true;
+      },
+      deleteProperty: (t, k) => {
+        writes++;
+        delete t[k as string];
+        return true;
+      },
+    });
+    try {
+      const on = { ...base, enabled: true, reason: "fullFree" as const };
+      for (let i = 0; i < 20; i++) throttleStore.set(on);
+      expect(marks.throttle).toBe("on");
+      expect(writes).toBe(1);
+      const limiting = { ...on, limitBps: 800_000, reason: "app" as const };
+      for (let i = 0; i < 20; i++) throttleStore.set(limiting);
+      expect(marks.throttle).toBe("limiting");
+      expect(writes).toBe(2);
+      throttleStore.set({ ...base });
+      expect(marks.throttle).toBeUndefined();
+      expect(writes).toBe(3);
+    } finally {
+      root.dataset = before;
+    }
+  });
+
+  it("slowing downloads or not keeps the same colours (no repaint)", () => {
+    expect(paletteKey(null, "on", false)).toBe(paletteKey(null, "limiting", false));
+    expect(paletteKey("dark", "on", true)).toBe(paletteKey("dark", "limiting", false));
+    expect(paletteKey(null, "on", false)).not.toBe(paletteKey(null, null, false));
+    expect(paletteKey(null, null, false)).not.toBe(paletteKey(null, null, true));
+    expect(paletteKey("light", null, false)).not.toBe(paletteKey("dark", null, false));
+  });
 });
 
 describe("Smart throttle state in the window", () => {

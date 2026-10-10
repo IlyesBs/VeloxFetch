@@ -115,15 +115,35 @@ of their real speed (Balanced), the cap holds while it lasts, then eases back up
 25 s after it stopped; 2 steady connections throughout; switching on / off and modes every 3 s never stops the
 download.
 
+### Steady speed, a cap that holds on the line, no flashing (October 2026)
+
+Reported: the speed swung 3 MB/s → 1 MB/s → 200 KB/s on a 3 MB/s line; turning Smart throttle on made the window
+flash, downloads stopped a while and came back, and the throttle "did not work". Measured on that line with real
+servers (each 200 ms tick, a temporary probe through the manager, as the app runs it):
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Speed falling to almost nothing for seconds on servers that limit connections | a refused request (429) freed its slot for the next part, refused too: 40 refusals in a row, 0 bytes; one refusal at 2 connections halved to 1 for minutes | the download's new requests wait after a refusal (1 s, 2 s… while it keeps refusing; a burst counts once); a single refusal after a steady 20 s keeps the count; a request carries a run of parts (16× fewer requests). See `architecture.md` > Performance model |
+| Under a cap: 30–90 % above it for 10+ s, then everything stopped ("stops a while, then resumes") | every connection's system buffer, grown at full speed, kept filling above the cap; reads of up to 408 KB paid after reading built a 3.5 s backlog everyone waited for | a capped download keeps only the connections the cap needs (the others stop at once, handing back what they had not paid), short requests on fresh connections, chunks paid in 64 KB pieces, what was owed to an old cap settled on any change |
+| Slowed for "browsing" with nobody else on the line, and kept slow | (a) the noise allowance (3 % of the speed) was below what a 3 s window is off by at full speed; (b) right after slowing, the system's intake above the cap looked like someone else | 10 % allowance and 3 confirmations; 2 readings after a cap change are ignored; with few connections the intake is small and short |
+| The next cap a share of the capped speed | the reference was learned the moment the cap lifted | learned again 3 observations later |
+| The window flashed every 3 s while Smart throttle was on | each poll wrote the same value to `<html data-throttle>`; the theme watcher took it as a colour change and painted the full-window background picture again, twice | written only when it changes (`throttle.ts`), and the watcher repaints only when the palette changes (`theme.ts` `paletteKey`: "on" and "limiting" share colours) |
+
+Result on the real line (thinkbroadband, 3 MB/s): free 2.7–3.3 MB/s; a game at 25 % → ~730 KB/s within a second,
+steady (no second without bytes), 6 connections; the game closes → back to full speed in ~5 s; automatic mode on
+for 50 s with nobody else: never slowed. Tests: see `docs/testing.md` > "Steady speed and a smooth Smart throttle".
+
 ### Automatic mode (`Controller`)
 
 | Signal | Rule |
 |---|---|
 | Smoothing | the last two (signed) readings are averaged, then each reading moves the smoothed traffic half way (`SMOOTHING` 0.5); it may go below zero by at most max(96 KB/s, 10 % of VeloxFetch's speed) |
-| Noise | of VeloxFetch's own speed, 3 % (30 % while a limit paces downloads: `paced`) never counts as someone else |
+| Noise | of VeloxFetch's own speed, 10 % (30 % while a limit paces downloads: `paced`) never counts as someone else (3 % until October 2026: a window 5–8 % off at full speed, common on a real line, slowed downloads for nobody right after turning it on) |
 | Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > max(96 KB/s, noise) (off below half) -> **browsing** |
 | Network busy | other traffic > max(512 KB/s, 15 % of the best speed) (off below half) -> **busy** |
-| Slow down | after 2 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Slow down | after 3 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Settle | the 2 readings after the cap was set or lowered (`SETTLE`) change nothing: the system still takes in what was on its way to VeloxFetch's connections faster than the new cap reads it, which the counters show as someone else |
+| Relearn | the reference and the best speed are learned again only 3 observations after a cap lifted (`RELEARN_AFTER`): the speed is still climbing back, and the buffered burst looked like a faster line |
 | Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the reference |
 | New mode / minimum | the cap follows at once (`retarget`), the controller keeps its state |
 | No counters | full speed, the controller starts over (`unknown`) |

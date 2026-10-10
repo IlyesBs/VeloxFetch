@@ -161,7 +161,7 @@ async fn automatic_mode_gives_way_to_browsing_and_takes_the_line_back_when_it_is
     // Browsing: after the confirmation, downloads slow down (here to the default 1 MB/s: no speed learned yet).
     let data = random_data(8 * MB, 9);
     let srv = serve(data.clone()).await;
-    for _ in 0..2 {
+    for _ in 0..3 {
         m.smart_throttle_observe_signals(Some(&[]), browsing());
     }
     let s = m.smart_throttle();

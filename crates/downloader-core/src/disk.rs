@@ -23,6 +23,8 @@ use crate::limiter::Throttle;
 /// A partly filled buffer is written after this long anyway: bytes count (progress, speed) when they are
 /// written, and a slow connection (a low speed limit shared by many connections) could otherwise take seconds
 /// to fill one, so the progress and the speed shown would stand still, then jump.
+/// Under a speed limit, a chunk is written and paid for in pieces of at most this size.
+const PACED_PIECE: usize = 64 * 1024;
 const FLUSH_EVERY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Create (truncating) the `.part` file and reserve its full length.
@@ -49,7 +51,31 @@ pub struct PumpParams {
 /// Stream `stream` into `path` starting at `params.offset`. `on_written` is called after each
 /// successful write with the byte count. Pending buffers are flushed even when cancelled.
 /// Returns bytes written.
-pub async fn pump<S, F>(stream: S, path: &Path, params: PumpParams, cancel: &CancellationToken, mut on_written: F) -> Result<u64>
+pub async fn pump<S, F>(stream: S, path: &Path, params: PumpParams, cancel: &CancellationToken, on_written: F) -> Result<u64>
+where
+    S: Stream<Item = std::result::Result<Bytes, HttpError>> + Send,
+    F: FnMut(u64) + Send,
+{
+    pump_keep(stream, path, params, cancel, on_written, &mut None, &|| false, &|| false).await.map(|(n, _)| n)
+}
+
+/// [`pump`], keeping in `excess` what the stream sent past `params.limit` in the last chunk read (instead of
+/// dropping it): one response carrying several parts is written part by part, the stream read on from there.
+/// Two questions stop it early (what was read is written, and the answer says so: `(written, true)`): `give_way`,
+/// asked after each chunk and while waiting for the speed limit (the connection is one too many for a lower limit:
+/// it stops at once, without paying for its last chunk); `enough`, asked after each chunk is paid for (this request
+/// has had its share).
+#[allow(clippy::too_many_arguments)]
+pub async fn pump_keep<S, F>(
+    stream: S,
+    path: &Path,
+    params: PumpParams,
+    cancel: &CancellationToken,
+    mut on_written: F,
+    excess: &mut Option<Bytes>,
+    give_way: &(dyn Fn() -> bool + Sync),
+    enough: &(dyn Fn() -> bool + Sync),
+) -> Result<(u64, bool)>
 where
     S: Stream<Item = std::result::Result<Bytes, HttpError>> + Send,
     F: FnMut(u64) + Send,
@@ -62,6 +88,8 @@ where
     let limit = params.limit;
     let throttle = params.throttle;
 
+    let mut gave_way = false;
+    let gave = &mut gave_way;
     let reader = async move {
         tokio::pin!(stream);
         let mut buf = BytesMut::with_capacity(buffer_size);
@@ -81,32 +109,73 @@ where
             if let Some(l) = limit {
                 let room = l - received;
                 if chunk.len() as u64 > room {
-                    chunk.truncate(room as usize);
+                    *excess = Some(chunk.split_off(room as usize));
                 }
             }
             received += chunk.len() as u64;
-            let chunk_len = chunk.len();
-            buf.extend_from_slice(&chunk);
-            // Under a speed limit the reader is about to wait: what it holds is written (and counted) first, not
-            // after the wait.
             let pacing = throttle.as_ref().is_some_and(|t| t.min_rate().is_some());
-            if buf.len() >= buffer_size || pacing || flushed.elapsed() >= FLUSH_EVERY {
-                if tx.send(buf.split().freeze()).await.is_err() {
+            if !pacing {
+                let chunk_len = chunk.len();
+                buf.extend_from_slice(&chunk);
+                if buf.len() >= buffer_size || flushed.elapsed() >= FLUSH_EVERY {
+                    if tx.send(buf.split().freeze()).await.is_err() {
+                        break Err(DownloadError::Internal("writer stopped".into()));
+                    }
+                    buf.reserve(buffer_size);
+                    flushed = tokio::time::Instant::now();
+                }
+                // Every chunk is paid for (a limit may have come meanwhile), the last one of a range too: a fast
+                // server can deliver a whole range in one chunk, which would otherwise never count against any limit.
+                if let Some(t) = &throttle {
+                    if let Err(e) = t.take(chunk_len, cancel).await {
+                        break Err(e);
+                    }
+                }
+            } else {
+                // Under a speed limit: written, then paid for, piece by piece (a connection can hand over hundreds of
+                // KB at once; paid in one go, nothing would be written for a long wait, then all of it at once). Pacing
+                // here, before reading more, leaves the socket unread, so TCP flow control slows the sender: the limit
+                // is enforced without buffering or dropping anything.
+                if !buf.is_empty() && tx.send(buf.split().freeze()).await.is_err() {
                     break Err(DownloadError::Internal("writer stopped".into()));
                 }
-                buf.reserve(buffer_size);
+                let t = throttle.as_ref().expect("pacing means a throttle");
+                let mut rest = chunk;
+                let mut stop: Option<Result<()>> = None;
+                while !rest.is_empty() {
+                    let piece = rest.split_to(rest.len().min(PACED_PIECE));
+                    let n = piece.len();
+                    if tx.send(piece).await.is_err() {
+                        stop = Some(Err(DownloadError::Internal("writer stopped".into())));
+                        break;
+                    }
+                    // Leaving (one connection too many for a lower limit): the bytes read are already off the line;
+                    // written without paying for them, which would only make the connections that stay wait.
+                    let leave = (limit != Some(received) && give_way()) || matches!(t.take_or_leave(n, cancel, give_way).await, Ok(true));
+                    if leave {
+                        if !rest.is_empty() && tx.send(std::mem::take(&mut rest)).await.is_err() {
+                            stop = Some(Err(DownloadError::Internal("writer stopped".into())));
+                            break;
+                        }
+                        stop = Some(Ok(()));
+                        *gave = true;
+                        break;
+                    }
+                    if cancel.is_cancelled() {
+                        stop = Some(Err(DownloadError::Cancelled));
+                        break;
+                    }
+                }
                 flushed = tokio::time::Instant::now();
-            }
-            // Pacing here (before reading more) leaves the socket unread, so TCP flow control
-            // slows the sender: the limit is enforced without buffering or dropping anything.
-            // Every chunk is paid for, the last one of a range too: a fast server can deliver a whole
-            // range in one chunk, which would otherwise never be counted against any limit.
-            if let Some(t) = &throttle {
-                if let Err(e) = t.take(chunk_len, cancel).await {
-                    break Err(e);
+                if let Some(r) = stop {
+                    break r;
                 }
             }
             if limit == Some(received) {
+                break Ok(());
+            }
+            if give_way() || enough() {
+                *gave = true;
                 break Ok(());
             }
         };
@@ -134,7 +203,7 @@ where
     let (read, wrote) = tokio::join!(reader, writer);
     let wrote = wrote?; // a disk error is the root cause; report it before reader-side symptoms
     read?;
-    Ok(wrote)
+    Ok((wrote, gave_way))
 }
 
 #[cfg(test)]

@@ -297,3 +297,20 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 3. Linux: cards and panels have no shadows; the selected tab, the current page in the side menu, the chosen Smart throttle
    mode and a focused field still show a clear ring. Switch the theme and turn Smart throttle on (amber): the soft light in
    the background follows within half a second.
+
+## T. Steady speed and a smooth Smart throttle (once per OS, on a real internet connection)
+1. Download a large file (1 GB test file) with nothing else on the line: the speed shown stays near the line's speed
+   (within about a sixth either way), never drops to a few hundred KB/s for seconds. Details > Timeline: few or no
+   "failed" lines.
+2. Same from a server that allows only a couple of connections (a public speed-test file host): a steady speed on 1–2
+   connections; a refused part waits a moment, the others keep going; no long stretch at 0.
+3. Turn Smart throttle on (automatic mode on, nobody else using the line): the window does not flash or flicker (once
+   amber, it stays still), the status says full speed and stays so for a minute; downloads keep their speed.
+4. Start a listed program (or add a running one to the list): within ~3 s downloads drop to the share, smoothly, with no
+   stop; the speed stays near the cap; the connection count drops to a few. Play or run a speed test meanwhile: no
+   bursts of lag every second.
+5. Close the program: after two scans (~6 s) downloads climb back to full speed in a few seconds, no burst far above the
+   line's speed.
+6. With the program running, switch modes on the card every few seconds: the download never stops, the window never
+   flashes.
+

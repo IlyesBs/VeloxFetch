@@ -44,7 +44,7 @@ use storage::{Sorter, Storage};
 /// Time constant of the speed shown for each download: long enough that the short pause between two parts of
 /// a connection (a new request) and bursts of buffered data do not make the number jump, short enough that a
 /// real change shows within a few seconds.
-const SPEED_SMOOTHING_SECS: f64 = 2.0;
+const SPEED_SMOOTHING_SECS: f64 = 3.0;
 
 /// The speed shown for a download after a tick: smoothed (segments finishing and starting make the raw speed jumpy),
 /// but never above a limit it is held to, so a limit just set shows at once instead of the number coming down over

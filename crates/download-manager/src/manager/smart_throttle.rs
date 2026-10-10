@@ -132,6 +132,8 @@ pub(super) struct SmartState {
     last_window: (f64, f64),
     /// What downloads were getting lately while nothing held them back (bytes/s; 0 = not known yet).
     recent_bps: f64,
+    /// Observations still to wait after a cap lifted before learning speeds again (see [`RELEARN_AFTER`]).
+    relearn_in: u8,
 }
 
 impl SmartState {
@@ -391,8 +393,10 @@ pub const IDLE_AFTER: Duration = Duration::from_secs(120);
 /// video, a call). Background chatter (a chat app, a sync client idling) stays below it.
 const ACTIVE_ON_BPS: f64 = 96.0 * 1024.0;
 /// Of VeloxFetch's own speed, this share of "other traffic" may be measuring noise (counters read a moment
-/// apart, retransmissions): it never counts as someone using the line.
-const NOISE_SHARE: f64 = 0.03;
+/// apart, retransmissions, the system taking data in ahead of VeloxFetch reading it while it writes): it never counts
+/// as someone using the line. Measured on a real line: a window off by 3 to 8 % of the speed is common, and 3 % made
+/// Smart throttle slow downloads down for nobody right after it was turned on.
+const NOISE_SHARE: f64 = 0.10;
 /// The same while a limit paces downloads: the system's receive buffers fill and empty by bursts, so a 3 s
 /// window can be off by the whole speed (it evens out over time; smoothed, about a tenth is left, measured on
 /// a real line).
@@ -404,8 +408,15 @@ const BUSY_ON_SHARE: f64 = 0.15;
 const OFF_RATIO: f64 = 0.5;
 /// Smoothing of the measured traffic (share of the newest reading).
 const SMOOTHING: f64 = 0.5;
-/// Readings in a row before slowing down (a single burst changes nothing).
-const CONFIRM: u8 = 2;
+/// Readings in a row before slowing down (a burst or two changes nothing).
+const CONFIRM: u8 = 3;
+/// Readings after the cap was set or lowered that say nothing about other traffic: the system still takes in what
+/// was already on its way to VeloxFetch's connections faster than the new cap reads it, which the counters show as
+/// someone else's traffic (it kept downloads slow for nobody, on a real line).
+const SETTLE: u8 = 2;
+/// Readings after the cap lifted before what downloads get is learned again (they are still speeding up; learned
+/// at once, the next cap was a share of the capped speed, and the burst of buffered data looked like a faster line).
+const RELEARN_AFTER: u8 = 3;
 /// Calm readings until the first step up (the cap is held for the ones before); doubled while the network keeps
 /// changing.
 const CALM: u32 = 4;
@@ -432,6 +443,8 @@ pub struct Controller {
     since_calm: Option<u32>,
     unsteady: bool,
     cap: Option<f64>,
+    /// Readings still to ignore after the cap was set or lowered (see [`SETTLE`]).
+    settle: u8,
 }
 
 impl Controller {
@@ -478,6 +491,20 @@ impl Controller {
         // Smoothed with its sign, so a window that showed a little more than the truth and the next one a little
         // less cancel out; how far below zero it may go is bounded, so real traffic shows within a reading or two.
         // The last two windows are averaged first: the "more" of one window and the "less" of the next meet there.
+        if self.settle > 0 {
+            // Just slowed down: this reading is the system's buffers, not someone else. Kept as it is.
+            self.settle -= 1;
+            self.prev_raw = None;
+            let away = sig.idle.is_some_and(|i| i >= IDLE_AFTER);
+            let reason = if self.active {
+                Reason::Browsing
+            } else if self.busy {
+                Reason::Busy
+            } else {
+                idle_or_free(away)
+            };
+            return (self.cap.map(|c| c as u64), reason);
+        }
         let pair = self.prev_raw.map_or(raw, |p| (p + raw) / 2.0);
         self.prev_raw = Some(raw);
         let floor_other = -(ACTIVE_ON_BPS.max(sig.mine_bps.unwrap_or(0.0) * 0.1));
@@ -507,6 +534,7 @@ impl Controller {
             let target = self.target(reference, share, floor);
             if self.pending >= CONFIRM && self.cap.is_none_or(|c| target < c) {
                 self.cap = Some(target);
+                self.settle = SETTLE;
             }
             let reason = if self.active { Reason::Browsing } else { Reason::Busy };
             return (self.cap.map(|c| c as u64), if self.cap.is_some() { reason } else { idle_or_free(away) });
@@ -726,7 +754,11 @@ impl DownloadManager {
             } else {
                 (None, if sig.idle.is_some_and(|i| i >= IDLE_AFTER) { Reason::FullIdle } else { Reason::FullFree })
             };
-            if limit.is_none() {
+            if limit.is_some() {
+                s.relearn_in = RELEARN_AFTER;
+            } else if s.relearn_in > 0 {
+                s.relearn_in -= 1; // speeding back up after a cap: not what the line gives yet
+            } else {
                 // Learn how fast this connection can go (only while nothing holds it back).
                 s.peak_bps = learn_peak(s.peak_bps, total);
                 // And what downloads get these days, while nobody else uses the line (the caps' reference).
@@ -876,7 +908,8 @@ mod tests {
     fn browsing_slows_downloads_after_a_confirmation_and_never_below_the_floor() {
         let mut c = Controller::default();
         assert_eq!(c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS), (None, Reason::FullFree), "downloads alone: full speed");
-        // One burst of browsing traffic: confirmed first, nothing changes yet.
+        // A burst or two of browsing traffic: confirmed first, nothing changes yet.
+        assert_eq!(c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS).0, None);
         assert_eq!(c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS).0, None);
         let (cap, why) = c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
         assert_eq!(why, Reason::Browsing);
@@ -887,6 +920,45 @@ mod tests {
             slow.step(sig(400.0 * KB, 0), 400_000.0, 10, 5_000_000);
         }
         assert_eq!(slow.step(sig(400.0 * KB, 0), 400_000.0, 10, 5_000_000).0, Some(5_000_000));
+    }
+
+    #[test]
+    fn what_the_system_still_takes_in_right_after_slowing_down_is_not_someone_else() {
+        // Slowed for real browsing; the browsing stops at once, but for two readings the counters show the system
+        // taking in what was already on its way to VeloxFetch (1.5 MB/s "other"). Those readings change nothing, and
+        // the cap lifts once the network is calm, as if they had not been there.
+        let mut c = Controller::default();
+        for _ in 0..3 {
+            c.step(sig(400.0 * KB, 0), PEAK, 25, FLOOR_BPS);
+        }
+        let cap = c.cap.expect("slowed");
+        for _ in 0..SETTLE {
+            assert_eq!(c.step(sig(1500.0 * KB, 0), PEAK, 25, FLOOR_BPS).0, Some(cap as u64), "held as it was");
+        }
+        assert_eq!(c.cap, Some(cap), "not lowered further by the buffered bytes");
+        let mut readings = 0;
+        while c.step(sig(0.0, 0), PEAK, 25, FLOOR_BPS).0.is_some() {
+            readings += 1;
+            assert!(readings < 40, "never lifted");
+        }
+    }
+
+    #[test]
+    fn a_window_a_few_percent_off_at_full_speed_is_not_browsing() {
+        // 3 MB/s of downloads; the counters run 5 to 8 % ahead for a few readings (the system taking data in ahead
+        // of VeloxFetch writing it): no slowing down. Real browsing on top (400 KB/s, 13 %) still slows them.
+        let mb = 1024.0 * 1024.0;
+        let mut c = Controller::default();
+        for off in [0.05, 0.08, 0.06, 0.08, 0.07, 0.05] {
+            let s = Signals { other_bps: Some(3.0 * mb * off), idle: Some(Duration::ZERO), mine_bps: Some(3.0 * mb), paced: false };
+            assert_eq!(c.step(s, 3.0 * mb, 25, FLOOR_BPS).0, None, "{off}");
+        }
+        let mut slowed = false;
+        for _ in 0..4 {
+            let s = Signals { other_bps: Some(400.0 * KB), idle: Some(Duration::ZERO), mine_bps: Some(3.0 * mb), paced: false };
+            slowed |= c.step(s, 3.0 * mb, 25, FLOOR_BPS).0.is_some();
+        }
+        assert!(slowed, "real browsing is still seen");
     }
 
     #[test]

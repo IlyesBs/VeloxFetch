@@ -48,7 +48,8 @@ pub fn is_throttle(e: &DownloadError) -> bool {
     matches!(e, DownloadError::Http(HttpError::Status { status: 429 | 503, .. }))
 }
 
-fn retry_after(e: &DownloadError) -> Option<Duration> {
+/// The wait a refusing server asked for (`Retry-After`), if any.
+pub fn retry_after(e: &DownloadError) -> Option<Duration> {
     match e {
         DownloadError::Http(HttpError::Status { retry_after, .. }) => *retry_after,
         _ => None,

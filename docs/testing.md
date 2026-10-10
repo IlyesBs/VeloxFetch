@@ -364,3 +364,27 @@ queue, throttle, ipc, views, redesign, usability, perf, ui, smart-queue, intelli
 folders. `desktop-preview.mjs` skips "it plays while downloading" when this computer's sound server takes no stream
 (it checks with `paplay`; on the development machine the PulseAudio layer of PipeWire hangs every client, `paplay`
 included); everything else in it, bytes arriving while downloading included, is checked.
+
+## Steady speed and a smooth Smart throttle (October 2026)
+
+Found by measuring on a real line (3 MB/s; Hetzner, which refuses above ~2 connections, and thinkbroadband, which
+allows ~32 and answers `Retry-After: 30`) with temporary probes printing every tick (deleted before the commit).
+Details: `docs/smart-throttle-and-preview.md` > "Steady speed…", `docs/architecture.md` > Performance model.
+
+| Where | Test | Fails without |
+|---|---|---|
+| `adaptive.rs` | `a_refusal_holds_new_requests_back_and_the_wait_grows_while_refused` (the wait, its growth, a burst counts once, `Retry-After`) | the hold |
+| `adaptive.rs` | `after_a_refusal_only_the_limit_goes_when_the_hold_ends_not_a_storm` | the hold (20 requests at once) |
+| `adaptive.rs` | `a_single_refusal_after_a_long_steady_run_keeps_the_connections` | the 20 s rule (2 → 1) |
+| `adaptive.rs` | `a_lower_limit_makes_exactly_the_extra_connections_give_way` | `give_way` |
+| `limiter.rs` | `a_connection_that_leaves_while_waiting_hands_its_share_back` | the refund (4 s instead of 1) |
+| `engine.rs` | `a_limit_keeps_only_the_connections_it_needs` | `capped_connections` |
+| `smart_throttle.rs` | `what_the_system_still_takes_in_right_after_slowing_down_is_not_someone_else`, `a_window_a_few_percent_off_at_full_speed_is_not_browsing`; the browsing tests confirm on 3 readings | settle / the 10 % allowance |
+| `tests/integration/tests/phase3.rs` | `a_connection_limited_server_gets_runs_of_parts_not_a_request_per_part` (≤ ⅓ of the parts in requests, ≤ 6 refusals) | runs, the hold |
+| `phase3.rs` | `runs_still_spread_the_last_parts_over_every_connection` (8 connections used, < 2.5 s instead of ~6) | shrinking runs |
+| `phase3.rs` | `a_cap_keeps_few_connections_holds_its_speed_and_never_stops_the_download` (≤ 4 connections, no 0.5 s without bytes, within 12 % of the cap, all back on lift) | trimming, pieces, settling the debt (it overshot by 15–50 % or stopped) |
+| `phase3.rs` | `a_download_started_under_a_cap_keeps_few_connections_and_its_speed` (≤ 3 connections, within 15 % of the cap) | starting on 2 when the free speed is unknown |
+| `smart_preview.rs` | `changing_modes_while_capped_never_stops_a_running_download` now passes every time (it stopped 0.6–1.3 s when the cap went 4.5 → 0.9 MB/s) | settling the debt on a lower limit |
+| `phase2.rs` | `mid_body_disconnects_resume_from_the_written_offset`: a connection lost inside a run counts as a retry of that part | |
+| `apps/desktop/src/throttle.test.ts` | `polls that bring the same state never touch <html> again`, `slowing downloads or not keeps the same colours (no repaint)` | the flash fix |
+

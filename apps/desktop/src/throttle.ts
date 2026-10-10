@@ -89,9 +89,17 @@ const subs = new Set<() => void>();
 function apply(next: SmartThrottle | null) {
   state = next;
   const root = document.documentElement;
-  if (next?.enabled)
-    root.dataset.throttle = next.limitBps !== null ? "limiting" : "on";
-  else delete root.dataset.throttle;
+  const mark = next?.enabled
+    ? next.limitBps !== null
+      ? "limiting"
+      : "on"
+    : undefined;
+  // Only a real change touches <html>: writing the same value every poll still told the theme watchers that the
+  // colours changed, and the whole window background was painted again every 3 s (it flashed).
+  if (root.dataset.throttle !== mark) {
+    if (mark) root.dataset.throttle = mark;
+    else delete root.dataset.throttle;
+  }
   subs.forEach((f) => f());
 }
 

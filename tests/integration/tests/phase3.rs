@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use downloader_core::{
     AdaptiveConfig, ClientConfig, DownloadConfig, DownloadControl, DownloadRequest, DownloadStatus, DownloadStore, Downloader, Priority,
-    ProgressHandle, RateLimits, RetryPolicy, SlotScheduler,
+    ProgressHandle, RateLimits, RetryPolicy, SegmentStatus, SlotScheduler,
 };
 use persistence::SqliteStore;
 use velox_integration_tests::{random_data, serve};
@@ -96,6 +96,141 @@ async fn server_side_connection_limit_429_makes_it_back_off_instead_of_failing()
     assert_eq!(std::fs::read(&o.path).unwrap(), *data);
     assert!(srv.state.throttled.load(Ordering::SeqCst) > 0, "test setup: the server never throttled");
     assert!(srv.state.peak_concurrent.load(Ordering::SeqCst) <= 2);
+}
+
+#[tokio::test]
+async fn a_connection_limited_server_gets_runs_of_parts_not_a_request_per_part() {
+    // A server allowing 2 connections that refuses everything above: each connection carries a run of parts in one
+    // request (a request per part, plus a refused request handing its slot to the next part, used to make dozens of
+    // refusals in a row and seconds without a byte). Fewer requests, almost no refusals, the same exact file.
+    let data = random_data(24 * MB, 22);
+    let srv = serve(data.clone()).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(5);
+    srv.state.keep_alive.store(true, Ordering::SeqCst);
+    srv.state.max_concurrent.store(2, Ordering::SeqCst);
+    let mut c = cfg();
+    c.adaptive.enabled = true;
+    let dir = tmpdir("runs429");
+    let progress = ProgressHandle::new();
+    let o = downloader(c).download(&DownloadRequest::new(srv.url("/f.bin"), &dir), DownloadControl::new(), progress.clone()).await.unwrap();
+    assert_eq!(std::fs::read(&o.path).unwrap(), *data);
+    let parts = progress.snapshot().segments.len();
+    let (hits, refused) = (srv.state.hits.load(Ordering::SeqCst), srv.state.throttled.load(Ordering::SeqCst));
+    assert!(parts >= 32, "test setup: many parts ({parts})");
+    assert!(hits * 3 <= parts, "{hits} requests for {parts} parts");
+    assert!(refused <= 6, "{refused} refused requests");
+    assert!(srv.state.peak_concurrent.load(Ordering::SeqCst) <= 2);
+}
+
+#[tokio::test]
+async fn runs_still_spread_the_last_parts_over_every_connection() {
+    // Each connection is capped by the server (slow per connection), 8 allowed: runs must not leave one connection
+    // with a long tail while the others sit idle. Close to the time 8 connections need, not a single one's.
+    let data = random_data(24 * MB, 23);
+    let srv = serve(data.clone()).await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(8); // ~4 MB/s per connection
+    srv.state.keep_alive.store(true, Ordering::SeqCst);
+    let mut c = cfg();
+    c.adaptive.enabled = false;
+    c.max_connections = 8;
+    let dir = tmpdir("runs-tail");
+    let t = Instant::now();
+    let o = run(&downloader(c), srv.url("/f.bin"), &dir).await;
+    let took = t.elapsed();
+    assert_eq!(std::fs::read(&o.path).unwrap(), *data);
+    assert!(o.connections >= 6, "connections used: {}", o.connections);
+    // One connection alone: ~6 s; eight: ~0.75 s. Generous for a loaded machine, far below one connection.
+    assert!(took < Duration::from_millis(2500), "took {took:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cap_keeps_few_connections_holds_its_speed_and_never_stops_the_download() {
+    // Many connections at full speed, then a cap far below (a game starts): only the connections the cap needs stay
+    // (each extra one filled the system's buffers: bursts, the cap overshot by half for many seconds, then everything
+    // stopped while the backlog was paid), the speed sits at the cap, bytes keep coming, and all come back when it
+    // lifts.
+    let data = random_data(160 * MB, 24);
+    let srv = serve(data.clone()).await;
+    srv.state.keep_alive.store(true, Ordering::SeqCst);
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(20); // ~1.6 MB/s per connection
+    let limits = RateLimits::new();
+    let mut c = cfg();
+    c.adaptive.interval = Duration::from_millis(250);
+    c.max_connections = 16;
+    let d = downloader(c).with_limits(limits.clone());
+    let dir = tmpdir("cap-conns");
+    let (p, ctl) = (ProgressHandle::new(), DownloadControl::new());
+    let task = {
+        let (d, p, ctl, url, dir) = (d.clone(), p.clone(), ctl.clone(), srv.url("/f.bin"), dir.clone());
+        tokio::spawn(async move { d.download(&DownloadRequest::new(url, &dir), ctl, p).await })
+    };
+    let open = |p: &ProgressHandle| p.snapshot().segments.iter().filter(|s| s.status == SegmentStatus::Downloading).count();
+    let t = Instant::now();
+    while open(&p) < 8 {
+        assert!(t.elapsed() < Duration::from_secs(10), "test setup: many connections at full speed ({})", open(&p));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let free = open(&p);
+    const CAP: u64 = 2_000_000;
+    limits.set_smart(Some(CAP));
+    // Every 100 ms for 6 s: bytes keep coming, and the connections go down to what the cap needs.
+    let mut samples = vec![(Instant::now(), p.received())];
+    for _ in 0..60 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        samples.push((Instant::now(), p.received()));
+    }
+    let capped = open(&p);
+    assert!(capped <= 4 && capped < free, "connections under the cap: {capped} (free: {free})");
+    let still: Vec<u128> =
+        samples.windows(6).filter(|w| w[5].1 == w[0].1).map(|w| w[0].0.duration_since(samples[0].0).as_millis()).collect();
+    assert!(still.is_empty(), "no bytes for half a second at (ms): {still:?}");
+    // Once settled (the last 4 s), the speed is the cap's, within a few percent.
+    let (a, b) = (samples[20], samples[60]);
+    let speed = (b.1 - a.1) as f64 / b.0.duration_since(a.0).as_secs_f64();
+    assert!((speed - CAP as f64).abs() < CAP as f64 * 0.12, "speed under the cap: {speed:.0} B/s");
+    limits.set_smart(None);
+    let t = Instant::now();
+    while open(&p) < free.min(8) {
+        assert!(t.elapsed() < Duration::from_secs(5), "the connections came back: {}", open(&p));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    ctl.cancel();
+    let _ = task.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_started_under_a_cap_keeps_few_connections_and_its_speed() {
+    // A game already runs when the download starts: what one connection gets is not known, so it does not climb to
+    // many connections under the cap (each one would fill the system's buffers above it).
+    let data = random_data(64 * MB, 25);
+    let srv = serve(data.clone()).await;
+    srv.state.keep_alive.store(true, Ordering::SeqCst);
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(20); // ~1.6 MB/s per connection
+    let limits = RateLimits::new();
+    const CAP: u64 = 1_000_000;
+    limits.set_smart(Some(CAP));
+    let mut c = cfg();
+    c.adaptive.interval = Duration::from_millis(250);
+    let d = downloader(c).with_limits(limits.clone());
+    let dir = tmpdir("cap-from-start");
+    let (p, ctl) = (ProgressHandle::new(), DownloadControl::new());
+    let task = {
+        let (d, p, ctl, url, dir) = (d.clone(), p.clone(), ctl.clone(), srv.url("/f.bin"), dir.clone());
+        tokio::spawn(async move { d.download(&DownloadRequest::new(url, &dir), ctl, p).await })
+    };
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (a, ta) = (p.received(), Instant::now());
+    let mut most = 0;
+    for _ in 0..30 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        most = most.max(p.snapshot().segments.iter().filter(|s| s.status == SegmentStatus::Downloading).count());
+    }
+    let speed = (p.received() - a) as f64 / ta.elapsed().as_secs_f64();
+    assert!(most <= 3, "connections under the cap: {most}");
+    assert!((speed - CAP as f64).abs() < CAP as f64 * 0.15, "speed under the cap: {speed:.0} B/s");
+    ctl.cancel();
+    let _ = task.await;
 }
 
 // --------------------------------------------------------------- 3.2 bandwidth limiter

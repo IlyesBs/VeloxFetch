@@ -61,3 +61,13 @@ colour now, not black), the 60 fps ceiling, and the extra cost of fractional sca
   them >= 40 fps, and on Linux no card or panel paints a shadow. `VELOX_E2E_DISPLAY=:0` measures on the real screen,
   `PERF_WAYLAND=1` on Wayland itself, `PERF_CSS` lays a stylesheet over the page before measuring (to find what
   costs, by hand).
+
+## No repaint every 3 s while Smart throttle is on (October 2026)
+
+`throttle.ts` wrote `<html data-throttle>` on every poll (every 3 s), even with the same value. Any write is an
+attribute mutation, so `theme.ts`'s watcher told the backdrop (`aurora.ts`) and the segment monitor that the colours
+changed: the full-window background picture was drawn and swapped twice per poll, which showed as a flash. Now the
+attribute is written only when it changes, and `onThemeChange` calls back only when `paletteKey` (theme, Smart throttle
+on or off, the system's dark mode) changes: "on" and "limiting" share one palette, so slowing downloads repaints
+nothing. Tests: `throttle.test.ts`.
+

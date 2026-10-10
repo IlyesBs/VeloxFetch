@@ -588,3 +588,18 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * **Browser registration in tests on Linux / macOS**: `VELOX_NMH_SCRATCH_HOME` (debug builds only, like
   `VELOX_NMH_SCRATCH_KEY` on Windows) puts the browsers' manifest folders under a scratch home; release builds never
   read it.
+
+## Steady speed and Smart throttle fixes (October 2026)
+
+No new command, permission, setting, file, listening socket or network destination. What changed on the wire:
+* **Fewer requests to servers that refuse**: after a "too many connections" answer (429 / 503) the download sends no new
+  request for 1 s, then 2, 4… up to 16 s while the server keeps refusing (bounded, reset by the next accepted request),
+  instead of up to 40 refused requests in a row. A long `Retry-After` still delays the refused part itself (capped at
+  300 s as before), never the whole download for longer than 16 s.
+* **Runs**: one ranged request may now cover several consecutive parts (at most 16) of the same file; the answer is
+  checked as before (`206`, a `Content-Range` that matches the request, the strong validator / `If-Range`), and its
+  bytes are written only into the parts that request claimed.
+* **Under a speed limit**, requests ask for a few seconds of data and carry `Connection: close` (a standard header; no
+  information about the user). The connection count drops to what the limit needs.
+* Window: `<html data-throttle>` is written only when it changes; no new data reaches the page.
+

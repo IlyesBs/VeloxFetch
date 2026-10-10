@@ -1227,12 +1227,14 @@ impl Downloader {
 
         let group = cancel.child_token();
         let mut set = JoinSet::new();
+        let claims = Arc::new(Claims::new(progress.snapshot().segments.len()));
         let pending: Vec<Segment> = progress.snapshot().segments.into_iter().filter(|s| !s.is_complete()).collect();
         // Segments take connection slots in the order they are spawned (the gate is first come, first served).
         // Each segment's first connection queues in this order (`acquire_in_turn`); retries queue behind.
         for (turn, seg) in (if preview { planner::preview_order(pending) } else { pending }).into_iter().enumerate() {
             let id = seg.id;
             let first_try = std::sync::atomic::AtomicBool::new(true);
+            let claims = claims.clone();
             let (client, url, part, group, progress, validator, policy, gate, throttle, controller, extras) = (
                 self.client(),
                 url.clone(),
@@ -1259,7 +1261,9 @@ impl Downloader {
                             progress.set_status(id, SegmentStatus::Retrying);
                             progress.note_retry(Some(id), n, e, d);
                             if retry::is_throttle(e) {
-                                // 429 / 503: the server is telling us we use too many connections.
+                                // 429 / 503: the server is telling us we use too many connections. No part asks
+                                // again for a moment (each refused request would free its slot for the next one).
+                                gate.server_refused(retry::retry_after(e));
                                 if let Some(ctl) = &controller {
                                     if let Some(n) = ctl.lock().unwrap().on_throttled(Instant::now()) {
                                         tracing::info!(connections = n, "server is throttling: reducing connections");
@@ -1270,57 +1274,159 @@ impl Downloader {
                             }
                         },
                         |_| {
-                            let (client, url, part, group, progress, validator, throttle, gate, extras) =
-                                (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras);
-                            let in_turn = first_try.swap(false, std::sync::atomic::Ordering::Relaxed);
+                            let (client, url, part, group, progress, validator, throttle, gate, extras, claims) =
+                                (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras, &claims);
+                            let mut in_turn = first_try.swap(false, std::sync::atomic::Ordering::Relaxed);
                             async move {
                                 // A connection slot is held only while a request is actually in flight, never
                                 // while backing off between retries: otherwise throttled segments would keep
                                 // "occupying" slots and lowering the limit could not take effect.
                                 // (Segments start in order; the gate size adapts live.)
-                                let _permit = tokio::select! {
-                                    _ = group.cancelled() => return Err(DownloadError::Cancelled),
-                                    p = async { if in_turn { gate.acquire_in_turn(turn).await } else { gate.acquire().await } } => p,
-                                };
-                                // Always continue from what is actually on disk for this segment.
-                                let cur = progress.segment(id).ok_or_else(|| DownloadError::Internal("missing segment".into()))?;
-                                if cur.is_complete() {
+                                'again: loop {
+                                    let _permit = loop {
+                                        if !in_turn {
+                                            // Part of another connection's run: wait until that one is done with it.
+                                            claims.wait_free(id, group).await?;
+                                        }
+                                        let p = tokio::select! {
+                                            _ = group.cancelled() => return Err(DownloadError::Cancelled),
+                                            p = async { if in_turn { gate.acquire_in_turn(turn).await } else { gate.acquire().await } } => p,
+                                        };
+                                        in_turn = false;
+                                        if progress.segment(id).is_some_and(|s| s.is_complete()) {
+                                            return Ok(());
+                                        }
+                                        if claims.try_claim(id) {
+                                            break p;
+                                        }
+                                    };
+                                    let mut run = vec![Claim::new(claims, id)];
+                                    // Always continue from what is actually on disk for this segment.
+                                    let cur = progress.segment(id).ok_or_else(|| DownloadError::Internal("missing segment".into()))?;
+                                    if cur.is_complete() {
+                                        return Ok(());
+                                    }
+                                    let from = cur.next_offset();
+                                    // Under a speed limit: a short request on a new connection instead (see
+                                    // `AdaptiveGate::set_request_cap`); the rest of the part comes in the next one.
+                                    let capped = gate.request_cap();
+                                    let mut end = capped.map_or(cur.end, |c| cur.end.min(from + c - 1));
+                                    // Otherwise the parts right after this one that nobody has started come in the same
+                                    // request (fewer requests: nothing for a server that limits them to refuse, no pause
+                                    // between parts). Runs get shorter as the work left shrinks, so every connection
+                                    // stays busy.
+                                    if capped.is_none() {
+                                        for next in claims.run_after(id, progress, gate.limit()) {
+                                            run.push(Claim::new(claims, next.id));
+                                            end = next.end;
+                                        }
+                                    }
+                                    let closing;
+                                    let extras = if capped.is_some() {
+                                        closing = extras.closing();
+                                        &closing
+                                    } else {
+                                        extras
+                                    };
+                                    progress.set_status(id, SegmentStatus::Downloading);
+                                    let sent = Instant::now();
+                                    let stream = client.get_range_with(url, from, end, validator.as_deref(), extras).await?;
+                                    gate.server_accepted();
+                                    progress.record_latency(sent.elapsed());
+                                    progress.note_status(206); // `get_range_with` accepts nothing else
+                                    progress.note_peak(gate.peak_active());
+                                    let mut stream = std::pin::pin!(stream.into_stream());
+                                    let mut excess = None;
+                                    let request_bytes = AtomicU64::new(0);
+                                    let capped_since = std::sync::OnceLock::new();
+                                    for (i, claim) in run.iter().enumerate() {
+                                        let seg = claim.id;
+                                        let s = progress.segment(seg).ok_or_else(|| DownloadError::Internal("missing segment".into()))?;
+                                        if i > 0 {
+                                            // Too many connections now (the limit went down): this one stops here, the rest
+                                            // of its run goes back to the parts' own turn.
+                                            if _permit.give_way() {
+                                                break;
+                                            }
+                                            progress.set_status(seg, SegmentStatus::Downloading);
+                                        }
+                                        let start = s.next_offset();
+                                        let want = if i == 0 { end.min(s.end) } else { s.end } - start + 1;
+                                        let source = futures_util::stream::iter(excess.take().map(Ok)).chain(stream.as_mut());
+                                        let params = PumpParams {
+                                            offset: start,
+                                            limit: Some(want),
+                                            buffer_size,
+                                            channel_capacity,
+                                            throttle: Some(throttle.clone()),
+                                        };
+                                        // A request made before a speed limit came goes on for one short request's worth
+                                        // (`AdaptiveGate::set_request_cap`), then its part continues on a new connection.
+                                        // One after the other: closing every connection at once makes servers refuse.
+                                        let give_way = || _permit.give_way();
+                                        let enough = || {
+                                            let (Some(c), None) = (gate.request_cap(), capped) else { return false };
+                                            let now = request_bytes.load(Ordering::Relaxed);
+                                            let since = *capped_since.get_or_init(|| now);
+                                            now.saturating_sub(since) >= c
+                                        };
+                                        let written = |n| {
+                                            progress.add(seg, n);
+                                            request_bytes.fetch_add(n, Ordering::Relaxed);
+                                        };
+                                        let got =
+                                            disk::pump_keep(source, part, params, group, written, &mut excess, &give_way, &enough).await;
+                                        let failed = match got {
+                                            Ok((got, _)) if got >= want => None,
+                                            // One connection too many for a lower limit: stopped where it was. Its own part
+                                            // queues for a slot again; a later part of the run goes back to its own turn.
+                                            Ok((_, true)) => {
+                                                progress.set_status(seg, SegmentStatus::Pending);
+                                                if i == 0 {
+                                                    continue 'again;
+                                                }
+                                                break;
+                                            }
+                                            Ok((got, false)) => Some(DownloadError::ShortBody { index: seg, got, expected: want }),
+                                            Err(e) => Some(e),
+                                        };
+                                        match failed {
+                                            // This part's own failure: retried as before.
+                                            Some(e) if i == 0 => return Err(e),
+                                            // A later part of the run: kept as far as it got, finished in its own turn.
+                                            Some(e) => {
+                                                if matches!(e, DownloadError::Cancelled) {
+                                                    return Err(e);
+                                                }
+                                                // Counted like any failed connection (diagnostics, the adaptive controller).
+                                                tracing::warn!(segment = seg, error = %e, "connection lost; the part continues on its own");
+                                                progress.bump_retry(seg);
+                                                progress.note_retry(Some(seg), s.retry_count + 1, &e, Duration::ZERO);
+                                                progress.set_status(seg, SegmentStatus::Pending);
+                                                break;
+                                            }
+                                            // A short request (under a speed limit) got its share: the next one goes on.
+                                            None if progress.segment(seg).is_some_and(|s| !s.is_complete()) => {
+                                                progress.set_status(seg, SegmentStatus::Pending);
+                                                continue 'again;
+                                            }
+                                            // Done: the connection goes on with the next part (counted once, not twice).
+                                            None => progress.set_status(seg, SegmentStatus::Completed),
+                                        }
+                                    }
                                     return Ok(());
                                 }
-                                progress.set_status(id, SegmentStatus::Downloading);
-                                let from = cur.next_offset();
-                                let want = cur.end - from + 1;
-                                let sent = Instant::now();
-                                let stream = client.get_range_with(url, from, cur.end, validator.as_deref(), extras).await?;
-                                progress.record_latency(sent.elapsed());
-                                progress.note_status(206); // `get_range_with` accepts nothing else
-                                progress.note_peak(gate.peak_active());
-                                let got = disk::pump(
-                                    stream.into_stream(),
-                                    part,
-                                    PumpParams {
-                                        offset: from,
-                                        limit: Some(want),
-                                        buffer_size,
-                                        channel_capacity,
-                                        throttle: Some(throttle.clone()),
-                                    },
-                                    group,
-                                    |n| progress.add(id, n),
-                                )
-                                .await?;
-                                if got < want {
-                                    return Err(DownloadError::ShortBody { index: id, got, expected: want });
-                                }
-                                Ok(())
                             }
                         },
                     )
                     .await;
+                    // A part another connection finished in its run is done, even if this task was stopped waiting.
+                    let done = progress.segment(id).is_some_and(|s| s.is_complete());
                     progress.set_status(
                         id,
                         match &res {
                             Ok(()) => SegmentStatus::Completed,
+                            _ if done => SegmentStatus::Completed,
                             Err(DownloadError::Cancelled) => SegmentStatus::Paused,
                             Err(_) => SegmentStatus::Failed,
                         },
@@ -1462,6 +1568,107 @@ impl Downloader {
     }
 }
 
+/// Longest run of parts one request carries.
+const MAX_RUN: usize = 16;
+
+/// Which parts a connection has taken (its own, plus the ones after it that its request carries: its run).
+struct Claims {
+    taken: Vec<std::sync::atomic::AtomicBool>,
+    freed: tokio::sync::Notify,
+}
+
+impl Claims {
+    fn new(n: usize) -> Self {
+        Self { taken: (0..n).map(|_| std::sync::atomic::AtomicBool::new(false)).collect(), freed: tokio::sync::Notify::new() }
+    }
+
+    fn try_claim(&self, id: usize) -> bool {
+        self.taken.get(id).is_some_and(|t| !t.swap(true, Ordering::SeqCst))
+    }
+
+    fn release(&self, id: usize) {
+        if let Some(t) = self.taken.get(id) {
+            t.store(false, Ordering::SeqCst);
+        }
+        self.freed.notify_waiters();
+    }
+
+    fn is_taken(&self, id: usize) -> bool {
+        self.taken.get(id).is_some_and(|t| t.load(Ordering::SeqCst))
+    }
+
+    async fn wait_free(&self, id: usize, cancel: &CancellationToken) -> Result<()> {
+        loop {
+            // Created before the check: a release in between still wakes it.
+            let freed = self.freed.notified();
+            if !self.is_taken(id) {
+                return Ok(());
+            }
+            tokio::select! {
+                _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
+                _ = freed => {}
+            }
+        }
+    }
+
+    /// Take the untouched parts right after `id` for its request: as many as the work left shared by twice the
+    /// connections allows (at most [`MAX_RUN`]), so the last parts still spread over every connection.
+    fn run_after(&self, id: usize, progress: &ProgressHandle, connections: usize) -> Vec<Segment> {
+        let segments = progress.snapshot().segments;
+        let free = segments.iter().filter(|s| !s.is_complete() && !self.is_taken(s.id)).count();
+        let len = (free / (2 * connections.max(1))).clamp(0, MAX_RUN - 1);
+        let mut run = Vec::new();
+        let mut prev_end = segments.get(id).map(|s| s.end);
+        for s in segments.iter().skip(id + 1).take(len) {
+            if s.downloaded > 0 || prev_end.map(|e| e + 1) != Some(s.start) || !self.try_claim(s.id) {
+                break;
+            }
+            prev_end = Some(s.end);
+            run.push(s.clone());
+        }
+        run
+    }
+}
+
+/// A taken part, given back when the connection is done with it (finished or not).
+struct Claim<'a> {
+    claims: &'a Claims,
+    id: usize,
+}
+
+impl<'a> Claim<'a> {
+    fn new(claims: &'a Claims, id: usize) -> Self {
+        Self { claims, id }
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        self.claims.release(self.id);
+    }
+}
+
+/// Under a speed limit a download keeps this much more connection capacity than the limit needs (connections
+/// vary), and at least [`MIN_CAPPED_CONNECTIONS`].
+const CAPPED_HEADROOM: f64 = 1.5;
+const MIN_CAPPED_CONNECTIONS: usize = 2;
+/// Under a speed limit, one request lasts about this long (then a new connection: see `AdaptiveGate::set_request_cap`).
+const REQUEST_SECS: f64 = 4.0;
+const MIN_CAPPED_REQUEST: u64 = 128 * 1024;
+const MAX_CAPPED_REQUEST: u64 = 16 * 1024 * 1024;
+
+/// How many connections a download held to `cap` (bytes/s) needs, when one connection gets `per_connection` and it
+/// runs `free` while nothing holds it back; `None`: the cap is above what it gets anyway, nothing to trim. Every extra
+/// connection only fills the system's receive buffers ahead of the limit: bytes then come in bursts and seconds late,
+/// the line stays busy long after the limit was set (what a game must not see), and the limit is overshot meanwhile.
+fn capped_connections(cap: u64, per_connection: f64, free: usize) -> Option<usize> {
+    if per_connection < 1.0 || cap as f64 >= per_connection * free as f64 * 0.8 {
+        return None;
+    }
+    let need = (cap as f64 * CAPPED_HEADROOM / per_connection).ceil() as usize;
+    Some(need.clamp(MIN_CAPPED_CONNECTIONS.min(free), free))
+}
+
 /// Samples throughput / errors / latency every interval and resizes the connection gate.
 fn spawn_sampler(
     interval: Duration,
@@ -1476,6 +1683,8 @@ fn spawn_sampler(
             tick.tick().await;
             let (mut last_at, mut last_bytes, mut last_errors) = (Instant::now(), progress.downloaded_now(), progress.total_retries());
             let mut last_waits = throttle.waits();
+            // What one connection gets while no limit holds the download (bytes/s; 0 = not known yet).
+            let mut per_connection = 0.0;
             loop {
                 tick.tick().await;
                 let now = Instant::now();
@@ -1491,11 +1700,39 @@ fn spawn_sampler(
                 };
                 last_waits = throttle.waits();
                 (last_at, last_bytes, last_errors) = (now, bytes, errors);
-                let decision = ctl.lock().unwrap().observe(sample);
+                let active = gate.active();
+                if !sample.limited && sample.throughput > 0.0 && active > 0 {
+                    let one = sample.throughput / active as f64;
+                    per_connection = if per_connection < 1.0 { one } else { per_connection + 0.3 * (one - per_connection) };
+                }
+                let (decision, free) = {
+                    let mut c = ctl.lock().unwrap();
+                    (c.observe(sample), c.limit())
+                };
                 if let Some(n) = decision {
                     tracing::debug!(connections = n, throughput = sample.throughput, errors = sample.errors, "adaptive resize");
-                    gate.set_limit(n);
                 }
+                // Under a speed limit, only the connections the limit needs; all of them again once it lifts. Started
+                // under the limit (a game already running), what one connection gets is not known yet: two, until they
+                // fall short of the limit and it is measured.
+                let capped = throttle.min_rate().and_then(|cap| {
+                    if per_connection < 1.0 {
+                        sample.limited.then_some(MIN_CAPPED_CONNECTIONS.min(free))
+                    } else {
+                        capped_connections(cap, per_connection, free)
+                    }
+                });
+                let want = capped.unwrap_or(free);
+                if gate.limit() != want {
+                    gate.set_limit(want);
+                }
+                // Each capped connection's request: about REQUEST_SECS of its share of the limit.
+                gate.set_request_cap(
+                    capped
+                        .zip(throttle.min_rate())
+                        .map(|(n, cap)| (cap as f64 / n as f64 * REQUEST_SECS) as u64)
+                        .map(|b| b.clamp(MIN_CAPPED_REQUEST, MAX_CAPPED_REQUEST)),
+                );
             }
         },
         tracing::Span::current(),
@@ -1539,4 +1776,20 @@ pub fn part_path(dest: &Path) -> PathBuf {
     let mut s = dest.as_os_str().to_owned();
     s.push(".part");
     PathBuf::from(s)
+}
+
+#[cfg(test)]
+mod capped_tests {
+    use super::capped_connections;
+
+    #[test]
+    fn a_limit_keeps_only_the_connections_it_needs() {
+        let kb = 1024.0;
+        // 32 connections of ~100 KB/s each (3.2 MB/s); a 800 KB/s cap needs 12 with headroom, a 100 KB/s one the minimum.
+        assert_eq!(capped_connections(800 * 1024, 100.0 * kb, 32), Some(12));
+        assert_eq!(capped_connections(100 * 1024, 100.0 * kb, 32), Some(2));
+        assert_eq!(capped_connections(3 * 1024 * 1024, 100.0 * kb, 32), None, "near what it gets anyway: untouched");
+        assert_eq!(capped_connections(800 * 1024, 0.0, 32), None, "not measured yet: untouched");
+        assert_eq!(capped_connections(10 * 1024, 100.0 * kb, 1), Some(1), "never more than it had");
+    }
 }
