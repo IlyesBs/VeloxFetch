@@ -121,6 +121,12 @@ and the Add dialog's **Check link** show:
 "Why?" shows what the server actually did. The check downloads nothing, writes nothing and can be cancelled. If it
 fails, you can still download. See [`docs/download-intelligence.md`](docs/download-intelligence.md).
 
+**Smart Duplicate Detection**: adding a link the app already has says so before anything happens. It tells you
+whether that download is running, paused, failed or finished, and whether the finished file is still there. It
+offers what fits: view it, resume it, open the file, or download another copy. A file that only has the same name is
+not a duplicate: the new download gets its own name and nothing is ever replaced. See
+[`docs/smart-duplicate-detection.md`](docs/smart-duplicate-detection.md).
+
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
 
 Diagnostics stay on the computer: the app writes a small rotating log to `<app data>/logs/velox.log`

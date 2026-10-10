@@ -105,6 +105,24 @@ The tests were run on Windows; the same tests run in CI on Linux and macOS (the 
   that appears under the name while downloading is never replaced. Tests: `usability.rs` (same name at once, a file appearing
   mid-download, a paused download keeps its name), `downloader-core/tests/download.rs`.
 
+* **Smart Duplicate Detection** (`docs/smart-duplicate-detection.md`). Before, the Add bar only compared the exact text of
+  a link with the list, said the same thing whatever the state, and a same-link match was claimed even when the server's
+  file had changed. Tests:
+  * `download-manager` `intelligence::tests` (6 new): normalisation, version rules, checksums, order, file state.
+  * `tests/integration/tests/duplicates.rs` (9): states, file gone or edited, history and restart, checksum, name
+    conflict vs. duplicate, identical requests at once, secrets, malformed links.
+  * `apps/desktop/src/duplicates.test.ts` (9) and `intelligence.test.ts`: prompt per state, name-conflict lines, keys
+    in en/fr/ar.
+  * e2e `desktop-usability.mjs`: the real prompt for a finished file offers Open, Show in folder, Download again.
+  * Results (Linux, 2026-10-10):
+    * Rust workspace: 702 passed, 0 failed (`duplicates.rs` 3 runs in a row, all green);
+    * vitest: 110;
+    * policy: 42/42;
+    * clippy and fmt: clean;
+    * e2e: 17 of 18 suites pass. `desktop-preview.mjs` fails at the web view's media player step ("player to read the
+      header" / "receive more") on this machine on the base commit too, before and after this change: an
+      environment problem, not a regression.
+
 * **A full or failing disk hung the download** (found by the fault-injection tests): when the writer of a segment stopped on a disk error, the reader kept waiting on a full channel for a writer that no longer
   existed, so the download stayed "downloading" forever. The writer now hands the channel back when it stops; the download fails at once with the disk's message and the retry resumes.
 * **A killed stream download left an empty placeholder file** (the finished name was reserved with an empty file before the real one was renamed over it) **and a hidden working folder for ever**. The file is now put in

@@ -3,12 +3,14 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import { opensVideoDialog, parseRate } from "../format";
 import { act, store, useStore } from "../hooks";
-import { PRIORITIES, type Analysis, type Download, type NewDownload, type PickedFolder, type Priority } from "../types";
+import { PRIORITIES, type Analysis, type DuplicateMatch, type NewDownload, type PickedFolder, type Priority } from "../types";
 import { t as tr, useT, type Key } from "../i18n";
 import { Icon } from "../ui/icons";
 import { StatusChip } from "../ui/primitives";
 import { localStamp, MAIN_QUEUE, queueName } from "../smartQueue";
 import { IntelligencePanel } from "./IntelligencePanel";
+import { actions } from "../actions";
+import { duplicatePrompt, localDuplicate, type DupAction } from "../duplicates";
 
 /** Put `url` in the link bar and focus it (paste / drop anywhere, Ctrl+L). An empty string only focuses. */
 export const FILL_LINK = "velox:fill-link";
@@ -17,20 +19,20 @@ export const OPEN_ADD = "velox:open-add";
 
 const EMPTY_ADVANCED = { username: "", password: "", referrer: "", cookies: "", userAgent: "" };
 
-/** The same link already in the list (not cancelled), if any. */
-function existing(url: string): Download | undefined {
-  const u = url.trim();
-  const { byId, ids } = store.getState();
-  for (let i = ids.length - 1; i >= 0; i--) {
-    const d = byId[ids[i]!];
-    if (d && d.url === u && d.status !== "cancelled") return d;
-  }
-  return undefined;
-}
+const DUP_LABEL: Record<DupAction, Key> = {
+  view: "dup.show",
+  resume: "dup.resume",
+  retry: "dup.retry",
+  open: "dup.open",
+  folder: "dup.folder",
+  again: "dup.again",
+  another: "dup.another",
+};
 
-/** "This link is already in your list": show it, or download it again. */
-function DuplicatePrompt({ d, onAgain, onShow, onClose }: { d: Download; onAgain: () => void; onShow: () => void; onClose: () => void }) {
+/** "You already have this": what the app knows of it, and only the actions that can work. Downloading anyway stays possible. */
+function DuplicatePrompt({ d, onAction, onClose }: { d: DuplicateMatch; onAction: (a: DupAction) => void; onClose: () => void }) {
   const t = useT();
+  const p = duplicatePrompt(d);
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", esc);
@@ -38,32 +40,48 @@ function DuplicatePrompt({ d, onAgain, onShow, onClose }: { d: Download; onAgain
   }, [onClose]);
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="card rise w-full max-w-md space-y-4 p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="dup-title" data-testid="duplicate-dialog">
+      <div
+        className="card rise w-full max-w-md space-y-4 p-5 shadow-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dup-title"
+        data-testid="duplicate-dialog"
+        data-confidence={d.confidence}
+        data-file={d.file ?? ""}
+      >
         <div className="flex items-center gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warn/15 text-warn">
             <Icon name="copy" size={19} />
           </div>
           <div className="min-w-0">
-            <h2 id="dup-title" className="text-[15px] font-semibold">
-              {t("dup.title")}
+            <h2 id="dup-title" className="text-[15px] font-semibold" data-testid="duplicate-title">
+              {t(p.title)}
             </h2>
-            <p className="text-xs text-dim">{t("dup.body")}</p>
+            <p className="text-xs text-dim">{t(p.reason)}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-line bg-raised px-3 py-2">
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{d.filename}</span>
-          <StatusChip status={d.status} />
+          {d.status && <StatusChip status={d.status} />}
         </div>
-        <div className="flex justify-end gap-2">
+        {p.notes.length > 0 && (
+          <ul className="space-y-1 text-xs text-dim" data-testid="duplicate-notes">
+            {p.notes.map((n) => (
+              <li key={n} className={n === "dup.n.changed" ? "text-warn" : undefined}>
+                {t(n)}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
           <button className="btn" onClick={onClose}>
             {t("common.cancel")}
           </button>
-          <button className="btn" data-testid="duplicate-show" onClick={onShow}>
-            {t("dup.show")}
-          </button>
-          <button className="btn btn-primary" data-testid="duplicate-again" onClick={onAgain} autoFocus>
-            {t("dup.again")}
-          </button>
+          {p.actions.map((a, i) => (
+            <button key={a} className={i === 0 ? "btn btn-primary" : "btn"} data-testid={`duplicate-${a === "view" ? "show" : a}`} onClick={() => onAction(a)} autoFocus={i === 0}>
+              {t(DUP_LABEL[a])}
+            </button>
+          ))}
         </div>
       </div>
     </div>,
@@ -89,8 +107,10 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
   const [formError, setFormError] = useState<string | null>(null);
   // A folder chosen for this download in the native dialog (a token; the path is only shown).
   const [folder, setFolder] = useState<PickedFolder | null>(null);
-  // A link that is already in the list, waiting for the user's answer.
-  const [dup, setDup] = useState<{ d: Download; req: NewDownload; fromDialog: boolean } | null>(null);
+  // A download the app already has for this link, waiting for the user's answer.
+  const [dup, setDup] = useState<{ d: DuplicateMatch; req: NewDownload; fromDialog: boolean } | null>(null);
+  // A duplicate check is running (a second press of Add waits for it instead of asking twice).
+  const asking = useRef(false);
   // the list under the Add button's arrow (several links, a video, options)
   const [moreOpen, setMoreOpen] = useState(false);
   const more = useRef<HTMLDivElement>(null);
@@ -193,11 +213,38 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
     }
   };
 
-  /** Ask first when the link is already in the list. */
+  /** Ask first when the app already has this download (Rust looks at the list, the history and the finished file). */
   const submit = async (req: NewDownload, fromDialog: boolean) => {
-    const d = existing(req.url);
+    if (asking.current) return;
+    asking.current = true;
+    let d: DuplicateMatch | null;
+    try {
+      d = await api.checkDuplicate(req.url, req.checksum);
+    } catch {
+      // Rust could not be asked: a plain comparison with the list, so a repeat is still noticed.
+      const { byId, ids } = store.getState();
+      d = localDuplicate(req.url, byId, ids);
+    } finally {
+      asking.current = false;
+    }
     if (d) return setDup({ d, req, fromDialog });
     await create(req, fromDialog);
+  };
+
+  /** The answer to the duplicate prompt. Nothing existing is ever removed, replaced or cancelled. */
+  const onDuplicate = (a: DupAction) => {
+    if (!dup) return;
+    const { d, req, fromDialog } = dup;
+    setDup(null);
+    if (a === "again" || a === "another") return void create(req, fromDialog);
+    reset();
+    dialog.current?.close();
+    const target = d.id !== null ? ({ kind: "download", id: d.id } as const) : d.historyId !== null ? ({ kind: "history", id: d.historyId } as const) : null;
+    if (a === "resume" && d.id !== null) void actions.resume(d.id);
+    if (a === "retry" && d.id !== null) void actions.retry(d.id);
+    if (a === "open" && target) void actions.openFile(target);
+    if (a === "folder" && target) void actions.showInFolder(target);
+    if (a === "view" && d.id !== null) onOpen?.(d.id);
   };
 
   const quick = async (e: FormEvent) => {
@@ -298,23 +345,7 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
         </div>
       </form>
 
-      {dup && (
-        <DuplicatePrompt
-          d={dup.d}
-          onClose={() => setDup(null)}
-          onShow={() => {
-            setDup(null);
-            reset();
-            dialog.current?.close();
-            onOpen?.(dup.d.id);
-          }}
-          onAgain={() => {
-            const { req, fromDialog } = dup;
-            setDup(null);
-            void create(req, fromDialog);
-          }}
-        />
-      )}
+      {dup && <DuplicatePrompt d={dup.d} onClose={() => setDup(null)} onAction={onDuplicate} />}
 
       <dialog ref={dialog} className="card m-auto max-h-[92vh] w-[min(34rem,94vw)] p-0" aria-labelledby="add-title" onClose={stopCheck}>
         <form onSubmit={detailed} className="space-y-4 p-5">

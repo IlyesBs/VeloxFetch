@@ -1,6 +1,6 @@
 import { formatBytes } from "../format";
 import { useT } from "../i18n";
-import { evidence, findingLine, HEALTH_CLASS, storageLine, strategyLine, warnings, type Line } from "../intelligence";
+import { evidence, findingLine, HEALTH_CLASS, nameLine, storageLine, strategyLine, warnings, type Line } from "../intelligence";
 import type { Analysis } from "../types";
 import { Icon } from "../ui/icons";
 
@@ -25,6 +25,7 @@ export function IntelligencePanel({ a, basics = false }: { a: Analysis; basics?:
   const warn = warnings(a);
   const kind = a.kind === "file" || a.kind === "unknown" ? null : t(`intel.kind.${a.kind}`);
   const dup = a.duplicate;
+  const name = nameLine(a);
   return (
     <section className="mt-3 rounded-xl border border-line px-3 pb-2 pt-2.5" data-testid="intel" data-health={a.health} aria-labelledby="intel-title">
       <div className="flex items-center gap-2">
@@ -70,6 +71,14 @@ export function IntelligencePanel({ a, basics = false }: { a: Analysis; basics?:
         {dup && (
           <Row label={t("intel.duplicate")} testid="intel-duplicate">
             {t(dup.id !== null ? "intel.dup.list" : "intel.dup.history", { name: dup.filename })} · {t(`intel.dup.${dup.reason}`)}
+            {dup.changed && <span className="text-warn"> · {t("intel.dup.changed")}</span>}
+            {dup.file === "missing" && <> · {t("intel.dup.fileMissing")}</>}
+            {dup.file === "changed" && <> · {t("intel.dup.fileChanged")}</>}
+          </Row>
+        )}
+        {name && (
+          <Row label={t("intel.name")} testid="intel-name">
+            {t(name.key, name.vars)}
           </Row>
         )}
         <Row label={t("intel.warnings")} testid="intel-warnings">

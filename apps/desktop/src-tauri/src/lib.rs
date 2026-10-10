@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use authz::Command;
-use download_manager::intelligence::{AnalysisDto, AnalyzeLink};
+use download_manager::intelligence::{AnalysisDto, AnalyzeLink, CheckDuplicate, DuplicateDto};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, NetworkDto,
@@ -194,6 +194,8 @@ command!(add_batch, AddBatch, (request: BatchRequest) -> BatchResult, |m| m.add_
 command!(review_link, ReviewLink, (url: String) -> PendingDto, |m| m.review_link(url));
 // Download Intelligence for the Add dialog: a read-only check of a link (`url: None` cancels a running one).
 command!(analyze_link, AnalyzeLink, (request: AnalyzeLink) -> Option<AnalysisDto>, |m| m.analyze_link(request));
+// Smart Duplicate Detection for the Add bar / dialog: read-only, no network (only what the app already knows).
+command!(check_duplicate, CheckDuplicate, (request: CheckDuplicate) -> Option<DuplicateDto>, |m| m.check_duplicate(request));
 
 // Stream (HLS / DASH) downloads: the UI sends a link and track ids from an earlier analysis, never a
 // segment address, a path, or anything for a command line.
@@ -876,6 +878,7 @@ pub fn run() {
             add_batch,
             review_link,
             analyze_link,
+            check_duplicate,
             get_clipboard_watch,
             set_clipboard_watch,
             analyze_media,

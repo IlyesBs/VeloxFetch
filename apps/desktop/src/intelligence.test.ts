@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 import ar from "./locales/ar.json";
-import { errorLabel, evidence, findingLine, storageLine, strategyLine, warnings } from "./intelligence";
+import { errorLabel, evidence, findingLine, nameLine, storageLine, strategyLine, warnings } from "./intelligence";
 import type { Analysis, Finding, FindingCode } from "./types";
 
 const base: Analysis = {
@@ -26,6 +26,7 @@ const base: Analysis = {
   storage: "ok",
   freeBytes: 100 * 1024 ** 3,
   duplicate: null,
+  nameConflict: null,
   health: "good",
   findings: [],
   errorCode: null,
@@ -87,9 +88,23 @@ describe("Download Intelligence lines", () => {
     for (const r of ["supported", "likelySupported", "notSupported", "unknown"]) needed.add(`intel.resume.${r}`);
     for (const h of ["good", "caution", "problem", "unknown"]) needed.add(`intel.health.${h}`);
     for (const k of ["webPage", "stream", "videoPage"]) needed.add(`intel.kind.${k}`);
-    for (const r of ["sameLink", "sameFinalLink", "sameFile"]) needed.add(`intel.dup.${r}`);
+    for (const r of ["sameLink", "sameFinalLink", "sameFile", "sameChecksum", "changed", "fileMissing", "fileChanged"]) needed.add(`intel.dup.${r}`);
+    for (const sameResource of [true, false])
+      for (const savedAs of ["a (1).zip", null]) needed.add(nameLine({ ...base, nameConflict: { savedAs, sameResource } })!.key);
     for (const file of [en, fr, ar] as unknown as Record<string, string>[]) {
       expect([...needed].filter((k) => !(k in file))).toEqual([]);
     }
+  });
+});
+
+describe("destination conflicts", () => {
+  it("are told apart from duplicates and never claim the same contents", () => {
+    expect(nameLine(base)).toBeNull();
+    const other = nameLine({ ...base, nameConflict: { savedAs: "a (1).zip", sameResource: false } })!;
+    expect(other).toEqual({ key: "intel.name.taken", vars: { name: "a.zip", saved: "a (1).zip" } });
+    expect(en[other.key]).toContain("may differ");
+    expect(en[other.key]).toContain("nothing is replaced");
+    expect(nameLine({ ...base, nameConflict: { savedAs: "a (1).zip", sameResource: true } })!.key).toBe("intel.name.own");
+    expect(nameLine({ ...base, nameConflict: { savedAs: null, sameResource: false } })!.key).toBe("intel.name.takenNoAlt");
   });
 });

@@ -232,12 +232,20 @@ The read-only check before a download (full description: `docs/download-intellig
 
 * **`crates/download-manager/src/intelligence.rs`** holds the rules. They are pure: no I/O, the clock and the connection
   plan are passed in. `assess(Observed) -> AnalysisDto`, `expiring(url)`, `display_url(url)` and
-  `find_duplicate(url, info, known)`.
+  `find_duplicate(url, info, checksum, known)` (with a confidence, version comparison and `file_state`; see
+  `docs/smart-duplicate-detection.md`).
 * **`manager/intelligence.rs`** gathers the inputs:
   * `probe_quick` (`HEAD` + 1-byte range, no retry) under `ANALYSIS_TIMEOUT` = 20 s;
   * `fs4::available_space` on the nearest existing parent of `predicted_dir`;
   * `sysinfo::Disks` (`DiskRefreshKind::nothing()`, through `sysio::disk_for`), only for files ≥ 4 GiB;
-  * `store.list()` plus `store.history(500)`.
+  * `store.list()` plus `store.history(500)`;
+  * for a finished match, one `metadata` call on its file (inside the download folders only), and `name_conflict`:
+    whether the file name is taken in `predicted_dir` (a file, or an unfinished download's destination) and the
+    numbered name it would get (`downloader_core::numbered_name`, the engine's rule).
+* **`check_duplicate`** (Smart Duplicate Detection): the same matching for the Add bar, with no network request. The
+  link is prepared as `create_download` stores it (credentials split, share links made direct). It returns
+  `DuplicateDto | null`; the UI's `duplicates.ts` turns that into a prompt for each state. It is advisory: nothing
+  existing is changed, and the engine's `claim_name` still keeps every copy in its own file.
 * **`Downloader::connection_plan(size)`** is `planner::connection_limits` with the engine's current settings, so the
   recommended start is the engine's own; the adaptive controller still tunes it while the download runs.
 * **Confirmation dialog:** `add_pending` spawns `analyze`, keeps its `AbortHandle` in the entry (`take_pending`

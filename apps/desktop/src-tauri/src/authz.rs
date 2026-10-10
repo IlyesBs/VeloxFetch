@@ -46,6 +46,7 @@ pub enum Command {
     AddBatch,
     ReviewLink,
     AnalyzeLink,
+    CheckDuplicate,
     GetClipboardWatch,
     SetClipboardWatch,
     AnalyzeMedia,
@@ -93,7 +94,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 77] = [
+    pub const ALL: [Command; 78] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -128,6 +129,7 @@ impl Command {
         Command::AddBatch,
         Command::ReviewLink,
         Command::AnalyzeLink,
+        Command::CheckDuplicate,
         Command::GetClipboardWatch,
         Command::SetClipboardWatch,
         Command::AnalyzeMedia,
@@ -210,6 +212,7 @@ impl Command {
             Command::AddBatch => "add_batch",
             Command::ReviewLink => "review_link",
             Command::AnalyzeLink => "analyze_link",
+            Command::CheckDuplicate => "check_duplicate",
             Command::GetClipboardWatch => "get_clipboard_watch",
             Command::SetClipboardWatch => "set_clipboard_watch",
             Command::AnalyzeMedia => "analyze_media",
@@ -352,6 +355,7 @@ mod tests {
             Command::AddBatch,
             Command::ReviewLink,
             Command::AnalyzeLink,
+            Command::CheckDuplicate,
             Command::GetClipboardWatch,
             Command::SetClipboardWatch,
             Command::AnalyzeMedia,

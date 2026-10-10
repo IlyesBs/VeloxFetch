@@ -297,6 +297,12 @@ and were added with the same rules as everything else (threats 17 and 18 in `doc
 * **Show in folder / Open** for finished downloads and history lines: by id only; programs, scripts, shortcuts and web pages are only shown, never opened.
 * **Speed limits per kind of file** (Settings > Speed); a download without a category of its own shares the limit of its kind.
 * **Errors in plain words** (`download_manager::explain`), with the engine's message kept for the details view.
+* **Smart Duplicate Detection** (`check_duplicate`, main window only, read-only, no network): it answers with the file
+  name, ids, state, confidence and file state, never with the link, its query / signature, credentials or a path. A
+  match never deletes, cancels, pauses or overwrites anything; the prompt's actions are the existing commands with
+  their checks (`FileTarget` ids, download folders, programs never opened). A finished file is only looked at
+  (`metadata`) inside the download folders, and never read or hashed. A taken file name is a separate "name
+  conflict", never a duplicate. Details: `docs/smart-duplicate-detection.md`.
 * **Same file names**: a second download of `setup.exe` becomes `setup (1).exe`; two downloads of the same name running at
   once never share a partial file, and a file that appears under the name while downloading is never replaced.
   (Before, the partial file was shared and the final rename could replace an existing file: fixed, see `docs/testing.md`.)

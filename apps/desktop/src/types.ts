@@ -468,9 +468,27 @@ export interface Finding {
 export interface DuplicateMatch {
   /** null: only in the history (downloaded before, removed from the list since). */
   id: number | null;
+  /** The history line of a match that is only in the history (to open or show its file). */
+  historyId: number | null;
   status: DownloadStatus | null;
   filename: string;
-  reason: "sameLink" | "sameFinalLink" | "sameFile";
+  reason: "sameLink" | "sameFinalLink" | "sameFile" | "sameChecksum";
+  /** exact: proven the same version (or checksum); likely: same link, version not compared; possible: the server now describes another version. */
+  confidence: "exact" | "likely" | "possible";
+  /** The server (or the checksum) describes another version than the known download's. */
+  changed: boolean;
+  /** Completed matches only: is the finished file still there (never read, only its metadata). */
+  file: "present" | "missing" | "changed" | "unknown" | null;
+  /** The finished file is there and may be opened from the app (not a program or script). */
+  openable: boolean;
+}
+
+/** The file name is already taken in its folder: a destination conflict, not a duplicate. Nothing is replaced. */
+export interface NameConflict {
+  /** The name it will most likely be saved as instead. */
+  savedAs: string | null;
+  /** The name is the matched duplicate's own file (the same resource). */
+  sameResource: boolean;
 }
 
 export interface Analysis {
@@ -495,6 +513,7 @@ export interface Analysis {
   storage: StorageCheck;
   freeBytes: number | null;
   duplicate: DuplicateMatch | null;
+  nameConflict: NameConflict | null;
   health: Health;
   /** Most serious first. */
   findings: Finding[];

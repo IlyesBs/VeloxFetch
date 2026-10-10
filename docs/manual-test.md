@@ -314,3 +314,19 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 6. With the program running, switch modes on the card every few seconds: the download never stops, the window never
    flashes.
 
+## U. Smart Duplicate Detection (once per OS)
+1. Download a small document. Paste the same link and press Add: "You already downloaded this file" (or "appears to
+   have been downloaded already"), with Open file, Show in folder, View, Download again. Open works.
+2. Download again: a second copy `name (1).ext`; the first file is untouched.
+3. Paste the link with `#something` at the end, or the host in capitals: same prompt. Change a query value (`?v=2`):
+   no prompt.
+4. Start a large download, paste its link: "This file is already downloading" (View / Download another copy). Pause it,
+   paste again: "paused", Resume it resumes the same download (no new one in the list).
+5. Delete the finished file in the file manager, paste its link: "the file is no longer in its folder"; Open is not
+   offered.
+6. Remove a finished download from the list (keep the file), paste its link: still found (from the history); Open and
+   Show in folder work.
+7. Put a file of your own named `test.zip` in the Compressed folder. Add dialog > Check link on another link whose file
+   is `test.zip`: the "File name" row says another file of that name is there (contents may differ), and gives the new
+   name. Download: saved as `test (1).zip`; your file is untouched.
+8. Restart the app: steps 1 and 6 still find the downloads.

@@ -186,6 +186,35 @@ pub enum DuplicateReason {
     SameFinalLink,
     /// Same site, same strong `ETag` and same size: the same file under another link (signed links...).
     SameFile,
+    /// The checksum given for this download is the one a known download has: the same content, whatever the link.
+    SameChecksum,
+}
+
+/// How sure the match is. No match at all is no [`DuplicateDto`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Confidence {
+    /// The same link (or redirect target) and the server's answer proves the same version, or the same checksum.
+    Exact,
+    /// The same link but its version could not be compared, or the same file proven by a strong `ETag` and size.
+    Likely,
+    /// The same link, but the server now describes another version (another `ETag`, size or date) or the checksum
+    /// differs: what was downloaded before may not be what the link gives now.
+    Possible,
+}
+
+/// The finished file of a completed match, as found on disk (a quick look at its metadata, never its content).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileState {
+    /// There, with the size it was saved with.
+    Present,
+    /// Moved or deleted since.
+    Missing,
+    /// A file is there but its size is not the one saved: changed or replaced since.
+    Changed,
+    /// Its metadata could not be read (no access, outside the download folders...).
+    Unknown,
 }
 
 /// The known download this one repeats. A file name alone never makes a duplicate.
@@ -194,9 +223,29 @@ pub enum DuplicateReason {
 pub struct DuplicateDto {
     /// `None`: only in the history (downloaded before, removed from the list since).
     pub id: Option<i64>,
+    /// The history line of a match that is only in the history (to open or show its file).
+    pub history_id: Option<i64>,
     pub status: Option<DownloadStatus>,
     pub filename: String,
     pub reason: DuplicateReason,
+    pub confidence: Confidence,
+    /// The server (or the checksum) describes another version than the known download's.
+    pub changed: bool,
+    /// Completed matches only: whether the finished file is still there.
+    pub file: Option<FileState>,
+    /// The finished file is there and may be opened from the app (not a program or script).
+    pub openable: bool,
+}
+
+/// The file name this download would get is already used in its folder (by a file or by another download).
+/// Nothing is ever replaced: the download is saved under the next free name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NameConflict {
+    /// The name it will most likely be saved as (`name (1).ext`...); the engine decides for good when it starts.
+    pub saved_as: Option<String>,
+    /// The name is the matched duplicate's own file (the same resource), not some other file of that name.
+    pub same_resource: bool,
 }
 
 /// The pre-download analysis shown before a download starts.
@@ -228,6 +277,8 @@ pub struct AnalysisDto {
     pub storage: StorageCheck,
     pub free_bytes: Option<u64>,
     pub duplicate: Option<DuplicateDto>,
+    /// The file name is already taken in the destination folder (a destination conflict, not a duplicate).
+    pub name_conflict: Option<NameConflict>,
     pub health: Health,
     /// Most serious first.
     pub findings: Vec<Finding>,
@@ -268,6 +319,7 @@ pub struct Observed<'a> {
     pub expected_name: &'a str,
     pub disk: DiskObservation,
     pub duplicate: Option<DuplicateDto>,
+    pub name_conflict: Option<NameConflict>,
     pub now_ms: u64,
 }
 
@@ -478,6 +530,7 @@ pub fn assess(o: Observed<'_>, plan: impl Fn(u64) -> (usize, usize)) -> Analysis
         storage,
         free_bytes,
         duplicate: o.duplicate,
+        name_conflict: o.name_conflict,
         health,
         findings,
         error_code,
@@ -608,24 +661,61 @@ pub fn display_url(u: &Url) -> String {
 }
 
 /// What the app knows of a download, for [`find_duplicate`].
+#[derive(Debug, Clone)]
 pub struct Known {
     pub id: Option<i64>,
+    /// The history line, for one that is only in the history.
+    pub history_id: Option<i64>,
     pub url: String,
     pub filename: String,
     pub status: Option<DownloadStatus>,
     pub etag: Option<String>,
+    pub last_modified: Option<String>,
     pub size: Option<u64>,
+    /// The checksum the download was given (normalised `algo:hex`), verified once it completed.
+    pub checksum: Option<String>,
+    /// Where its file is (or will be): only read by the manager, to look at the finished file. Never sent.
+    pub destination: Option<std::path::PathBuf>,
 }
 
-/// The known download (or history entry) this link repeats: same link, same final link, or the same file
-/// proven by a strong `ETag` and size on the same site. A file name alone never matches. Running or waiting
-/// downloads come first, then finished ones, then the history.
-pub fn find_duplicate(url: &Url, info: Option<&ResourceInfo>, known: &[Known]) -> Option<DuplicateDto> {
+/// A strong `ETag` (a weak one, `W/"..."`, only says "about the same", so it proves nothing).
+fn strong_etag(e: &str) -> bool {
+    !e.starts_with("W/") && e.len() > 2
+}
+
+/// Whether the server's answer now describes the known download's version: `Some(true)` proven the same
+/// (strong `ETag`, or size and date), `Some(false)` proven another one (another strong `ETag`, size or date),
+/// `None` when nothing can be compared.
+fn same_version(info: &ResourceInfo, k: &Known) -> Option<bool> {
+    let etags = (info.etag.as_deref().filter(|e| strong_etag(e)), k.etag.as_deref().filter(|e| strong_etag(e)));
+    if let (Some(a), Some(b)) = etags {
+        return Some(a == b);
+    }
+    let sizes = (info.content_length, k.size);
+    if let (Some(a), Some(b)) = sizes {
+        if a != b {
+            return Some(false);
+        }
+    }
+    let dates = (info.last_modified.as_deref(), k.last_modified.as_deref());
+    match (sizes, dates) {
+        (_, (Some(a), Some(b))) if a != b => Some(false),
+        ((Some(_), Some(_)), (Some(_), Some(_))) => Some(true),
+        _ => None,
+    }
+}
+
+/// The known download (or history entry) this link repeats, with how sure that is. Evidence, strongest first:
+/// the same checksum (the same content, whatever the link); the same link or redirect target, its version compared
+/// with what the server says now (`ETag`, size, date); the same file proven by a strong `ETag` and size on the same
+/// site under another link. A file name alone never matches, and a cancelled download never counts. Running or
+/// waiting downloads come first, then finished ones, failed ones, then the history; the surer match first among
+/// equals. `checksum` is the normalised one given for the new download, if any.
+pub fn find_duplicate(url: &Url, info: Option<&ResourceInfo>, checksum: Option<&str>, known: &[Known]) -> Option<DuplicateDto> {
     let link = crate::batch::normalize(url);
     let final_link = info.and_then(|i| Url::parse(&i.final_url).ok()).map(|u| crate::batch::normalize(&u));
-    let strong = |e: &str| !e.starts_with("W/") && e.len() > 2;
     let file_key = info.and_then(|i| {
-        let e = i.etag.as_deref().filter(|e| strong(e))?;
+        let e = i.etag.as_deref().filter(|e| strong_etag(e))?;
         Some((e.to_string(), i.content_length?))
     });
     let rank = |s: Option<DownloadStatus>| match s {
@@ -640,23 +730,71 @@ pub fn find_duplicate(url: &Url, info: Option<&ResourceInfo>, known: &[Known]) -
         .filter_map(|k| {
             let ku = Url::parse(&k.url).ok()?;
             let kl = crate::batch::normalize(&ku);
-            let reason = if kl == link {
-                DuplicateReason::SameLink
+            let sums = checksum.zip(k.checksum.as_deref());
+            let link_reason = if kl == link {
+                Some(DuplicateReason::SameLink)
             } else if final_link.as_deref() == Some(kl.as_str()) {
-                DuplicateReason::SameFinalLink
-            } else if let Some((etag, size)) = &file_key {
-                let same = k.etag.as_deref() == Some(etag) && k.size == Some(*size) && site(&ku) == site(url);
-                if !same {
-                    return None;
-                }
-                DuplicateReason::SameFile
+                Some(DuplicateReason::SameFinalLink)
             } else {
-                return None;
+                None
             };
-            Some((rank(k.status), DuplicateDto { id: k.id, status: k.status, filename: k.filename.clone(), reason }))
+            let (reason, confidence, changed) = match (sums, link_reason) {
+                (Some((a, b)), _) if a.eq_ignore_ascii_case(b) => {
+                    (link_reason.unwrap_or(DuplicateReason::SameChecksum), Confidence::Exact, false)
+                }
+                // The same link, but another content is expected now.
+                (Some(_), Some(r)) => (r, Confidence::Possible, true),
+                (_, Some(r)) => match info.and_then(|i| same_version(i, k)) {
+                    Some(true) => (r, Confidence::Exact, false),
+                    Some(false) => (r, Confidence::Possible, true),
+                    None => (r, Confidence::Likely, false),
+                },
+                (_, None) => {
+                    let (etag, size) = file_key.as_ref()?;
+                    let same = k.etag.as_deref() == Some(etag.as_str()) && k.size == Some(*size) && site(&ku) == site(url);
+                    if !same || sums.is_some() {
+                        return None; // (another checksum: not the same content, whatever the ETag says)
+                    }
+                    (DuplicateReason::SameFile, Confidence::Likely, false)
+                }
+            };
+            let dto = DuplicateDto {
+                id: k.id,
+                history_id: k.history_id,
+                status: k.status,
+                filename: k.filename.clone(),
+                reason,
+                confidence,
+                changed,
+                file: None,
+                openable: false,
+            };
+            Some(((rank(k.status), confidence), dto))
         })
         .min_by_key(|(r, _)| *r)
         .map(|(_, d)| d)
+}
+
+/// What a completed match's file looks like now, from its metadata (`None`: it could not be read) and the size
+/// it was saved with.
+pub fn file_state(meta: Option<std::io::Result<u64>>, saved: Option<u64>) -> FileState {
+    match meta {
+        None => FileState::Unknown,
+        Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => FileState::Missing,
+        Some(Err(_)) => FileState::Unknown,
+        Some(Ok(len)) if saved.is_some_and(|s| s != len) => FileState::Changed,
+        Some(Ok(_)) => FileState::Present,
+    }
+}
+
+/// Request to look for a duplicate of a link about to be added (the Add bar / dialog). Read-only: no network
+/// request, only the downloads and history the app already has and a quick look at a finished file.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheckDuplicate {
+    pub url: String,
+    /// The checksum the user gave for the new download, if any.
+    pub checksum: Option<String>,
 }
 
 /// Request to check a link from the Add dialog. `url: None` cancels a check still running.
@@ -703,6 +841,7 @@ mod tests {
                 expected_name: "a.zip",
                 disk: DiskObservation { free, fat: false },
                 duplicate: None,
+                name_conflict: None,
                 now_ms: 1_700_000_000_000,
             },
             |s| downloader_core::planner::connection_limits(s, 16, 256 * 1024),
@@ -789,6 +928,7 @@ mod tests {
                 expected_name: "a.zip",
                 disk: DiskObservation { free: Some(1 << 40), fat: true },
                 duplicate: None,
+                name_conflict: None,
                 now_ms: 0,
             },
             |_| (1, 1),
@@ -842,6 +982,7 @@ mod tests {
             expected_name: "report.pdf",
             disk: DiskObservation::default(),
             duplicate: None,
+            name_conflict: None,
             now_ms: 0,
         };
         assert_eq!(assess(o(false), |_| (1, 1)).access, Access::BrowserSessionRequired);
@@ -934,20 +1075,31 @@ mod tests {
     }
 
     fn known(id: i64, u: &str, name: &str, status: DownloadStatus, etag: Option<&str>, size: Option<u64>) -> Known {
-        Known { id: Some(id), url: u.into(), filename: name.into(), status: Some(status), etag: etag.map(str::to_string), size }
+        Known {
+            id: Some(id),
+            history_id: None,
+            url: u.into(),
+            filename: name.into(),
+            status: Some(status),
+            etag: etag.map(str::to_string),
+            last_modified: None,
+            size,
+            checksum: None,
+            destination: None,
+        }
     }
 
     #[test]
     fn duplicates_need_more_than_a_file_name() {
         let u = url("https://dl.example.com/a.zip");
         let list = [known(1, "https://other.example.org/a.zip", "a.zip", DownloadStatus::Completed, None, None)];
-        assert_eq!(find_duplicate(&u, None, &list), None, "same name, different link");
+        assert_eq!(find_duplicate(&u, None, None, &list), None, "same name, different link");
         let list = [
             known(1, "https://dl.example.com/a.zip#part", "a.zip", DownloadStatus::Completed, None, None),
             known(2, "https://dl.example.com/a.zip", "a.zip", DownloadStatus::Paused, None, None),
             known(3, "https://dl.example.com/a.zip", "a.zip", DownloadStatus::Cancelled, None, None),
         ];
-        let d = find_duplicate(&u, None, &list).unwrap();
+        let d = find_duplicate(&u, None, None, &list).unwrap();
         assert_eq!((d.id, d.reason), (Some(2), DuplicateReason::SameLink), "the paused one comes first, cancelled never");
     }
 
@@ -956,19 +1108,126 @@ mod tests {
         let u = url("https://dl.example.com/a.zip?sig=2");
         let i = info(|i| i.final_url = "https://dl.example.com/a.zip?sig=2".into());
         let list = [known(5, "https://dl.example.com/a.zip?sig=1", "a.zip", DownloadStatus::Completed, Some("\"abc\""), Some(4 << 30))];
-        assert_eq!(find_duplicate(&u, Some(&i), &list).unwrap().reason, DuplicateReason::SameFile);
+        assert_eq!(find_duplicate(&u, Some(&i), None, &list).unwrap().reason, DuplicateReason::SameFile);
         let other_size = [known(5, "https://dl.example.com/a.zip?sig=1", "a.zip", DownloadStatus::Completed, Some("\"abc\""), Some(1))];
-        assert_eq!(find_duplicate(&u, Some(&i), &other_size), None);
+        assert_eq!(find_duplicate(&u, Some(&i), None, &other_size), None);
         let weak = info(|i| i.etag = Some("W/\"abc\"".into()));
         let list_weak = [known(5, "https://dl.example.com/b.zip", "a.zip", DownloadStatus::Completed, Some("W/\"abc\""), Some(4 << 30))];
-        assert_eq!(find_duplicate(&u, Some(&weak), &list_weak), None, "a weak ETag proves nothing");
+        assert_eq!(find_duplicate(&u, Some(&weak), None, &list_weak), None, "a weak ETag proves nothing");
         // Redirected to a link the list already has.
         let r = info(|i| i.final_url = "https://cdn.example.net/a.zip".into());
         let list = [known(7, "https://cdn.example.net/a.zip", "a.zip", DownloadStatus::Queued, None, None)];
-        assert_eq!(find_duplicate(&url("https://example.com/get"), Some(&r), &list).unwrap().reason, DuplicateReason::SameFinalLink);
+        assert_eq!(find_duplicate(&url("https://example.com/get"), Some(&r), None, &list).unwrap().reason, DuplicateReason::SameFinalLink);
         // Only in the history.
-        let h = [Known { id: None, url: "https://example.com/get".into(), filename: "a.zip".into(), status: None, etag: None, size: None }];
-        let d = find_duplicate(&url("https://example.com/get"), None, &h).unwrap();
-        assert_eq!((d.id, d.status), (None, None));
+        let h = [Known {
+            id: None,
+            history_id: Some(9),
+            status: None,
+            ..known(0, "https://example.com/get", "a.zip", DownloadStatus::Completed, None, None)
+        }];
+        let d = find_duplicate(&url("https://example.com/get"), None, None, &h).unwrap();
+        assert_eq!((d.id, d.history_id, d.status), (None, Some(9), None));
+    }
+
+    #[test]
+    fn links_are_normalised_conservatively() {
+        let list = [known(1, "https://dl.example.com/a.zip?v=1", "a.zip", DownloadStatus::Completed, None, None)];
+        // Host case, default port and a fragment do not change the resource.
+        for same in ["https://DL.Example.COM/a.zip?v=1", "https://dl.example.com:443/a.zip?v=1", "https://dl.example.com/a.zip?v=1#top"] {
+            let d = find_duplicate(&url(same), None, None, &list).unwrap_or_else(|| panic!("{same}"));
+            assert_eq!((d.reason, d.confidence), (DuplicateReason::SameLink, Confidence::Likely), "{same}");
+        }
+        // Another query, another path, another scheme or port: maybe another resource, never matched by the link.
+        for other in [
+            "https://dl.example.com/a.zip?v=2",
+            "https://dl.example.com/a.zip",
+            "https://dl.example.com/b/a.zip?v=1",
+            "http://dl.example.com/a.zip?v=1",
+            "https://dl.example.com:8443/a.zip?v=1",
+            "https://dl.example.com/A.zip?v=1",
+        ] {
+            assert_eq!(find_duplicate(&url(other), None, None, &list), None, "{other}");
+        }
+        // A signed link with another signature is not the same link either (only a strong ETag and size prove it).
+        let signed = [known(2, "https://dl.example.com/a.zip?X-Amz-Signature=aaa", "a.zip", DownloadStatus::Completed, None, None)];
+        assert_eq!(find_duplicate(&url("https://dl.example.com/a.zip?X-Amz-Signature=bbb"), None, None, &signed), None);
+        // A malformed stored link is skipped, not an error.
+        let bad = [known(3, "not a link", "a.zip", DownloadStatus::Completed, None, None)];
+        assert_eq!(find_duplicate(&url("https://dl.example.com/a.zip"), None, None, &bad), None);
+    }
+
+    #[test]
+    fn the_version_decides_how_sure_a_same_link_match_is() {
+        let u = url("https://dl.example.com/a.zip");
+        let i = info(|_| {}); // strong "abc", 4 GiB, no date
+        let k = |etag: Option<&str>, size: Option<u64>, date: Option<&str>| Known {
+            last_modified: date.map(str::to_string),
+            ..known(1, "https://dl.example.com/a.zip", "a.zip", DownloadStatus::Completed, etag, size)
+        };
+        let got = |k: Known, i: &ResourceInfo| {
+            let d = find_duplicate(&u, Some(i), None, &[k]).unwrap();
+            (d.confidence, d.changed)
+        };
+        assert_eq!(got(k(Some("\"abc\""), Some(4 << 30), None), &i), (Confidence::Exact, false), "same strong ETag");
+        assert_eq!(got(k(Some("\"new\""), Some(4 << 30), None), &i), (Confidence::Possible, true), "the ETag changed");
+        assert_eq!(got(k(None, Some(1), None), &i), (Confidence::Possible, true), "the size changed");
+        assert_eq!(got(k(None, Some(4 << 30), None), &i), (Confidence::Likely, false), "same size only: not proof");
+        assert_eq!(got(k(None, None, None), &i), (Confidence::Likely, false), "nothing known");
+        let dated = info(|i| {
+            i.etag = None;
+            i.last_modified = Some("Tue, 01 Oct 2026 10:00:00 GMT".into());
+        });
+        let old = Some("Mon, 01 Sep 2026 10:00:00 GMT");
+        assert_eq!(got(k(None, Some(4 << 30), old), &dated), (Confidence::Possible, true), "another date");
+        let same = Some("Tue, 01 Oct 2026 10:00:00 GMT");
+        assert_eq!(got(k(None, Some(4 << 30), same), &dated), (Confidence::Exact, false), "same size and date");
+        // Without the server's answer (the Add bar asks nothing), a same-link match is likely, never exact.
+        let d = find_duplicate(&u, None, None, &[k(Some("\"abc\""), Some(4 << 30), None)]).unwrap();
+        assert_eq!((d.confidence, d.changed), (Confidence::Likely, false));
+    }
+
+    #[test]
+    fn checksums_prove_the_content() {
+        let sum = |s: &str| Known {
+            checksum: Some(s.into()),
+            ..known(1, "https://a.example.com/x.iso", "x.iso", DownloadStatus::Completed, None, None)
+        };
+        // The same checksum under a link of another site: the same content.
+        let d = find_duplicate(&url("https://mirror.example.net/x.iso"), None, Some("sha256:AB12"), &[sum("sha256:ab12")]).unwrap();
+        assert_eq!((d.reason, d.confidence), (DuplicateReason::SameChecksum, Confidence::Exact));
+        // The same link but another checksum: another content is expected now.
+        let d = find_duplicate(&url("https://a.example.com/x.iso"), None, Some("sha256:ffff"), &[sum("sha256:ab12")]).unwrap();
+        assert_eq!((d.reason, d.confidence, d.changed), (DuplicateReason::SameLink, Confidence::Possible, true));
+        // Another checksum and another link: nothing, even with the same name.
+        assert_eq!(find_duplicate(&url("https://b.example.com/x.iso"), None, Some("sha256:ffff"), &[sum("sha256:ab12")]), None);
+    }
+
+    #[test]
+    fn running_matches_and_surer_matches_come_first() {
+        let u = url("https://dl.example.com/a.zip");
+        let i = info(|_| {});
+        let list = [
+            known(1, "https://dl.example.com/a.zip", "a.zip", DownloadStatus::Completed, Some("\"old\""), None),
+            known(2, "https://dl.example.com/a.zip", "a (1).zip", DownloadStatus::Completed, Some("\"abc\""), None),
+            known(3, "https://dl.example.com/a.zip", "a (2).zip", DownloadStatus::Failed, None, None),
+        ];
+        assert_eq!(find_duplicate(&u, Some(&i), None, &list).unwrap().id, Some(2), "the copy of the current version");
+        let mut with_active = list.to_vec();
+        with_active.push(known(4, "https://dl.example.com/a.zip", "a (3).zip", DownloadStatus::Downloading, None, None));
+        assert_eq!(find_duplicate(&u, Some(&i), None, &with_active).unwrap().id, Some(4), "the running one");
+        let failed = [known(3, "https://dl.example.com/a.zip", "a.zip", DownloadStatus::Failed, None, None)];
+        let d = find_duplicate(&u, None, None, &failed).unwrap();
+        assert_eq!((d.status, d.file), (Some(DownloadStatus::Failed), None), "a failed one is told as failed, no file claimed");
+    }
+
+    #[test]
+    fn a_finished_file_is_told_as_it_is_on_disk() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(file_state(Some(Ok(10)), Some(10)), FileState::Present);
+        assert_eq!(file_state(Some(Ok(10)), None), FileState::Present);
+        assert_eq!(file_state(Some(Ok(9)), Some(10)), FileState::Changed);
+        assert_eq!(file_state(Some(Err(Error::from(ErrorKind::NotFound))), Some(10)), FileState::Missing);
+        assert_eq!(file_state(Some(Err(Error::from(ErrorKind::PermissionDenied))), Some(10)), FileState::Unknown);
+        assert_eq!(file_state(None, Some(10)), FileState::Unknown);
     }
 }

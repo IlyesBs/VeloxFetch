@@ -82,6 +82,26 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
   the Doctor never retries or changes anything by itself.
 - **Sign in:** sites that need a login (HTTP Basic, cookies from the browser) are handled.
 
+### Before a download: Smart Duplicate Detection
+Details: `docs/smart-duplicate-detection.md`.
+
+- **When:** pressing Add (bar or dialog) asks Rust first (`check_duplicate`: no network, the list, the history and
+  a quick look at a finished file).
+- **Evidence, strongest first:** the same checksum; the same link (conservatively normalised: host case, default
+  port and `#fragment` only; queries and signatures kept) with its version compared when the server was asked
+  (ETag / size / date); the same file under another link (strong ETag and size, same site). Never the name alone.
+- **Confidence:** `exact`, `likely` or `possible` (the server's file changed since).
+- **States:**
+  - running: View / Download another copy;
+  - paused: Resume;
+  - failed: Try again (never taken for a file);
+  - finished: Open (only if safe) / Show in folder, or "no longer in its folder" / "changed since";
+  - history-only: through its history line.
+- **Name conflicts:** a taken file name is shown in the analysis as its own row ("another file named X, contents may
+  differ, saved as X (1)"), never as a duplicate. The engine never overwrites (`claim_name`).
+- **Advisory:** nothing existing is cancelled, replaced or deleted. Downloading another copy always works, and two
+  identical requests at once get two files.
+
 ### Before a download: Download Intelligence
 Details: `docs/download-intelligence.md`.
 
@@ -433,7 +453,8 @@ More: `docs/architecture.md`.
   - the downloads and history already known.
 - **Rules** (`intelligence.rs`, pure): kind, resume (4 levels, a validator required for "supported"), strategy
   (`Downloader::connection_plan`, the engine's own rule), sign-in, temporary links, storage, duplicates (never by
-  name alone), findings and a health label.
+  name alone; with a confidence and version comparison), a taken file name (`nameConflict`), findings and a health
+  label.
 - **Where it shows:** `PendingDto.analysis` (confirmation dialog), and the `analyze_link` command (Add dialog, main
   window only).
 - **Cancelling:** answering the dialog, a new check, or `url: null` cancels the check.
@@ -566,7 +587,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 16 | Windows | ✅ | NSIS / MSI, protocol handler, file associations, start with Windows, **tray**, notifications; Authenticode signing; safe install folder and DLL search order |
 | 17 | Linux | ✅ | AppImage / DEB (+ RPM); tray and notifications on different desktops; XDG; sleep APIs |
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
-| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions) |
+| + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything) |
 | + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux (private local address); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing) |
 | **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
@@ -669,6 +690,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Interface smoothness and start-up | `docs/ui-performance.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
 | Download Intelligence | `docs/download-intelligence.md` |
+| Smart Duplicate Detection | `docs/smart-duplicate-detection.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |

@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem";
 import type {
   Analysis,
+  DuplicateMatch,
   PreviewInfo,
   SmartThrottle,
   VideoTools,
@@ -103,6 +104,8 @@ export const api = {
   reviewLink: (url: string) => call<unknown>("review_link", { url }),
   /** Download Intelligence for the Add dialog: a read-only check of a link. `null` cancels the check that runs. */
   analyzeLink: (url: string | null) => call<Analysis | null>("analyze_link", { request: { url } }),
+  /** A download the app already has for this link (or checksum): read-only, no network. */
+  checkDuplicate: (url: string, checksum?: string) => call<DuplicateMatch | null>("check_duplicate", { request: { url, ...(checksum && { checksum }) } }),
   getClipboardWatch: () => call<ClipboardState>("get_clipboard_watch"),
   setClipboardWatch: (enabled: boolean) => call<ClipboardState>("set_clipboard_watch", { enabled }),
   analyzeMedia: (url: string, pending?: number) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null }),

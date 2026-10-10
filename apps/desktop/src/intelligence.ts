@@ -70,6 +70,15 @@ export function storageLine(a: Analysis): Line {
   return { key: `intel.storage.${a.storage}`, vars: { free: formatBytes(a.freeBytes), size: formatBytes(a.size) } };
 }
 
+/** The destination conflict, if the file name is taken in its folder (never a claim that the contents are the same). */
+export function nameLine(a: Analysis): Line | null {
+  const c = a.nameConflict;
+  if (!c) return null;
+  const vars = { name: a.filename, saved: c.savedAs ?? "" };
+  if (c.sameResource) return { key: c.savedAs ? "intel.name.own" : "intel.name.ownNoAlt", vars };
+  return { key: c.savedAs ? "intel.name.taken" : "intel.name.takenNoAlt", vars };
+}
+
 export const HEALTH_CLASS: Record<Health, string> = {
   good: "bg-ok/15 text-ok",
   caution: "bg-warn/15 text-warn",

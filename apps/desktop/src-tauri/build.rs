@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "add_batch",
     "review_link",
     "analyze_link",
+    "check_duplicate",
     "get_clipboard_watch",
     "set_clipboard_watch",
     "analyze_media",
