@@ -306,11 +306,11 @@ command!(get_smart_throttle, GetSmartThrottle, () -> SmartThrottleDto, |m| async
 command!(set_smart_throttle, SetSmartThrottle, (request: SetSmartThrottle) -> SmartThrottleDto, |m| m.set_smart_throttle(request));
 command!(set_preview_mode, SetPreviewMode, (id: i64, enabled: bool) -> PreviewDto, |m| m.set_preview_mode(id, enabled));
 command!(get_preview_info, GetPreviewInfo, (id: i64) -> PreviewDto, |m| m.preview_info(id));
-// Where the player reads previews from, when not the custom protocol (Linux: see `preview_server::loopback`).
+// Where the player reads previews from, when not the custom protocol (Linux and macOS: see `preview_server::loopback`).
 command!(get_preview_base, GetPreviewBase, () -> Option<String>, |_m| async {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let base = preview_server::loopback::base();
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let base = None;
     Ok::<_, download_manager::ManagerError>(base)
 });
@@ -702,10 +702,11 @@ pub fn run() {
         std::process::exit(install_video_tools_cli());
     }
     let shutting_down = std::sync::Arc::new(AtomicBool::new(false));
-    #[allow(unused_mut)] // changed on Linux only
+    #[allow(unused_mut)] // changed on Linux and macOS only
     let mut context = tauri::generate_context!();
-    // Linux: previews are read from a private local address (see preview_server.rs); its exact origin joins media-src.
-    #[cfg(target_os = "linux")]
+    // Linux and macOS: previews are read from a private local address (see preview_server.rs); its exact origin joins
+    // media-src. (Their web views' players cannot stream a file that is still growing through the custom protocol.)
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(origin) = preview_server::loopback::reserve() {
         preview_server::loopback::allow_in_csp(context.config_mut(), &origin);
     }
@@ -792,7 +793,7 @@ pub fn run() {
             let test_source = dev_only("VELOX_CLIPBOARD_FILE").is_some();
             let clipboard = clipboard::ClipboardWatch::start(app.handle().clone(), manager.clone(), source, test_source);
             smart_throttle::spawn(manager.clone());
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             tauri::async_runtime::spawn(preview_server::loopback::start(manager.clone()));
             if fetch_tools {
                 // Whatever the installer could not get (no internet then, a source down) is fetched right after

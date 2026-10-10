@@ -10,7 +10,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
-use crate::adaptive::{AdaptiveConfig, AdaptiveController, AdaptiveGate, Sample};
+use crate::adaptive::{AdaptiveConfig, AdaptiveController, AdaptiveGate, GatePermit, Sample};
 use crate::disk::{self, PumpParams};
 use crate::error::{DownloadError, Result};
 use crate::filename::{choose_filename, sanitize_filename, web_page_instead_of_file};
@@ -1282,15 +1282,27 @@ impl Downloader {
                                 // while backing off between retries: otherwise throttled segments would keep
                                 // "occupying" slots and lowering the limit could not take effect.
                                 // (Segments start in order; the gate size adapts live.)
+                                // A slot kept from this part's previous request (the next short request under a speed
+                                // limit): it does not queue again behind every other part. Queuing again put the start
+                                // of a video that is being watched behind the middle of the file.
+                                let mut kept: Option<GatePermit> = None;
                                 'again: loop {
-                                    let _permit = loop {
+                                    let reused = match kept.take() {
+                                        // Not one too many now, and nobody took the part meanwhile.
+                                        Some(p) if !p.give_way() && claims.try_claim(id) => Some(p),
+                                        _ => None,
+                                    };
+                                    if let Some(p) = &reused {
+                                        p.rest().await;
+                                    }
+                                    let _permit = if let Some(p) = reused { p } else { loop {
                                         if !in_turn {
                                             // Part of another connection's run: wait until that one is done with it.
                                             claims.wait_free(id, group).await?;
                                         }
                                         let p = tokio::select! {
                                             _ = group.cancelled() => return Err(DownloadError::Cancelled),
-                                            p = async { if in_turn { gate.acquire_in_turn(turn).await } else { gate.acquire().await } } => p,
+                                            p = async { if in_turn { gate.acquire_in_turn(turn).await } else { gate.acquire_ranked(turn).await } } => p,
                                         };
                                         in_turn = false;
                                         if progress.segment(id).is_some_and(|s| s.is_complete()) {
@@ -1299,7 +1311,7 @@ impl Downloader {
                                         if claims.try_claim(id) {
                                             break p;
                                         }
-                                    };
+                                    } };
                                     let mut run = vec![Claim::new(claims, id)];
                                     // Always continue from what is actually on disk for this segment.
                                     let cur = progress.segment(id).ok_or_else(|| DownloadError::Internal("missing segment".into()))?;
@@ -1383,6 +1395,10 @@ impl Downloader {
                                             Ok((_, true)) => {
                                                 progress.set_status(seg, SegmentStatus::Pending);
                                                 if i == 0 {
+                                                    // Stopped to switch to short requests (not to leave): the slot stays.
+                                                    if !_permit.is_leaving() {
+                                                        kept = Some(_permit);
+                                                    }
                                                     continue 'again;
                                                 }
                                                 break;
@@ -1408,6 +1424,7 @@ impl Downloader {
                                             // A short request (under a speed limit) got its share: the next one goes on.
                                             None if progress.segment(seg).is_some_and(|s| !s.is_complete()) => {
                                                 progress.set_status(seg, SegmentStatus::Pending);
+                                                kept = Some(_permit);
                                                 continue 'again;
                                             }
                                             // Done: the connection goes on with the next part (counted once, not twice).

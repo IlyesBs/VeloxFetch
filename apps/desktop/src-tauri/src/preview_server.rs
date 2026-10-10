@@ -1,7 +1,7 @@
 //! Live preview over a Tauri v2 asynchronous custom protocol:
 //!
 //! ```text
-//! <video src="http://velox-preview.localhost/12">   (Windows; velox-preview://localhost/12 on macOS / Linux)
+//! <video src="http://velox-preview.localhost/12">   (Windows; Linux and macOS: the private address below)
 //!     -> handler (this file): main window only, id only, GET / HEAD only
 //!     -> DownloadManager::read_preview(12, Range)   (only written bytes of an audio / video download)
 //!     -> 206 Partial Content + Content-Range, or an error status
@@ -16,6 +16,16 @@
 //! `read_preview` (only written bytes of audio / video). The page learns the address with `get_preview_base`. The port
 //! is taken before the window is built and that exact origin is added to the CSP's `media-src` (no wildcard): `<video>`
 //! / `<audio>` may use it, scripts still cannot (`connect-src` unchanged).
+//!
+//! macOS: WKWebView's player (AVFoundation) asks for exact byte ranges and needs a file that is still growing to be
+//! streamed as one answer of the full length asked for. A custom protocol's answer is a single finished body, so a
+//! downloading video stopped after its first part. macOS uses the same private address as Linux (loopback addresses
+//! are outside App Transport Security). Windows (WebView2) plays from the custom protocol and is unchanged.
+//!
+//! A download still being written is answered like an ordinary web server serving a growing file: the headers at
+//! once (full length, `Content-Range`), then the bytes as the download writes them, also when the player asks for a
+//! part the download has not reached yet. (Answering 503 there made WebKit stop the preview for good: "R2: Received
+//! 503 HTTP error code".)
 
 use std::borrow::Cow;
 
@@ -111,8 +121,8 @@ async fn answer(
     }
 }
 
-/// Linux: the private address the media player can read (see the top of this file).
-#[cfg(target_os = "linux")]
+/// Linux and macOS: the private address the media player can read (see the top of this file).
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod loopback {
     use std::io::Read;
     use std::sync::OnceLock;
@@ -323,12 +333,14 @@ pub mod loopback {
     /// An error is answered as the custom protocol does.
     async fn stream(sock: &mut TcpStream, manager: &download_manager::DownloadManager, asked: Asked) -> std::io::Result<()> {
         let target = asked.target;
-        let read = |range: String| async move {
-            match target {
-                Target::Download(id) => manager.read_preview(id, Some(&range)).await,
-                Target::Media(id) => manager.read_media_preview(id, Some(&range)).await,
+        // A download still being written: the headers at once, then the bytes as they are written, even when the
+        // first byte asked for is not there yet. (Waiting for it and then answering 503 made WebKit's player stop the
+        // preview for good when it asked for the next part ahead of the download.)
+        if let Target::Download(id) = target {
+            if let Some(h) = manager.preview_head(id, asked.range.as_deref()).await.filter(|h| h.active) {
+                return stream_growing(sock, manager, id, &asked, h).await;
             }
-        };
+        }
         let first = answer(manager, asked.target, asked.range.as_deref(), asked.head).await;
         let known = first.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(content_range);
         let Some((start, got_to, total)) = known.filter(|_| first.status() == StatusCode::PARTIAL_CONTENT) else {
@@ -365,12 +377,56 @@ pub mod loopback {
         let first_body = first.body();
         bytes.extend_from_slice(&first_body[..first_body.len().min((end - start + 1) as usize)]);
         sock.write_all(&bytes).await?;
-        let mut at = got_to + 1;
+        pump(sock, manager, target, got_to + 1, end, total.is_some()).await
+    }
+
+    /// The answer for a download still being written (see [`stream`]): like an ordinary web server serving a growing
+    /// file, the full length asked for, then the bytes as they are written.
+    async fn stream_growing(
+        sock: &mut TcpStream,
+        manager: &download_manager::DownloadManager,
+        id: i64,
+        asked: &Asked,
+        h: download_manager::PreviewHead,
+    ) -> std::io::Result<()> {
+        let end = requested_end(asked.range.as_deref(), h.total).max(h.start);
+        let partial = asked.range.is_some();
+        let mut b = Response::builder()
+            .status(if partial { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK })
+            .header(header::CONTENT_TYPE, h.content_type)
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CACHE_CONTROL, "no-store")
+            .header("X-Content-Type-Options", "nosniff")
+            .header(header::CONTENT_SECURITY_POLICY, "default-src 'none'")
+            .header(header::CONTENT_LENGTH, end - h.start + 1);
+        if partial {
+            b = b.header(header::CONTENT_RANGE, format!("bytes {}-{end}/{}", h.start, h.total));
+        }
+        let head = b.body(Cow::Borrowed(&[][..])).unwrap_or_else(|_| plain(StatusCode::INTERNAL_SERVER_ERROR));
+        sock.write_all(&to_bytes(&head)).await?;
+        if asked.head {
+            return Ok(());
+        }
+        pump(sock, manager, Target::Download(id), h.start, end, true).await
+    }
+
+    /// Send bytes `at..=end` as they are written. `sized`: the full size is known (a range can be asked for).
+    async fn pump(
+        sock: &mut TcpStream,
+        manager: &download_manager::DownloadManager,
+        target: Target,
+        mut at: u64,
+        end: u64,
+        sized: bool,
+    ) -> std::io::Result<()> {
         let mut last_progress = std::time::Instant::now();
         while at <= end {
             let asked_at = std::time::Instant::now();
-            let ask = if total.is_some() { format!("bytes={at}-{end}") } else { format!("bytes={at}-") };
-            let r = read(ask).await;
+            let ask = if sized { format!("bytes={at}-{end}") } else { format!("bytes={at}-") };
+            let r = match target {
+                Target::Download(id) => manager.read_preview(id, Some(&ask)).await,
+                Target::Media(id) => manager.read_media_preview(id, Some(&ask)).await,
+            };
             match (r.status, r.content_range.as_deref().and_then(content_range)) {
                 (206, Some((a, b, _))) if a == at && !r.body.is_empty() => {
                     sock.write_all(&r.body).await?;
@@ -407,7 +463,7 @@ pub mod loopback {
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn the_private_address_answers_only_its_secret_its_host_and_reads() {
         use loopback::{parse, to_bytes, Asked};

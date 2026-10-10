@@ -119,9 +119,9 @@ The tests were run on Windows; the same tests run in CI on Linux and macOS (the 
     * vitest: 110;
     * policy: 42/42;
     * clippy and fmt: clean;
-    * e2e: 17 of 18 suites pass. `desktop-preview.mjs` fails at the web view's media player step ("player to read the
-      header" / "receive more") on this machine on the base commit too, before and after this change: an
-      environment problem, not a regression.
+    * e2e: 17 of 18 suites passed then. `desktop-preview.mjs` failed on the base commit too. It was first thought to
+      be the machine, but it was an app bug (a 503 for bytes not written yet, and the file's start not fetched first),
+      fixed right after: see "Preview on Linux and macOS".
 
 * **A full or failing disk hung the download** (found by the fault-injection tests): when the writer of a segment stopped on a disk error, the reader kept waiting on a full channel for a writer that no longer
   existed, so the download stayed "downloading" forever. The writer now hands the channel back when it stops; the download fails at once with the disk's message and the retry resumes.
@@ -222,8 +222,7 @@ WebView2's DevTools port. Needs `WebKitWebDriver` (package `webkit2gtk-driver`) 
 virtual display, and KWin (when installed) as window manager in a private D-Bus session, so nothing appears on, or changes, the
 user's desktop. `VELOX_E2E_DISPLAY=:0` runs on the real display instead; `VELOX_E2E_WM=0` skips the window manager. Windows are
 closed like a user would (`x11-close-window.py`, WM_DELETE_WINDOW). Not ported yet: `desktop-browser.mjs` (Windows registry checks)
-and the `real-*` scripts. Known Linux gaps they show: live preview does not play (WebKitGTK cannot stream media from a custom
-protocol). (`desktop-ui.mjs` used to measure ~20 fps while downloading; since the paint fixes of `docs/ui-performance.md` it holds
+and the `real-*` scripts. (Live preview on Linux: fixed, see "Preview on Linux and macOS" below.) (`desktop-ui.mjs` used to measure ~20 fps while downloading; since the paint fixes of `docs/ui-performance.md` it holds
 60 fps and passes.) On a machine without root, both tools can be unpacked from their packages into
 a user folder (`dpkg -x`) and put on `PATH`. Still failing on Linux, before and after the Smart Download Queue (checked on the previous
 commit too): `desktop-queue.mjs` waits in vain for the second dry-run power action at its very end.
@@ -406,3 +405,31 @@ Details: `docs/smart-throttle-and-preview.md` > "Steady speed…", `docs/archite
 | `phase2.rs` | `mid_body_disconnects_resume_from_the_written_offset`: a connection lost inside a run counts as a retry of that part | |
 | `apps/desktop/src/throttle.test.ts` | `polls that bring the same state never touch <html> again`, `slowing downloads or not keeps the same colours (no repaint)` | the flash fix |
 
+## Preview on Linux and macOS (October 2026)
+
+`desktop-preview.mjs` failed on Linux before this fix, on the base commit too. GStreamer said
+`R2: Received 503 HTTP error code`, and once the start of the file was not ready after 20 s. Full analysis:
+`docs/smart-throttle-and-preview.md`, "Linux and macOS: why the preview stopped". Tests added:
+
+* `smart_preview.rs::watching_a_download_already_running_gets_its_start_first`. A real download at 200 KB/s, with
+  "Watch" pressed while it runs:
+  * the start is playable within 8 s (about 2 s now; it never was before);
+  * the first unfinished part never sits idle for 4 s while others download;
+  * 15 runs in a row green.
+* `adaptive.rs`:
+  * `a_part_queuing_again_keeps_its_place`: part 0 queuing again goes before parts 1–3;
+  * `a_cancelled_wait_leaves_the_line`: a paused part does not block the line.
+* `policy.test.mjs`: the private address on Linux and macOS only (Windows keeps the protocol); `Info.plist` allows
+  local networking only.
+* `desktop-preview.mjs`: macOS now expects the private address, and checks the secret, the Host and that scripts
+  cannot read it, as on Linux.
+
+Results (Linux):
+* Rust: 705 passed;
+* vitest: 110;
+* policy: 42/42;
+* clippy: clean;
+* e2e: all 18 suites pass (`desktop-preview.mjs` 3 runs in a row).
+
+macOS and Windows run in CI. A macOS type-check could not run here (it needs Apple's SDK). The macOS code path is
+the Linux code under a wider `cfg`, with no new platform calls.

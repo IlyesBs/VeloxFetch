@@ -120,6 +120,19 @@ pub fn serve_window(runs: &[(u64, u64)], start: u64, wanted_end: Option<u64>) ->
     Some((start, end))
 }
 
+/// The start of an answer for a download still being written: a player is sent the headers at once and the bytes
+/// as the download writes them, like any web server serving a growing file. (Answering "not there yet" instead made
+/// WebKit's player, on Linux and macOS, stop the preview for good.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviewHead {
+    pub content_type: &'static str,
+    pub total: u64,
+    /// The download is running: the missing bytes will come.
+    pub active: bool,
+    /// The first byte asked for.
+    pub start: u64,
+}
+
 /// What the preview needs to know about a download right now.
 struct Source {
     path: PathBuf,
@@ -202,6 +215,19 @@ impl DownloadManager {
             return Err(ManagerError::invalid("that file is not in a download folder VeloxFetch knows"));
         }
         Ok(Source { path, total, content_type, runs, active })
+    }
+
+    /// What a player needs to start an answer before the bytes it asks for are written (see [`PreviewHead`]).
+    /// `None`: not previewable (no such download, not audio / video, size unknown, outside the download folders) or
+    /// a start past the end: the ordinary answer ([`read_preview`](Self::read_preview)) then says why.
+    pub async fn preview_head(&self, id: i64, range: Option<&str>) -> Option<PreviewHead> {
+        let src = self.preview_source(id).await.ok()?;
+        let start = match parse_range(range) {
+            None | Some((None, None)) => 0,
+            Some((Some(a), _)) => a,
+            Some((None, Some(n))) => src.total.saturating_sub(n.max(1)),
+        };
+        (start < src.total).then_some(PreviewHead { content_type: src.content_type, total: src.total, active: src.active, start })
     }
 
     /// Answer one player request. Never fails: every problem is a status code.

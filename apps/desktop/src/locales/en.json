@@ -578,6 +578,7 @@
   "prev.watch": "Watch while downloading",
   "prev.ready": "{got} ready from the start ({pct}%). If the picture stops, it waits for the next part to arrive.",
   "prev.whole": "The whole file is here.",
+  "prev.cantPlay": "This file cannot be played here on this computer. Once it has downloaded, open it in your own player.",
   "qc.paused": "Queue paused",
   "qc.pausedHeld": "Queue paused · {n} paused by the queue",
   "qc.outside": "Outside the schedule window",

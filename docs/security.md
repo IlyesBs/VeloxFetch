@@ -584,8 +584,13 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
   10 s, at most 16 connections and 40 new requests a second (429), no CORS headers. The CSP gets that exact origin in
   `media-src` at start-up (no wildcard; the static `tauri.conf.json` is unchanged and `csp_is_strict` still holds);
   `connect-src` is unchanged, so scripts cannot read it (checked in `desktop-preview.mjs`). New command
-  `get_preview_base` (main window only; no arguments; `None` on Windows / macOS). Threat 32; policy test
-  "no shipped code opens a TCP or UDP listening socket, except the Linux preview address built to 12.2".
+  `get_preview_base` (main window only; no arguments; `None` on Windows). Threat 32; policy test
+  "no shipped code opens a TCP or UDP listening socket, except the Linux / macOS preview address built to 12.2".
+  **Since the preview fix (October 2026) macOS uses the same address** (WKWebView's player cannot stream a growing
+  file through the custom protocol). Same rules, same code. `Info.plist` allows plain http for local addresses only
+  (`NSAllowsLocalNetworking`); `NSAllowsArbitraryLoads` and per-domain exceptions are forbidden by the policy test.
+  A running download is answered as a growing file (headers at once, bytes as written): still only written
+  audio / video bytes, the same reader.
 * **Program list paths**: an entry may be an absolute executable path (no wildcards, at most 260 characters). The
   scan reads executables' full paths only while such an entry is listed; they are compared and dropped, never
   stored, logged or sent (policy test "smart throttle").

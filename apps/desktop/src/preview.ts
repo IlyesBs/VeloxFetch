@@ -1,5 +1,6 @@
 // Where the media player reads a preview from: the app's own preview protocol by id (never a path), or, where the
-// system's web view cannot play from it (Linux), the app's private local address that serves the same bytes.
+// system's web view cannot stream a growing file from it (Linux, macOS), the app's private local address that serves
+// the same bytes.
 
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "./api";

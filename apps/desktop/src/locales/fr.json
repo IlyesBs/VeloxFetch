@@ -578,6 +578,7 @@
   "prev.watch": "Regarder pendant le téléchargement",
   "prev.ready": "{got} prêts depuis le début ({pct} %). Si l’image s’arrête, elle attend l’arrivée de la partie suivante.",
   "prev.whole": "Le fichier complet est là.",
+  "prev.cantPlay": "Ce fichier ne peut pas être lu ici sur cet ordinateur. Une fois téléchargé, ouvrez-le avec votre propre lecteur.",
   "qc.paused": "File d’attente en pause",
   "qc.pausedHeld": "File d’attente en pause · {n} mis en pause par la file",
   "qc.outside": "Hors de la plage planifiée",

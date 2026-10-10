@@ -178,8 +178,8 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 ## Live preview
 
 ```text
-<video src="http://velox-preview.localhost/12">            (velox-preview://localhost/12 on macOS;
-                                                            http://127.0.0.1:<port>/<secret>/12 on Linux, below)
+<video src="http://velox-preview.localhost/12">            (Windows; Linux and macOS:
+                                                            http://127.0.0.1:<port>/<secret>/12, below)
   -> src-tauri/src/preview_server.rs   main window only, GET / HEAD only, path = a download id only
   -> manager.read_preview(12, Range)   audio / video only; .part while downloading, the saved file once done;
                                        inside a download folder (AllowedRoots); only written bytes
@@ -187,8 +187,10 @@ Settings (saved): `smart_throttle.enabled` (off), `.auto` (on), `.min_bps` (256 
 ```
 
 * Only bytes that are really on disk are served: each unfinished segment holds back its last 512 KB (the writer may
-  still have them in flight). A request for bytes not there yet waits up to 20 s while the download runs (the player
-  shows "loading"), then 503 + `Retry-After`; it never returns the zeros of an unwritten part.
+  still have them in flight). On the custom protocol (Windows), a request for bytes not there yet waits up to 20 s
+  while the download runs, then gets 503 + `Retry-After`. The private address (Linux, macOS) never answers 503 for a
+  running download: the headers go out at once and the bytes follow as they are written (see below). Neither ever
+  returns the zeros of an unwritten part.
 * At most 2 MB per answer; the player asks for the next part. `bytes=a-`, `bytes=a-b`, `bytes=-n` (suffix) are
   understood; a start past the end is 416 with `bytes */total`.
 * Types: mp4 / m4v / webm / mkv / mov / ogv / ts / avi, mp3 / m4a / aac / ogg / opus / wav / flac. Anything else
@@ -220,7 +222,69 @@ blob, data; the page got `FormatError` and nothing played). On Linux the same an
   answering only what was written made WebKit take that for the whole file (a 60 s song showed as 3.7 s and
   stopped). A video job whose size is not known yet is sent from the start without a length until it ends. A quick
   "not written yet" (nothing downloads it any more) or 120 s without progress ends the answer; the player asks again.
-* Windows (WebView2) and macOS keep the custom protocol, unchanged.
+* Windows (WebView2) keeps the custom protocol, unchanged.
+
+### Linux and macOS: why the preview stopped, and the fix (October 2026)
+
+Symptom: on Linux the player loaded and played for a moment, then stopped for good. GStreamer's log said
+`R2: Received 503 HTTP error code` (WebKit's second request). On macOS a downloading video did not play at all.
+Windows was fine. Packages were not the cause: every GStreamer plugin was installed on the test machine.
+
+Causes and fixes:
+
+1. **A 503 for bytes not written yet.** After buffering, WebKit opens a second request at the point where it
+   stopped. When those bytes were not written yet, `stream` waited 20 s and then answered 503. WebKit's source
+   element treats that as fatal.
+
+   Now a request for a download that is still running (`DownloadManager::preview_head`: media type, size, still
+   running, the resolved start) is answered like any web server serving a growing file (`stream_growing`):
+   * `206` / `200` with the full `Content-Length` and `Content-Range` at once;
+   * then the bytes as they are written (`pump`), even if the first byte asked for is not there yet.
+
+   A paused, finished or unknown download keeps the earlier answers (the saved file, `416`, `415`, `404`).
+2. **macOS could not stream a growing file through the custom protocol.** WKWebView's player (AVFoundation) asks
+   for exact byte ranges. It needs a file that is still being written to come as one answer of the full length,
+   and a custom protocol's answer is one finished body. macOS now uses the same private address as Linux:
+   * `#[cfg(any(target_os = "linux", target_os = "macos"))]` on `loopback`, its start-up and `get_preview_base`;
+   * `/dev/urandom` exists there too;
+   * `Info.plist` adds `NSAppTransportSecurity` → `NSAllowsLocalNetworking` (local addresses only; App Transport
+     Security stays on for everything else, and `policy.test.mjs` forbids any wider exception).
+3. **The file's start was not fetched first** once "Watch" was pressed on a running download, mostly under a speed
+   limit. The playable start stayed at 0 for 20 s while 4 of 5 MB arrived, so the player waited for nothing.
+   * A part that had to queue for a slot again went to the back of a first-come queue, behind the middle of the
+     file. This happened when another connection's run had the part, when its connection gave way to a lower
+     limit, or when it switched to short requests.
+   * Every slot of the connection gate is now handed out by part order (`AdaptiveGate::acquire_ranked`; first tries
+     through `acquire_in_turn` go through it too). A part's next short request also keeps its slot instead of
+     queuing again (`GatePermit::is_leaving` / `rest`: a hold after refusals still applies).
+   * Result: the start is playable about 2 s after "Watch" at 200 KB/s, and the first unfinished part never sits
+     idle.
+4. **The player recovers on its own.** If the player errors, `PreviewCard` reconnects it up to 3 times, 1.5 s
+   apart. If it still cannot play (a format this computer's player does not decode), it says so plainly
+   (`prev.cantPlay`) instead of showing a black box. The download is never affected.
+
+**Installed with the app (Linux).** WebKitGTK plays media through GStreamer:
+
+| Package | GStreamer packages |
+|---|---|
+| `.deb` | Depends on `gstreamer1.0-plugins-base` (playback, Ogg/Vorbis/Opus), `gstreamer1.0-plugins-good` (WAV, MP4/MOV, Matroska/WebM, FLAC, MP3, HTTP), `gstreamer1.0-libav` (H.264, AAC, HEVC...). Recommends `gstreamer1.0-plugins-bad` and a sound output (`gstreamer1.0-pulseaudio \| gstreamer1.0-pipewire`). |
+| `.rpm` | Depends on `gstreamer1-plugins-base` and `gstreamer1-plugins-good`. Recommends `gstreamer1-plugin-libav`, `gstreamer1-plugins-bad-free` and `gstreamer1-plugin-openh264` (Fedora ships H.264 that way). |
+| AppImage | `bundleMediaFramework: true`: GStreamer and its plugins travel inside the AppImage, so it plays on a system without them. |
+
+All of this is in `tauri.release.linux.conf.json`. Windows (Media Foundation in WebView2) and macOS (AVFoundation)
+decode with the system's own frameworks: nothing to install.
+
+**What each system's player can decode** (the download itself is never affected):
+
+| | Windows (WebView2) | macOS (WKWebView) | Linux (WebKitGTK + the packages above) |
+|---|---|---|---|
+| MP4 / M4V / MOV (H.264, AAC) | yes | yes | yes |
+| HEVC / H.265 | only with the system's HEVC extension | yes | yes (libav) |
+| WebM / Ogg (VP8/VP9/AV1, Opus/Vorbis) | yes | WebM VP9/Opus on recent macOS; Ogg no | yes |
+| MKV / AVI | often (codec dependent) | no | yes |
+| MP3 / M4A / AAC / WAV / FLAC | yes | yes | yes |
+
+When a format cannot be decoded, the card says so after the retries.
 
 ## Tests
 

@@ -98,10 +98,9 @@ try {
   check("the details of an audio / video download offer a preview", true);
   await waitFor(() => has("[data-testid=preview-video]"), "the player");
   const src = await ev(`document.querySelector('[data-testid=preview-video]').src`);
-  // Tauri's address for a custom protocol: http://<name>.localhost/ on Windows, <name>://localhost/ on macOS. Linux's
-  // web view cannot play from a custom protocol: the app's private address there (this computer only, a 64-hex secret).
-  const previewUrl =
-    process.platform === "win32" ? `http://velox-preview.localhost/${song.id}` : process.platform === "darwin" ? `velox-preview://localhost/${song.id}` : null;
+  // Tauri's address for a custom protocol on Windows: http://<name>.localhost/. Linux's and macOS's web views cannot
+  // stream a growing file from a custom protocol: the app's private address there (this computer only, a 64-hex secret).
+  const previewUrl = process.platform === "win32" ? `http://velox-preview.localhost/${song.id}` : null;
   const ok = previewUrl ? src === previewUrl : new RegExp(`^http://127\\.0\\.0\\.1:\\d+/[0-9a-f]{64}/${song.id}$`).test(src);
   check("the player reads from the app's own address, by id", ok, src);
   if (!previewUrl) {
@@ -109,11 +108,11 @@ try {
     const wrong = await new Promise((res) =>
       http.get({ host: "127.0.0.1", port, path: `/${"0".repeat(64)}/${song.id}` }, (r) => (r.resume(), res(r.statusCode))).on("error", () => res(0)),
     );
-    check("Linux: without the secret the private address gives nothing", wrong === 404, String(wrong));
+    check("Linux / macOS: without the secret the private address gives nothing", wrong === 404, String(wrong));
     const rebound = await new Promise((res) =>
       http.get({ host: "127.0.0.1", port, path: new URL(src).pathname, headers: { Host: `evil.example:${port}` } }, (r) => (r.resume(), res(r.statusCode))).on("error", () => res(0)),
     );
-    check("Linux: another host name for it is refused (DNS rebinding)", rebound === 403, String(rebound));
+    check("Linux / macOS: another host name for it is refused (DNS rebinding)", rebound === 403, String(rebound));
   }
   await waitFor(async () => (await ev(`document.querySelector('[data-testid=preview-video]').readyState`)) >= 1, "the player to read the file's header", 20000);
   const duration = await ev(`document.querySelector('[data-testid=preview-video]').duration`);
@@ -143,10 +142,10 @@ try {
 
   const sneaky = await ev(`fetch("http://velox-preview.localhost/${song.id}").then(() => "read", () => "blocked")`);
   check("a page script cannot read the preview protocol (CSP connect-src)", sneaky === "blocked", sneaky);
-  if (process.platform === "linux") {
+  if (process.platform !== "win32") {
     const src2 = await ev(`document.querySelector('[data-testid=preview-video]').src`);
     const sneaky2 = await ev(`fetch(${JSON.stringify("SRC")}.replace("SRC", document.querySelector('[data-testid=preview-video]').src)).then(() => "read", () => "blocked")`);
-    check("nor the private address (Linux)", sneaky2 === "blocked", `${sneaky2} ${src2}`);
+    check("nor the private address (Linux / macOS)", sneaky2 === "blocked", `${sneaky2} ${src2}`);
   }
   check("a seek far ahead does not break the player", await ev(`(async () => { const v = document.querySelector('[data-testid=preview-video]'); v.currentTime = 50; await new Promise((r) => setTimeout(r, 1500)); return !v.error; })()`));
   await invoke("set_speed_limit", { request: { target: { kind: "global" }, bytesPerSec: null } });

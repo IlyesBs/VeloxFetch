@@ -329,6 +329,12 @@ pub struct AdaptiveGate {
     shedding: AtomicUsize,
     /// Under a speed limit: the most one request asks for (0 = no limit, see [`AdaptiveGate::set_request_cap`]).
     request_cap: std::sync::atomic::AtomicU64,
+    /// Parts waiting for a slot again, by rank (see [`AdaptiveGate::acquire_ranked`]); the second number keeps equal
+    /// ranks apart.
+    ranked: Mutex<std::collections::BTreeSet<(usize, u64)>>,
+    ticket: std::sync::atomic::AtomicU64,
+    /// The first of `ranked` changed.
+    head_changed: Notify,
 }
 
 pub struct GatePermit {
@@ -353,6 +359,9 @@ impl AdaptiveGate {
             refusals: AtomicU32::new(0),
             shedding: AtomicUsize::new(0),
             request_cap: Default::default(),
+            ranked: Mutex::default(),
+            ticket: Default::default(),
+            head_changed: Notify::new(),
         })
     }
 
@@ -424,12 +433,9 @@ impl AdaptiveGate {
         self.peak.load(Ordering::SeqCst)
     }
 
+    /// A slot with no particular place (after every ranked part).
     pub async fn acquire(self: &Arc<Self>) -> GatePermit {
-        let permit = self.sem.clone().acquire_owned().await.expect("gate semaphore is never closed");
-        self.wait_hold().await;
-        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-        self.peak.fetch_max(now, Ordering::SeqCst);
-        GatePermit { permit: Some(permit), gate: self.clone(), leaving: Default::default() }
+        self.acquire_ranked(usize::MAX).await
     }
 
     /// A segment's first connection: queue for a slot in plan order (`turn` 0, 1, 2, ...), whatever order the tasks
@@ -445,20 +451,74 @@ impl AdaptiveGate {
             }
             taken.await;
         }
-        let mut wait = std::pin::pin!(self.sem.clone().acquire_owned());
-        // The first poll takes the place in the semaphore's queue (or the permit); only then the next turn may queue.
-        let first = futures_util::poll!(wait.as_mut());
-        self.next_turn.fetch_max(turn + 1, Ordering::SeqCst);
-        self.turn_taken.notify_waiters();
-        let permit = match first {
-            std::task::Poll::Ready(p) => p,
-            std::task::Poll::Pending => wait.await,
+        // Queued among the parts by rank (its turn); only then the next turn may queue.
+        self.ranked_after(turn, || {
+            self.next_turn.fetch_max(turn + 1, Ordering::SeqCst);
+            self.turn_taken.notify_waiters();
+        })
+        .await
+    }
+
+    /// A part queuing for a slot again (the first try queues with [`acquire_in_turn`](Self::acquire_in_turn)):
+    /// slots go to the waiting part of the lowest `rank` (its plan order), not to whoever queued first. So a part
+    /// that had to wait (another connection's run had it, its connection gave way, it switched to short requests)
+    /// keeps its place: the start of a video being watched never waits behind the middle of the file.
+    pub async fn acquire_ranked(self: &Arc<Self>, rank: usize) -> GatePermit {
+        self.ranked_after(rank, || {}).await
+    }
+
+    /// [`acquire_ranked`](Self::acquire_ranked), calling `queued` once the place is taken. Every slot of the gate is
+    /// handed out here, so only the first in line ever waits on the semaphore.
+    async fn ranked_after(self: &Arc<Self>, rank: usize, queued: impl FnOnce()) -> GatePermit {
+        let me = (rank, self.ticket.fetch_add(1, Ordering::Relaxed));
+        let first = {
+            let mut q = self.ranked_queue();
+            q.insert(me);
+            q.first() == Some(&me)
+        };
+        queued();
+        if first {
+            self.head_changed.notify_waiters();
         }
-        .expect("gate semaphore is never closed");
+        /// Leaves the queue however the wait ends (a slot, or cancelled).
+        struct Leave<'a>(&'a AdaptiveGate, (usize, u64));
+        impl Drop for Leave<'_> {
+            fn drop(&mut self) {
+                let mut q = self.0.ranked_queue();
+                let was_first = q.first() == Some(&self.1);
+                q.remove(&self.1);
+                drop(q);
+                if was_first {
+                    self.0.head_changed.notify_waiters();
+                }
+            }
+        }
+        let leave = Leave(self, me);
+        let permit = loop {
+            let changed = self.head_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let first = self.ranked_queue().first() == Some(&me);
+            if !first {
+                changed.await;
+                continue;
+            }
+            // First in line: wait for a slot, unless a lower rank arrives meanwhile.
+            tokio::select! {
+                biased;
+                p = self.sem.clone().acquire_owned() => break p.expect("gate semaphore is never closed"),
+                _ = &mut changed => {}
+            }
+        };
+        drop(leave);
         self.wait_hold().await;
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.peak.fetch_max(now, Ordering::SeqCst);
         GatePermit { permit: Some(permit), gate: self.clone(), leaving: Default::default() }
+    }
+
+    fn ranked_queue(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeSet<(usize, u64)>> {
+        self.ranked.lock().unwrap_or_else(|p| p.into_inner())
     }
 
     pub fn set_limit(&self, new: usize) {
@@ -488,6 +548,16 @@ impl GatePermit {
     /// More connections are open than the limit now allows (it went down): `true` once, for as many connections as
     /// are one too many, which then stop where they are and give their slot back. Without this a lower limit would
     /// only apply as parts finish, which under a low speed limit can take minutes.
+    /// [`give_way`](Self::give_way) picked this connection to stop.
+    pub fn is_leaving(&self) -> bool {
+        self.leaving.load(Ordering::SeqCst)
+    }
+
+    /// Before a kept slot makes its next request: wait out a hold after refusals, as a new slot would.
+    pub async fn rest(&self) {
+        self.gate.wait_hold().await;
+    }
+
     pub fn give_way(&self) -> bool {
         if self.leaving.load(Ordering::SeqCst) {
             return true;
@@ -876,5 +946,56 @@ mod tests {
         drop(d);
         g.set_limit(4);
         let _x = (g.acquire().await, g.acquire().await, g.acquire().await, g.acquire().await);
+    }
+
+    #[tokio::test]
+    async fn a_part_queuing_again_keeps_its_place() {
+        let g = AdaptiveGate::new(1);
+        let held = g.acquire_in_turn(0).await;
+        // Later parts queue for their first try...
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut waiting = Vec::new();
+        for turn in 1..4 {
+            let (g, order) = (g.clone(), order.clone());
+            waiting.push(tokio::spawn(async move {
+                let p = g.acquire_in_turn(turn).await;
+                order.lock().unwrap().push(turn);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                drop(p);
+            }));
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        // ...then part 0 has to queue again (another connection's run had it, or it gave way): it goes first.
+        let again = {
+            let (g, order) = (g.clone(), order.clone());
+            tokio::spawn(async move {
+                let p = g.acquire_ranked(0).await;
+                order.lock().unwrap().push(0);
+                drop(p);
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        again.await.unwrap();
+        for w in waiting {
+            w.await.unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), [0, 1, 2, 3], "the start first, then plan order");
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_wait_leaves_the_line() {
+        let g = AdaptiveGate::new(1);
+        let held = g.acquire().await;
+        // The first in line gives up (its download was paused): the next one is not stuck behind it.
+        assert!(tokio::time::timeout(Duration::from_millis(30), g.acquire_ranked(0)).await.is_err());
+        let next = tokio::spawn({
+            let g = g.clone();
+            async move { g.acquire_ranked(5).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(held);
+        assert!(tokio::time::timeout(Duration::from_secs(1), next).await.is_ok(), "the slot went to the next in line");
     }
 }

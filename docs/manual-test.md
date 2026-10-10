@@ -330,3 +330,14 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    is `test.zip`: the "File name" row says another file of that name is there (contents may differ), and gives the new
    name. Download: saved as `test (1).zip`; your file is untouched.
 8. Restart the app: steps 1 and 6 still find the downloads.
+
+## V. Live preview on each OS (once per OS, after installing the release package)
+1. Linux: install the `.deb` (or `.rpm`) on a clean system. The package manager also installs the GStreamer
+   plugins it lists (`apt` / `dnf` shows them). The AppImage runs without them.
+2. Start downloading a large MP4 (and an MP3), press **Watch while downloading** at once: picture or sound within a
+   few seconds; it keeps playing as the download goes on, never stops with an error; seeking back works.
+3. Throttle the download (a low speed limit), then press Watch: the start still comes first (the "ready from the
+   start" figure grows), playback starts and continues.
+4. macOS: the same on a downloading MP4 (H.264): it plays while downloading. A WebM / MKV that the system cannot
+   decode says "cannot be played here" after a few seconds; the download continues.
+5. Windows: unchanged; the same checks pass.

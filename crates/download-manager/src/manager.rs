@@ -32,7 +32,7 @@ mod tools;
 
 pub use media::is_stream_link;
 use pending::PendingList;
-pub use preview::{media_type as preview_media_type, PreviewResponse};
+pub use preview::{media_type as preview_media_type, PreviewHead, PreviewResponse};
 use queue::QueueState;
 pub use queues::MAIN_QUEUE;
 pub use smart_throttle::{

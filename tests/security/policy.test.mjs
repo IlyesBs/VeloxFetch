@@ -40,7 +40,7 @@ const lockedCrates = () => [...lock().matchAll(/^name = "([^"]+)"$/gm)].map((m) 
 // ---------------------------------------------------------------------------------------------
 // 12.2 Localhost security: there is no local network service to attack
 
-test("no shipped code opens a TCP or UDP listening socket, except the Linux preview address built to 12.2", () => {
+test("no shipped code opens a TCP or UDP listening socket, except the Linux / macOS preview address built to 12.2", () => {
   const bad = [];
   const PREVIEW = path.join("apps", "desktop", "src-tauri", "src", "preview_server.rs");
   for (const f of shippedRust()) {
@@ -48,10 +48,11 @@ test("no shipped code opens a TCP or UDP listening socket, except the Linux prev
     if (/\b(TcpListener|UdpSocket)\b/.test(text) && path.relative(ROOT, f) !== PREVIEW) bad.push(path.relative(ROOT, f));
   }
   assert.deepEqual(bad, [], "a local HTTP/TCP API needs the 12.2 design (127.0.0.1 + token + Origin + schemas + rate limits) first");
-  // The one exception (WebKitGTK's player cannot read a custom protocol): 12.2 in full, Linux only, read-only.
+  // The one exception (WebKitGTK's player cannot read a custom protocol; WKWebView's cannot stream a growing file
+  // through one): 12.2 in full, Linux and macOS only (Windows keeps the custom protocol), read-only.
   const pv = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "preview_server.rs"));
   const lb = pv.slice(pv.indexOf("pub mod loopback"));
-  assert.match(pv, /#\[cfg\(target_os = "linux"\)\]\s*pub mod loopback/, "Linux only");
+  assert.match(pv, /#\[cfg\(any\(target_os = "linux", target_os = "macos"\)\)\]\s*pub mod loopback/, "Linux and macOS only");
   assert.ok(!/UdpSocket/.test(lb) && (lb.match(/bind\(/g) ?? []).length === 1, "one listener");
   assert.match(lb, /TcpListener::bind\(\("127\.0\.0\.1", 0\)\)/, "this computer only, a free port");
   assert.match(lb, /read_exact\(&mut b\)/, "a random secret from the system (32 bytes)");
@@ -64,7 +65,11 @@ test("no shipped code opens a TCP or UDP listening socket, except the Linux prev
   assert.match(lb, /const MAX_OPEN: usize = \d+;\s*const MAX_PER_SECOND: u32 = \d+;/, "rate limits");
   assert.match(lb, /StatusCode::TOO_MANY_REQUESTS/);
   assert.ok(!/access-control-allow-origin/i.test(pv), "no CORS at all");
-  assert.match(lb, /manager\.read_preview\(id, Some\(&range\)\)/, "the same reader: only written audio / video bytes");
+  assert.match(lb, /manager\.read_preview\(id, Some\(&\w+\)\)/, "the same reader: only written audio / video bytes");
+  // macOS: plain http only for local addresses (App Transport Security stays on for everything else).
+  const plist = read("apps", "desktop", "src-tauri", "packaging", "macos", "Info.plist");
+  assert.match(plist, /<key>NSAllowsLocalNetworking<\/key>\s*<true\/>/);
+  assert.doesNotMatch(plist, /NSAllowsArbitraryLoads|NSExceptionDomains/, "no wider exception");
 });
 
 test("the browser link is a named pipe / unix socket, never a TCP port", () => {
