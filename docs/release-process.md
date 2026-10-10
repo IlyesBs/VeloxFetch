@@ -48,6 +48,23 @@ extension), and `scripts/package-release.mjs` collects `release/`:
 | Linux | `.deb`, `.rpm`, `.AppImage`, `VeloxFetch-portable-linux-x64.zip` |
 | all | `VeloxFetch-extension-chromium.zip`, `-chrome-store.zip`, `-firefox.zip`, `SHA256SUMS.txt` |
 
+**Linux AppImage and its media bundle (October 2026).** The AppImage carries GStreamer and its plugins
+(`bundleMediaFramework`), so live preview plays without system packages. linuxdeploy's GStreamer plugin needs
+`patchelf`, the plugins (base, good, libav) and `gst-plugin-scanner`.
+
+* **Before**, the script installed `patchelf` only when the Tauri libraries were missing. A machine that already
+  had them, or used `~/.local/sysroot`, failed at the end with
+  `failed to run linuxdeploy` (`Error: patchelf not found`).
+* **Now** the script always checks those tools (`appimage_missing`):
+  * it installs them with the package manager (apt / dnf / pacman / zypper);
+  * without admin rights, it gets `patchelf` from pip into `~/.local/bin`;
+  * it tells the plugin where the system keeps GStreamer (`GSTREAMER_PLUGINS_DIR` / `GSTREAMER_HELPERS_DIR`:
+    Debian/Ubuntu `/usr/lib/<arch>-linux-gnu`, Fedora/openSUSE `/usr/lib64`, Arch `/usr/lib`). The plugin only
+    guesses the Debian path.
+* **If something is still missing**, the AppImage is built without its media bundle, with a loud warning, instead
+  of failing the whole release. The `.deb` / `.rpm` depend on the GStreamer packages either way.
+* **CI** (`build.yml`, Ubuntu 22.04) runs the same script and gets the same checks.
+
 The zips are written by the script itself (no zip tool needed; Unix permissions are kept so the programs stay
 executable). The checksums are verified (`sha256sum -c` / `shasum -c`), then the security gate runs; the script
 fails when the gate fails.

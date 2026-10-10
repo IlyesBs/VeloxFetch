@@ -20,6 +20,10 @@
 #   Rust (cargo)        installed with rustup into ~/.cargo
 #   Linux libraries     installed with the system's package manager (apt, dnf, pacman, zypper; asks for the
 #                       admin password), or taken from a user-space sysroot (~/.local/sysroot/env.sh) if present
+#   AppImage tools      patchelf and the GStreamer plugins the AppImage carries (live preview): installed with the
+#                       package manager; without admin rights patchelf comes from pip into ~/.local/bin; if the
+#                       media plugins still cannot be had, the AppImage is built without them (said loudly; the
+#                       .deb / .rpm depend on them anyway)
 #   macOS               the Xcode command line tools are requested when missing
 #   gate tools          cargo-audit, cargo-deny, cargo-cyclonedx (cargo install --locked)
 #   --no-auto-setup     only report what is missing
@@ -73,6 +77,7 @@ as_root() { if [ "$(id -u)" = 0 ]; then "$@"; elif have sudo; then sudo "$@"; el
 for d in /usr/bin /bin /usr/local/bin; do case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d" ;; esac; done
 if [ "$os" = macos ]; then prepend_path /usr/local/bin; prepend_path /opt/homebrew/bin; fi
 prepend_path "$HOME/.cargo/bin"
+prepend_path "$HOME/.local/bin"
 prepend_path "$HOME/.volta/bin"
 prepend_path "$HOME/.local/share/fnm/aliases/default/bin"
 prepend_path "$HOME/.local/node/bin"
@@ -148,6 +153,62 @@ install_linux_libs() {
   fi
 }
 
+# ---- AppImage: linuxdeploy's GStreamer plugin (bundleMediaFramework) needs patchelf, the plugins and their helper.
+# Where the system keeps them differs (Debian/Ubuntu: /usr/lib/<arch>-linux-gnu; Fedora/openSUSE: /usr/lib64;
+# Arch: /usr/lib); the plugin itself only guesses the Debian path, so it is told.
+gst_plugins_dir() {
+  local d
+  for d in "/usr/lib/$(uname -m)-linux-gnu/gstreamer-1.0" /usr/lib64/gstreamer-1.0 /usr/lib/gstreamer-1.0; do
+    [ -e "$d/libgstcoreelements.so" ] && { echo "$d"; return; }
+  done
+}
+gst_helpers_dir() {
+  local d
+  for d in "/usr/lib/$(uname -m)-linux-gnu/gstreamer1.0/gstreamer-1.0" /usr/libexec/gstreamer-1.0 /usr/lib/gstreamer-1.0 \
+           /usr/lib64/gstreamer-1.0 /usr/lib/gstreamer1.0/gstreamer-1.0; do
+    [ -x "$d/gst-plugin-scanner" ] && { echo "$d"; return; }
+  done
+}
+# What the AppImage's media bundle is missing (empty: nothing). Playback needs base (playbin), good (MP4, WAV,
+# Matroska, FLAC, HTTP) and libav (H.264, AAC...).
+appimage_missing() {
+  local out="" dir
+  have patchelf || out="$out patchelf"
+  dir="$(gst_plugins_dir)"
+  if [ -z "$dir" ]; then
+    out="$out gstreamer-plugins-base"
+  else
+    [ -e "$dir/libgstplayback.so" ] || out="$out gstreamer-plugins-base"
+    [ -e "$dir/libgstisomp4.so" ] || out="$out gstreamer-plugins-good"
+    [ -e "$dir/libgstlibav.so" ] || out="$out gstreamer-libav"
+  fi
+  [ -n "$(gst_helpers_dir)" ] || out="$out gst-plugin-scanner"
+  echo "$out"
+}
+install_appimage_tools() {
+  if have apt-get; then
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y patchelf \
+      gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
+  elif have dnf; then
+    as_root dnf install -y patchelf gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugin-libav
+  elif have pacman; then
+    as_root pacman -S --needed --noconfirm patchelf gst-plugins-base gst-plugins-good gst-libav
+  elif have zypper; then
+    as_root zypper --non-interactive install patchelf gstreamer-plugins-base gstreamer-plugins-good gstreamer-plugins-libav
+  else
+    return 1
+  fi
+}
+# No admin rights: patchelf alone can come from pip (a static build) into ~/.local/bin.
+patchelf_user_install() {
+  have pip3 || return 1
+  pip3 install --user --quiet patchelf 2>/dev/null || pip3 install --user --quiet --break-system-packages patchelf || return 1
+  prepend_path "$HOME/.local/bin"; export PATH
+  have patchelf
+}
+
+media_args=()
+
 step "Checking the build tools"
 if ! node_ok; then
   [ "$auto" = 1 ] || die "Node.js 20+ with npm is required (https://nodejs.org)"
@@ -180,6 +241,25 @@ case "$os" in
     fi
     # linuxdeploy (AppImage) is itself an AppImage: run it without needing FUSE.
     export APPIMAGE_EXTRACT_AND_RUN=1
+    # The AppImage carries GStreamer (live preview without system packages): its tools must be there.
+    missing="$(appimage_missing)"
+    if [ -n "$missing" ] && [ "$auto" = 1 ]; then
+      note "missing for the AppImage:$missing; installing them (the admin password may be asked)"
+      if [ "$(id -u)" = 0 ] || have sudo; then
+        install_appimage_tools || note "could not install them with the package manager"
+      fi
+      have patchelf || patchelf_user_install || true
+      missing="$(appimage_missing)"
+    fi
+    if [ -n "$(gst_plugins_dir)" ]; then export GSTREAMER_PLUGINS_DIR="$(gst_plugins_dir)"; fi
+    if [ -n "$(gst_helpers_dir)" ]; then export GSTREAMER_HELPERS_DIR="$(gst_helpers_dir)"; fi
+    if [ -n "$missing" ]; then
+      # Never a failed build for it: the AppImage is made without the media bundle (it then plays through the
+      # system's GStreamer, like the .deb / .rpm, which depend on those packages).
+      note "WARNING: still missing for the AppImage:$missing"
+      note "WARNING: the AppImage is built WITHOUT its own media plugins (live preview needs the system's GStreamer)"
+      media_args=(--config '{"bundle":{"linux":{"appimage":{"bundleMediaFramework":false}}}}')
+    fi
     ;;
   macos)
     if ! xcode-select -p >/dev/null 2>&1; then
@@ -246,7 +326,7 @@ fi
 
 step "Building the app and its installer ($conf)"
 # runs the UI build (tsc + vite) first, then compiles velox-desktop and bundles it
-npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"}
+npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"} ${media_args[@]+"${media_args[@]}"}
 
 step "Packaging release/ (installer, portable zip, extension zips, SHA256SUMS.txt)"
 node scripts/package-release.mjs

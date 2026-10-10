@@ -453,3 +453,16 @@ Results (Linux):
   reply") as the first suite right after a build. It was not reproduced in 4 runs in a row, all 32 checks passing,
   and no crash dump was found.
 
+## Release script: AppImage media tools (October 2026)
+
+`build-release.sh` failed at the AppImage on a machine that already had the Tauri libraries
+(`failed to run linuxdeploy`; linuxdeploy's GStreamer plugin said `Error: patchelf not found`). Fixed in the script
+(see `docs/release-process.md`). Checked:
+* `bash -n` passes;
+* the detection, run on this machine, finds the plugins
+  (`/usr/lib/x86_64-linux-gnu/gstreamer-1.0`) and the helper, and reports `patchelf` missing when it is not on the
+  PATH;
+* `patchelf` installed in user space from pip.
+
+Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
+
