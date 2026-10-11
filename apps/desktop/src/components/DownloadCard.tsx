@@ -9,6 +9,7 @@ import type { Download, FileKind } from "../types";
 import { Icon, type IconName } from "../ui/icons";
 import { ContextMenu, Menu, ProgressBar, StatusChip, type MenuItem } from "../ui/primitives";
 import { canRedownload, redownloadIsPrimary } from "../redownload";
+import { canUseNewLink, openNewLink } from "../newLink";
 import { canOpen, kindLabel } from "./FileIcon";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { SignInDialog } from "./SignInDialog";
@@ -60,6 +61,7 @@ export function downloadMenu(d: Download, onOpen: (id: number) => void, onSignIn
     ...(d.status === "completed" && !d.fileMissing && canOpen(d.filename, d.kind) ? [{ label: t("card.open"), icon: "external" as const, onSelect: () => void actions.openFile(target) }] : []),
     ...(d.status !== "cancelled" ? [{ label: t("card.showFolder"), icon: "folder" as const, onSelect: () => void actions.showInFolder(target) }] : []),
     ...(d.status === "failed" && onSignIn ? [{ label: t("card.signInRetry"), icon: "lock" as const, onSelect: onSignIn }] : []),
+    ...(canUseNewLink(d) ? [{ label: t("nl.menu"), icon: "link" as const, onSelect: () => openNewLink(d.id) }] : []),
     ...(canRedownload(d) ? [{ label: t("card.redownload"), icon: "download" as const, onSelect: () => void actions.redownload(d) }] : []),
     { label: t("card.details"), icon: "layers", onSelect: () => onOpen(d.id) },
     { label: t("card.copy"), icon: "copy", onSelect: () => void actions.copy(d.url) },

@@ -7,7 +7,7 @@ import { Icon } from "../ui/icons";
  * Download Doctor's diagnosis under a download's error: what happened, where the problem is, whether retrying helps
  * (and when), what else the evidence shows, and what to do. Buttons stay in the error card (Sign in, Retry...).
  */
-export function DoctorPanel({ d }: { d: Diagnosis }) {
+export function DoctorPanel({ d, onNewLink }: { d: Diagnosis; onNewLink?: () => void }) {
   const t = useT();
   const say = (l: Line) => t(l.key, l.vars);
   const space = spaceLine(d);
@@ -45,6 +45,12 @@ export function DoctorPanel({ d }: { d: Diagnosis }) {
             </li>
           ))}
         </ul>
+      )}
+      {onNewLink && d.actions.includes("newLink") && (
+        <button className="btn mt-1 h-7 px-2 text-xs" data-testid="doctor-new-link" onClick={onNewLink}>
+          <Icon name="link" size={13} />
+          {t("nl.menu")}
+        </button>
       )}
     </div>
   );

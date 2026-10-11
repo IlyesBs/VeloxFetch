@@ -229,3 +229,11 @@ for the recovery test). `store.test.ts` and `smartQueue.test.ts` fixtures gained
 - **Rollback:** remove `doctor` from `DownloadDto` and `DiagnosticsDto`, the two `doctor.rs` modules, the diag
   fields (`last_failure`, `doctor`: old saved JSON is read with defaults), and the `tls_will_fail_again` clause.
   There is no database migration.
+
+## Get a new link (October 2026)
+
+The `newLink` advice (expired link, ended session, access denied, not found, server error, integrity, web page) now
+comes with a real button on the Details page: **Use a new link…**. It opens the dialog described in
+`docs/new-link-recovery.md`. Download Doctor's diagnosis and retry policy are unchanged: a 401 / 403 / 404 is still
+never retried endlessly, and expired links are still told apart from real refusals by the evidence it already has.
+

@@ -15,6 +15,7 @@ pub mod intelligence;
 pub mod links;
 mod manager;
 pub mod profiles;
+pub mod relink;
 pub mod validate;
 
 pub use api::*;

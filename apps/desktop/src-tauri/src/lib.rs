@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use authz::Command;
 use download_manager::intelligence::{AnalysisDto, AnalyzeLink, CheckDuplicate, DuplicateDto};
 use download_manager::profiles::{ProfileAction, ProfilesDto};
+use download_manager::relink::{NewLinkOutcome, UseNewLink};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, NetworkDto,
@@ -74,6 +75,7 @@ command!(resume_download, ResumeDownload, (id: i64) -> DownloadDto, |m| m.resume
 command!(cancel_download, CancelDownload, (id: i64) -> DownloadDto, |m| m.cancel_download(id));
 command!(retry_download, RetryDownload, (id: i64) -> DownloadDto, |m| m.retry_download(id));
 command!(redownload, Redownload, (id: i64) -> DownloadDto, |m| m.redownload(id));
+command!(use_new_link, UseNewLink, (request: UseNewLink) -> NewLinkOutcome, |m| m.use_new_link(request));
 command!(delete_download, DeleteDownload, (id: i64, delete_file: bool) -> (), |m| m.delete_download(id, delete_file));
 command!(get_download, GetDownload, (id: i64) -> DownloadDto, |m| m.get_download(id));
 command!(list_downloads, ListDownloads, (filter: ListFilter) -> Vec<DownloadDto>, |m| m.list_downloads(filter));
@@ -852,6 +854,7 @@ pub fn run() {
             cancel_download,
             retry_download,
             redownload,
+            use_new_link,
             delete_download,
             get_download,
             list_downloads,

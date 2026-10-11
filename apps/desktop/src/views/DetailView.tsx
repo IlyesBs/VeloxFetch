@@ -5,6 +5,7 @@ import { actions } from "../actions";
 import { PrimaryAction } from "../components/DownloadCard";
 import { DiagnosticsCard } from "../components/DiagnosticsCard";
 import { DoctorPanel } from "../components/DoctorPanel";
+import { openNewLink } from "../newLink";
 import { buttons as doctorButtons, headline, retryLine, sourceLine } from "../doctor";
 import { api } from "../api";
 import { PreviewCard } from "../components/PreviewCard";
@@ -144,7 +145,7 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
                 {d.errorCode && <p className="mt-1 font-mono" data-testid="detail-error-code">{t("det.errCode", { code: d.errorCode })}</p>}
               </details>
             )}
-            {d.doctor && d.status === "failed" && <DoctorPanel d={d.doctor} />}
+            {d.doctor && d.status === "failed" && <DoctorPanel d={d.doctor} onNewLink={() => openNewLink(d.id)} />}
           </div>
           {d.status === "failed" && (
             <div className="flex shrink-0 gap-2">

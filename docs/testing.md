@@ -467,6 +467,27 @@ Results (Linux):
 Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
 
 
+## Use a new link (October 2026)
+
+See `docs/new-link-recovery.md` §8. Tests:
+
+* `crates/download-manager/src/relink.rs` unit tests (9);
+* `tests/integration/tests/relink.rs` (11, mocked server: `/signed/<token>/` links that expire, `/noetag/`,
+  `../dated/`; added to `tests/integration/src/lib.rs`);
+* `apps/desktop/src/newLink.test.ts` (4);
+* e2e `desktop-views.mjs`: card menu → Use a new link on a paused download; the same link refused; a fresh link
+  proven and used; completes byte for byte; unknown id refused.
+
+Results (Linux, 2026-10-11):
+* Rust workspace 744 passed (relink: 3 runs in a row green); clippy and fmt clean; vitest 130; policy 42/42;
+* e2e views, ui (×3), intelligence, ipc, usability, browser: all pass. One `desktop-ui.mjs` run had a one-off timing
+  miss on the profile drop-down pick (the value was read before React re-rendered); the next two runs passed.
+* `desktop-usability.mjs`: its finished-file menu expectation was out of date since Download again (the menu is
+  `Open | Show in folder | Download again | Details | …` by design). Expectation updated.
+* Release gate: the Rust steps pass with the build environment loaded. `npm audit` reports a high advisory in
+  `source-map-js` (GHSA-68fv-2mgg-jv7q), a build-time dependency of the UI bundler. It is on `main` too and is not
+  part of this feature.
+
 ## Download again (October 2026)
 
 See `docs/redownload.md` §5. Tests:

@@ -6,6 +6,7 @@ import { BatchDialog } from "./components/BatchDialog";
 import { ClipboardBanner } from "./components/ClipboardBanner";
 import { MediaDialog } from "./components/MediaDialog";
 import { PendingDialog } from "./components/PendingDialog";
+import { NewLinkHost } from "./components/NewLinkDialog";
 import { PowerBanner } from "./components/PowerBanner";
 import { Sidebar, type NavTarget, type RouteName } from "./components/shell/Sidebar";
 import { StatusBar } from "./components/shell/StatusBar";
@@ -223,6 +224,7 @@ export default function App() {
       {batch && <BatchDialog initialLinks={batch.links} onClose={() => setBatch(null)} />}
       {stream && <MediaDialog initialUrl={stream.url} onClose={() => setStream(null)} />}
       <PendingDialog />
+      <NewLinkHost />
       <Toasts />
     </div>
   );

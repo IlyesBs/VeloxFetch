@@ -13,6 +13,7 @@
     "allow-cancel-download",
     "allow-retry-download",
     "allow-redownload",
+    "allow-use-new-link",
     "allow-delete-download",
     "allow-get-download",
     "allow-list-downloads",
