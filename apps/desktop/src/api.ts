@@ -9,6 +9,7 @@ export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "
 import type {
   Analysis,
   DuplicateMatch,
+  NewLinkOutcome,
   ProfileAction,
   Profiles,
   PreviewInfo,
@@ -77,6 +78,9 @@ export const api = {
   cancelDownload: (id: number) => call<Download>("cancel_download", { id }),
   retryDownload: (id: number) => call<Download>("retry_download", { id }),
   redownload: (id: number) => call<Download>("redownload", { id }),
+  /** Continue a paused / failed download from a new link (`url`) or a link the browser handed over (`pending`). */
+  useNewLink: (id: number, source: { url: string } | { pending: number }, mode: "auto" | "confirm" = "auto") =>
+    call<NewLinkOutcome>("use_new_link", { request: { id, ...source, mode } }),
   deleteDownload: (id: number, deleteFile: boolean) => call<void>("delete_download", { id, deleteFile }),
   getDownload: (id: number) => call<Download>("get_download", { id }),
   getDownloadDetail: (id: number) => call<DownloadDetail>("get_download_detail", { id }),

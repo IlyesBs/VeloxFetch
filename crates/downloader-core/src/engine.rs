@@ -684,6 +684,25 @@ impl Downloader {
         Ok(self.client().probe_with(&url, &extras).await?)
     }
 
+    /// The bytes `start..start+len` of a URL, by one ranged request (no retries), checked like a segment's:
+    /// a `206` whose `Content-Range` starts where asked. At most `len` bytes are read. For comparing a little of
+    /// a partial file with what a new link sends, never for downloading.
+    pub async fn sample_range(&self, url: &str, headers: &[(String, String)], start: u64, len: u64) -> Result<Vec<u8>> {
+        let url = parse_url(url)?;
+        let extras = RequestExtras::from_pairs(headers);
+        let end = start + len.max(1) - 1;
+        let mut body = std::pin::pin!(self.client().get_range_with(&url, start, end, None, &extras).await?.into_stream());
+        let mut out = Vec::with_capacity(len as usize);
+        while (out.len() as u64) < len {
+            match body.next().await {
+                Some(chunk) => out.extend_from_slice(&chunk?),
+                None => break,
+            }
+        }
+        out.truncate(len as usize);
+        Ok(out)
+    }
+
     async fn probe_with_retry(
         &self,
         url: &Url,

@@ -525,6 +525,36 @@ Full description: `docs/redownload.md`.
   * `bootstrap` also resyncs on window focus (throttled to 3 s).
 * **IPC:** `redownload` (main window only).
 
+## Use a new link
+
+Full description: `docs/new-link-recovery.md`.
+
+* **Rules** (`crates/download-manager/src/relink.rs`, pure): `identify` (verdict + evidence from the stored size /
+  validators / content type, the new link's probe and the byte samples), `decide` (auto / confirm, `noRanges` and
+  `noValidator` blockers, nothing-to-reuse), `sample_windows` (≤ 2 × 64 KiB inside checkpointed bytes), `headers_for`
+  (same-origin credentials only), `same_source`.
+* **Flow** (`manager/relink.rs`, `DownloadManager::use_new_link`):
+  1. validate the link (as when adding: credentials out of the link, direct-link rewrite);
+  2. check the download is paused / failed and not running, and claim it (`Inner::relinking`);
+  3. refuse the same link and session;
+  4. `probe_quick` with a 20 s limit, then `Downloader::sample_range` against the `.part` file (read only inside
+     `AllowedRoots`);
+  5. decide;
+  6. switch in one store step only if the status and segment progress did not change meanwhile (link, sealed
+     headers, the new link's strong ETag / Last-Modified);
+  7. `start_download`.
+
+  A pending browser request (`pending_source`) supplies its link and headers and is dismissed only when used.
+* **Engine:** one addition, `Downloader::sample_range` (one ranged GET, `206` + `Content-Range` checked by
+  `get_range_with`, at most `len` bytes read). Resume, `If-Range`, segment writes and final verification are
+  unchanged and do the rest.
+* **UI:**
+  * `newLink.ts` (where it is offered, what an outcome says);
+  * `NewLinkDialog.tsx` (`NewLinkHost` mounted once in `App`, opened by the `velox:new-link` event from the card
+    menu and `DoctorPanel`);
+  * `PendingDialog.tsx` (continue a stopped duplicate with the browser's link).
+* **IPC:** `use_new_link` (main window only).
+
 ## Video download details
 
 Full description: `docs/video-details.md`.

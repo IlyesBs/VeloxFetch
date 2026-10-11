@@ -370,6 +370,24 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 6. A running or paused download has no "Download again" in its menu.
 7. Repeat 1–2 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.
 
+## AA. Use a new link (once per OS: Windows, Linux, macOS)
+1. Start a large download, pause it at about 30 %. Right-click its card: **Use a new link…** is there (it is not
+   there for a running or finished download).
+2. Paste the same link: "This is the link the download already uses." Nothing changes.
+3. Paste another link to the same file (a mirror, or the same file from another address of the same server):
+   "Link replaced. Resuming from the saved progress." The download continues from about 30 %, not from 0 %, and
+   the finished file opens (compare its checksum with the publisher's when one is given).
+4. Pause another download part-way and paste a link to a **different** file: "This link gives a different file.",
+   "Your saved progress (…) is kept." The card keeps its percentage. **Download it as a new file** adds a separate
+   download.
+5. Paste a link that gives a 404: "The new link did not work." with the code; nothing changes.
+6. With the browser extension and confirmation on: pause a download from a site, then click the same file's link on
+   the page again. The confirmation dialog offers **Continue the stopped download with this link**. Use it: no second
+   download appears; the stopped one continues.
+7. A failed download whose Doctor says to get a new link: the Details page shows **Use a new link…**.
+8. Restart the app right after a switch, and resume: it continues from the new link.
+9. Repeat 1–4 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.
+
 ## Y. Video download details (once per OS)
 1. Download a video from a site page, and an HLS stream. While each runs, click its row: the details page opens.
    Percent, speed, the live chart, time left and "Running for" move; the status follows Pause / Resume pressed on

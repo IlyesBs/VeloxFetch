@@ -148,6 +148,39 @@ try {
   await waitFor(async () => !onDisk(d), "the card's file to be deleted", 5000).catch(() => {});
   check("the card's Remove and delete file deletes it from the disk", !onDisk(d));
 
+  // ============================================================ Use a new link (an expired link, a mirror)
+  srv.delayMs = 400; // ~2.5 s for the whole file: time to pause it part-way
+  const nl = (await invoke("create_download", { request: { url: `${srv.base}/foxtrot.bin?sig=old` } })).ok;
+  await waitFor(async () => (await invoke("get_download", { id: nl.id })).ok?.downloaded >= 65536, "some bytes saved", 15000);
+  await invoke("pause_download", { id: nl.id });
+  await waitFor(async () => (await status(nl.id)) === "paused", "the download to pause");
+  srv.delayMs = 0;
+  const kept = (await invoke("get_download", { id: nl.id })).ok.downloaded;
+  await nav("downloads");
+  await waitFor(() => has(`[data-testid=download-${nl.id}]`), "the paused card");
+  const openMenu = () => page(`(() => { document.querySelector('[data-testid=download-${nl.id}]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 })); return true; })()`);
+  await openMenu();
+  await waitFor(() => has("[role=menu]"), "menu");
+  const nlItems = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem]')].map((b) => b.innerText.trim())`);
+  check("a paused download's menu offers Use a new link", nlItems.includes("Use a new link…"), nlItems.join("|"));
+  await page(`(() => { [...document.querySelectorAll('[role=menu] [role=menuitem]')].find((b) => b.innerText.trim() === 'Use a new link…').click(); return true; })()`);
+  await waitFor(() => has("[data-testid=newlink-dialog]"), "the new link dialog");
+  await fill("[data-testid=newlink-url]", `${srv.base}/foxtrot.bin?sig=old`);
+  await click("[data-testid=newlink-check]");
+  await waitFor(() => has("[data-testid=newlink-result]"), "the check's result", 10000);
+  check("the link it already has is not taken for a new one, and nothing changes", (await ev(`document.querySelector('[data-testid=newlink-result]').dataset.reason`)) === "sameSource" && (await status(nl.id)) === "paused");
+  await fill("[data-testid=newlink-url]", `${srv.base}/mirror/foxtrot.bin?sig=fresh`);
+  await click("[data-testid=newlink-check]");
+  await waitFor(async () => (await ev(`document.querySelector('[data-testid=newlink-result]')?.dataset.applied`)) === "true", "the new link to be used", 10000);
+  check("a fresh link to the same file is proven and used", (await ev(`document.querySelector('[data-testid=newlink-result]').dataset.reason`)) === "etagMatch", await text("[data-testid=newlink-result]"));
+  await finished(nl.id);
+  const nlDone = (await invoke("get_download", { id: nl.id })).ok;
+  check("it completes from the saved progress, byte for byte", fs.readFileSync(path.join(h.root, nlDone.filename)).equals(srv.FILE) && kept > 0 && nlDone.url.includes("sig=fresh"));
+  await waitFor(async () => !(await has("[data-testid=newlink-dialog]")), "the dialog to close", 5000).catch(() => {});
+  check("no error was thrown by the page", (await ev("window.__errs.length")) === 0, JSON.stringify(await ev("window.__errs")));
+  check("an unknown download is refused", !!(await invoke("use_new_link", { request: { id: 987654, url: `${srv.base}/x.bin` } })).err);
+  await invoke("delete_download", { id: nl.id, deleteFile: true });
+
   // ============================================================ Active: live work, pause / resume all
   srv.delayMs = 1200; // ~8 s for the whole file: long enough to look at it running
   const run = (await invoke("create_download", { request: { url: `${srv.base}/echo.iso` } })).ok;

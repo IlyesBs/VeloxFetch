@@ -18,6 +18,9 @@
 //! | `/huge/..` | claims to be one petabyte (`Content-Length` / `Content-Range`) |
 //! | `/big-header/..` | answers with a huge (`State::junk_header_bytes`) header value |
 //! | `/html/..` | the file, but announced as `Content-Type: text/html` (a sign-in page where a file was expected) |
+//! | `/signed/<token>/..` | the file, or `403` once `<token>` is in `State::expired` (a signed link that expired) |
+//! | `/noetag/..` | the file, without an `ETag` (nothing proves its version) |
+//! | `../dated/..` | (anywhere in the path) also sends a fixed `Last-Modified` |
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -68,6 +71,8 @@ pub struct State {
     pub routes: Mutex<std::collections::HashMap<String, Arc<Vec<u8>>>>,
     /// Delay before each fixed document is answered.
     pub route_delay: Mutex<Duration>,
+    /// Tokens of `/signed/<token>/..` links that have expired: answered with `403`.
+    pub expired: Mutex<std::collections::HashSet<String>>,
 }
 
 pub struct Server {
@@ -131,6 +136,7 @@ pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
         content_disposition: Mutex::new(None),
         routes: Mutex::new(Default::default()),
         route_delay: Mutex::new(Duration::ZERO),
+        expired: Mutex::new(Default::default()),
     });
     let l = TcpListener::bind(addr).await.unwrap();
     let addr = l.local_addr().unwrap();
@@ -211,6 +217,11 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         if !ok {
             return s.write_all(simple("401 Unauthorized", "WWW-Authenticate: Basic realm=\"velox\"\r\n").as_bytes()).await.is_ok()
                 && keep_alive;
+        }
+    }
+    if let Some(token) = path.strip_prefix("/signed/").and_then(|r| r.split('/').next()) {
+        if st.expired.lock().unwrap().contains(token) {
+            return s.write_all(simple("403 Forbidden", "").as_bytes()).await.is_ok() && keep_alive;
         }
     }
     if path.starts_with("/redirloop") {
@@ -297,8 +308,12 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         String::new()
     };
     let ctype = if path.starts_with("/html/") { "text/html; charset=utf-8" } else { "application/octet-stream" };
+    let mut etag_hdr = if path.starts_with("/noetag/") { String::new() } else { format!("ETag: {etag}\r\n") };
+    if path.contains("/dated/") {
+        etag_hdr.push_str("Last-Modified: Mon, 05 Jan 2026 00:00:00 GMT\r\n");
+    }
     let head = format!(
-        "HTTP/1.1 {status}\r\nETag: {etag}\r\nServer: velox-test/1.0\r\n{accept}Content-Type: {ctype}\r\nConnection: {conn_hdr}\r\n{disposition}{junk}{hdrs}\r\n"
+        "HTTP/1.1 {status}\r\n{etag_hdr}Server: velox-test/1.0\r\n{accept}Content-Type: {ctype}\r\nConnection: {conn_hdr}\r\n{disposition}{junk}{hdrs}\r\n"
     );
     if s.write_all(head.as_bytes()).await.is_err() {
         return false;

@@ -630,6 +630,22 @@ No new command, permission, setting, file, listening socket or network destinati
 * **IPC:** `get_profiles` / `profile_action` are main window only (`authz`, capability file, build manifest,
   destructive-commands test list).
 
+## Use a new link (October 2026)
+
+Full rules: `docs/new-link-recovery.md` §6.
+* **`use_new_link`** is main window only (`authz`, capability file, build manifest, destructive-commands test list).
+* **Credential isolation:** a pasted link gets the download's cookies / `Authorization` only on the same origin
+  (scheme, host, port). The referrer and user agent are kept. A browser hand-over uses the browser's headers for that
+  link. Credentials in a pasted link become a sealed header, never part of the stored link.
+* **No corruption by design:** saved bytes are continued only on proof of the same file (strong ETag + size + matching
+  byte samples), or "likely" with the user's explicit confirmation. Another file is never applied. A link without
+  working ranges or without a validator never continues saved bytes. Final size and checksum checks are unchanged.
+* **No secrets in logs:** the request's `Debug` redacts the link, and diagnostics events never contain it. Reports
+  pass the redactor (tested with a signed-URL secret).
+* **Paths:** the partial file is read for samples only after `AllowedRoots::check`. Nothing is deleted.
+* **Bounded:** one attempt per request, no retries, one check per download at a time, the same link and session
+  refused.
+
 ## Download again (October 2026)
 
 * **`redownload`** is main window only (`authz`, capability file, build manifest, destructive-commands test list).

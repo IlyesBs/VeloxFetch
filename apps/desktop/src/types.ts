@@ -870,3 +870,23 @@ export interface VideoTools {
   deno: ToolStatus;
   ffmpeg: ToolStatus;
 }
+
+/** "Use a new link": whether the new link gives the file the download started with (crates/download-manager/src/relink.rs). */
+export type NewLinkVerdict = "verifiedSame" | "likelySame" | "differentResource" | "unknown";
+export type NewLinkReason =
+  | "etagMatch" | "bytesMatch" | "dateMatch" | "nothingToReuse"
+  | "webPage" | "sizeChanged" | "etagChanged" | "dateChanged" | "bytesDiffer"
+  | "sizeUnknown" | "sizeOnly" | "noRanges" | "noValidator" | "sameSource" | "unreachable";
+
+export interface NewLinkOutcome {
+  verdict: NewLinkVerdict;
+  reason: NewLinkReason;
+  /** Switched to the new link and continuing. Nothing is changed otherwise. */
+  applied: boolean;
+  /** "Continue anyway" may be offered (likely the same file). */
+  canConfirm: boolean;
+  httpStatus: number | null;
+  /** Bytes already saved, kept whatever the outcome. */
+  keptBytes: number;
+  download: Download | null;
+}

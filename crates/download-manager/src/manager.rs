@@ -26,6 +26,7 @@ mod preview;
 mod profiles;
 mod queue;
 mod queues;
+mod relink;
 mod smart_throttle;
 mod storage;
 mod sysio;
@@ -121,6 +122,8 @@ struct Inner {
     /// The Smart Download Queues (`queues.rs`): several queues with rules, over the one slot scheduler.
     queues: Mutex<queues::Queues>,
     pending: Mutex<PendingList>,
+    /// Downloads a new link is being checked for (`relink.rs`).
+    relinking: Mutex<relink::Relinking>,
     /// The Add dialog's link check that is running (`intelligence.rs`).
     link_check: Mutex<intelligence::LinkCheck>,
     /// Download Doctor: the newest diagnosis of each failed download (`doctor.rs`), in memory only.
@@ -280,6 +283,7 @@ impl DownloadManager {
             queue: Mutex::new(queue),
             queues: Mutex::new(queues),
             pending: Mutex::new(PendingList::default()),
+            relinking: Mutex::new(relink::Relinking::default()),
             link_check: Mutex::new(Default::default()),
             doctor: Mutex::new(HashMap::new()),
             media: Mutex::new(Default::default()),

@@ -225,6 +225,18 @@ impl DownloadManager {
         Ok(e.dto.content_type.clone())
     }
 
+    /// The link and browser headers of a waiting download, left waiting (for "use a new link", which answers it
+    /// only if the link is used).
+    pub(super) fn pending_source(&self, token: u64) -> Result<(String, Vec<(String, String)>), ManagerError> {
+        let list = self.inner.pending.lock().unwrap();
+        let e =
+            list.entries.iter().find(|e| e.dto.token == token).ok_or_else(|| ManagerError::invalid("this request is no longer waiting"))?;
+        if e.dto.media.is_some() {
+            return Err(ManagerError::invalid("this is a video: it cannot continue a file download"));
+        }
+        Ok((e.req.url.clone(), e.headers.clone()))
+    }
+
     /// The user said no: forget it.
     pub fn dismiss_pending(&self, token: u64) -> Result<(), ManagerError> {
         self.take_pending(token).map(|_| ())

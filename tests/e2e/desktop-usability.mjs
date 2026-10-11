@@ -75,7 +75,7 @@ try {
   await page(`(() => { document.querySelector('[data-testid=download-${pdf.id}]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 200 })); return true; })()`);
   await waitFor(() => has("[role=menu]"), "menu");
   const items = await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem]')].map((b) => b.innerText.trim()).join('|')`);
-  check("a finished file's menu starts with Open and Show in folder", items.startsWith("Open|Show in folder|Details|Copy link"), items);
+  check("a finished file's menu starts with Open and Show in folder", items.startsWith("Open|Show in folder|Download again|Details|Copy link"), items);
   await key("Escape");
   await page(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); return true; })()`);
 

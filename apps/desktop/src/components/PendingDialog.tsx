@@ -4,8 +4,10 @@ import { formatBytes } from "../format";
 import { act, useStore } from "../hooks";
 import { useT } from "../i18n";
 import { IntelligencePanel } from "./IntelligencePanel";
+import { NewLinkResult } from "./NewLinkDialog";
+import { continuable } from "../newLink";
 import { MediaDialog } from "./MediaDialog";
-import type { PendingDownload, PickedFolder } from "../types";
+import type { NewLinkOutcome, PendingDownload, PickedFolder } from "../types";
 import { Icon } from "../ui/icons";
 
 function Row({ label, children, testid }: { label: string; children: React.ReactNode; testid?: string }) {
@@ -69,6 +71,19 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
     setBusy(true);
     await act(() => api.dismissPendingDownload(p.token));
     setBusy(false);
+  };
+  // A stopped download of the same file is in the list: this link (with the browser's session) may continue it.
+  const target = continuable(p.analysis?.duplicate);
+  const [relink, setRelink] = useState<NewLinkOutcome | null>(null);
+  const [checking, setChecking] = useState(false);
+  const continueStopped = async (mode: "auto" | "confirm") => {
+    if (target === null) return;
+    setBusy(true);
+    setChecking(true);
+    const o = await act(() => api.useNewLink(target, { pending: p.token }, mode));
+    setChecking(false);
+    setBusy(false);
+    if (o) setRelink(o); // applied: the request is answered and this dialog goes away
   };
 
   useEffect(() => {
@@ -152,6 +167,27 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
         </Row>
       </dl>
       {p.analysis && <IntelligencePanel a={p.analysis} />}
+      {target !== null && (
+        <div className="mt-3 space-y-2 rounded-lg border border-line px-3 py-2 text-xs" data-testid="pending-relink">
+          <p>{t("nl.pendingAsk")}</p>
+          {checking && <p className="text-dim" role="status">{t("nl.checking")}</p>}
+          {relink && <NewLinkResult o={relink} />}
+          <div className="flex justify-end">
+            {relink?.canConfirm ? (
+              <button className="btn h-7 px-2 text-xs" data-testid="pending-relink-confirm" disabled={busy} onClick={() => void continueStopped("confirm")}>
+                {t("nl.confirm")}
+              </button>
+            ) : (
+              !relink && (
+                <button className="btn h-7 px-2 text-xs" data-testid="pending-relink-use" disabled={busy} onClick={() => void continueStopped("auto")}>
+                  <Icon name="link" size={13} />
+                  {t("nl.pendingUse")}
+                </button>
+              )
+            )}
+          </div>
+        </div>
+      )}
       {p.incognito && <p className="mt-2 text-xs text-dim">{t("pend.private")}</p>}
 
       <div className="mt-4 flex items-center justify-end gap-2">

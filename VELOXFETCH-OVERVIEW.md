@@ -109,6 +109,22 @@ Details: `docs/redownload.md`.
 - **Safe:** never overwrites (a file still there keeps its name; the copy gets `name (1)`), deletes only partial
   data inside the download folders, and refuses running, paused or waiting downloads.
 
+### Use a new link (expired links, sessions, mirrors)
+Details: `docs/new-link-recovery.md`.
+
+- **What:** a paused or failed download continues from a fresh link, keeping its saved bytes, but only when the new
+  link is proven to give the same file.
+- **Where:** the card's "…" menu (**Use a new link…**), the Doctor's advice on the Details page, and the browser
+  confirmation dialog when a re-clicked link matches a stopped download (**Continue the stopped download with this
+  link**, with the browser's fresh session).
+- **Proof:** same size and the same strong version tag (ETag), ranges that work on the new link, and up to two
+  64 KiB samples of the saved bytes that match. "Likely the same" (bytes match, no tag) waits for the user. Another
+  file (other size, tag, date on the same server, bytes, or a web page) is refused. A file name or size alone never
+  counts.
+- **Safe:** nothing saved is ever deleted; a refused or failed check changes nothing; the same expired link is not
+  retried; one check per download at a time; a cancel during the check wins; the final checksum still decides.
+  Cookies and sign-in go only to the same origin.
+
 ### Download Profiles
 Details: `docs/download-profiles.md`.
 
@@ -526,6 +542,8 @@ More: `docs/architecture.md`.
   timeline line.
 - **Recovery** stays the engine's: its retry loop with backoff and `Retry-After`, and safe resume / restart. One fix:
   certificate failures are no longer retried.
+- **Get a new link:** its `newLink` advice has a real button (Use a new link…). The new link is verified before any
+  saved byte is reused (`docs/new-link-recovery.md`).
 
 ---
 
@@ -538,7 +556,7 @@ messages, downloaded files, update data and UI requests.
   - strict CSP: no inline scripts or styles in HTML, no remote origins, no `eval`;
   - the page cannot make network requests.
 - **IPC:**
-  - 81 fixed commands, each its own permission (most are main-window only);
+  - 82 fixed commands, each its own permission (most are main-window only);
   - **no generic** "run / read any file" command;
   - inputs are typed, and unknown fields are refused;
   - a per-window authorization in Rust mirrors the capability files (a test keeps them identical).
@@ -754,6 +772,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Smart Duplicate Detection | `docs/smart-duplicate-detection.md` |
 | Download Profiles | `docs/download-profiles.md` |
 | Download again | `docs/redownload.md` |
+| Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
@@ -770,6 +789,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-11 | `feat_session_link_refresh` | Feature | Use a new link: a paused or failed download (expired signed link, ended session, mirror gone) continues from a fresh link (pasted, from the Doctor, or re-clicked in the browser). Saved bytes are reused only on proof of the same file: strong ETag + size + matching 64 KiB samples, and working ranges and a validator. "Likely" needs the user's word. Another file is refused and nothing changes. Same-origin credentials only, no secrets in logs, bounded (no retries, one check at a time). New command `use_new_link` (main window only); `Downloader::sample_range`. | `docs/new-link-recovery.md` |
 | 2026-10-11 | `fix_select_colors` (55e4736) | Fix | Every drop-down opens a list drawn by the app in the theme's colours (same surface as the fields), on Windows, Linux and macOS. The system list ignored all CSS: grey on Linux. Keyboard, right-to-left, ARIA. The field has the same surface as other fields. No component changed. | `docs/ui-performance.md` |
 | 2026-10-11 | `fix_connections_64` (07c8002) | Fix | Up to 64 connections everywhere: the Fast profile is 64 (was 32). The planner no longer holds files of 50–200 MB at 32 or 10–50 MB at 16: from 10 MB a download may use all 64, still bounded by the setting and the 256 KB minimum piece. | `docs/download-profiles.md`, `docs/testing.md` |
 | 2026-10-10 | `feat_video_details` (2d55185) | Feature | Clicking a video download opens a details page like a file's. It shows the overview, live speed chart, average and peak, retries, time taken, size or estimate, the player, the pieces strip, and the metadata (link, site, type, quality, file type, subtitles, added / finished, folder, saved files), with every action. The job sends a running-time clock that does not count paused time. The row's "left" / "pieces" texts are translated. | `docs/video-details.md` |
