@@ -85,6 +85,10 @@ pub struct DownloadRecord {
     /// Extra request headers handed over by a browser (`Referer`, `Cookie`, `User-Agent`), so a
     /// resumed download can still authenticate. Cleared when the download completes or is cancelled.
     pub request_headers: Vec<(String, String)>,
+    /// The `.part` file's size and modification time (`<len>:<mtime ns>`) when the segment hashes were last saved.
+    /// The same stamp at resume: the file was not touched since, the saved segments are trusted as they are.
+    /// Another stamp (a crash after more writes, an outside change) or none: completed segments are re-hashed first.
+    pub part_stamp: Option<String>,
 }
 
 impl std::fmt::Debug for DownloadRecord {

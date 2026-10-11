@@ -112,8 +112,32 @@ pub async fn serve(data: Arc<Vec<u8>>) -> Server {
     serve_on("127.0.0.1:0".parse().unwrap(), data).await
 }
 
+/// Test folders (`<temp>/velox-<suite>-<pid>-...`) left by test processes that have ended: removed once per process.
+/// On Linux the temp folder is often in memory, and thousands of runs add up to gigabytes. Only folders whose
+/// process is gone are touched (never this run's, never a running test's).
+pub fn sweep_stale_test_folders() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let proc = std::path::Path::new("/proc");
+        if !proc.is_dir() {
+            return; // only where process liveness can be read cheaply (Linux)
+        }
+        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let Some(rest) = name.strip_prefix("velox-") else { continue };
+            let Some(pid) = rest.split('-').find(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())) else { continue };
+            let is_dir = e.file_type().is_ok_and(|t| t.is_dir());
+            if is_dir && pid.parse::<u32>().is_ok_and(|p| p != std::process::id()) && !proc.join(pid).exists() {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    });
+}
+
 /// [`serve`] on a chosen address (e.g. one a test just saw refused, to show a recovery).
 pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
+    sweep_stale_test_folders();
     let state = Arc::new(State {
         data: Mutex::new(data),
         etag: Mutex::new("\"v1\"".into()),
@@ -353,5 +377,27 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
     } else {
         let _ = s.shutdown().await;
         false
+    }
+}
+
+#[cfg(test)]
+mod sweep_tests {
+    #[test]
+    fn only_folders_of_ended_processes_are_removed() {
+        if !std::path::Path::new("/proc").is_dir() {
+            return;
+        }
+        let t = std::env::temp_dir();
+        let dead = t.join("velox-sweeptest-4000000000-x"); // no such process
+        let mine = t.join(format!("velox-sweeptest-{}-x", std::process::id()));
+        let other = t.join("velox-not-a-test-folder");
+        for d in [&dead, &mine, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        super::sweep_stale_test_folders();
+        assert!(!dead.exists(), "an ended process's folder goes");
+        assert!(mine.exists() && other.exists(), "this run's and unrelated folders stay");
+        let _ = std::fs::remove_dir_all(&mine);
+        let _ = std::fs::remove_dir_all(&other);
     }
 }

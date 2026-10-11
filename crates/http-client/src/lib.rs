@@ -48,6 +48,10 @@ pub enum HttpError {
     /// The file had started coming, then nothing arrived for too long.
     #[error("the server stopped sending")]
     Stalled,
+    /// A ranged answer describes another version of the file than the one being downloaded (another strong `ETag`,
+    /// another total size in `Content-Range`): its bytes must never join the ones already saved.
+    #[error("the file changed on the server during the download: {0}")]
+    SourceChanged(String),
 }
 
 impl HttpError {
@@ -441,7 +445,11 @@ impl HttpClient {
         let resp = Self::check(resp)?;
         let mut probe = info_from_headers(url, &resp);
         let mut range_verified = false;
-        if status == StatusCode::PARTIAL_CONTENT {
+        // Ranges of a compressed answer count bytes of the compressed form, which can differ from one answer to the
+        // next: never cut such a file into ranges.
+        if status == StatusCode::PARTIAL_CONTENT && !identity_encoding(&resp) {
+            tracing::debug!("the server compresses its answer: ranges are not used");
+        } else if status == StatusCode::PARTIAL_CONTENT {
             let cr = resp.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok());
             match cr.and_then(parse_content_range) {
                 Some((0, 0, total)) => {
@@ -540,12 +548,22 @@ impl HttpClient {
         if resp.status() != StatusCode::PARTIAL_CONTENT {
             return Err(HttpError::RangeNotHonored(format!("expected 206, got {} for bytes={start}-{end}", resp.status())));
         }
-        let cr = resp.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(parse_content_range);
-        match cr {
-            Some((s, e, _)) if s == start && e >= s && e <= end => {}
-            other => return Err(HttpError::RangeNotHonored(format!("Content-Range {other:?} does not match requested {start}-{end}"))),
+        if !identity_encoding(&resp) {
+            return Err(HttpError::RangeNotHonored(format!("compressed answer (Content-Encoding) for bytes={start}-{end}")));
         }
-        Ok(RangeStream { resp })
+        // `If-Range` with a strong ETag makes a server that changed the file answer 200 (refused above). One that
+        // ignores `If-Range` still says its ETag: another strong one is another file.
+        if let (Some(want), Some(got)) = (if_range.filter(|v| is_strong_etag(v)), hdr(&resp, header::ETAG).filter(|v| is_strong_etag(v))) {
+            if want != got {
+                return Err(HttpError::SourceChanged("the ETag of a ranged answer is not the download's".into()));
+            }
+        }
+        let cr = resp.headers().get(header::CONTENT_RANGE).and_then(|v| v.to_str().ok()).and_then(parse_content_range);
+        let total = match cr {
+            Some((s, e, total)) if s == start && e >= s && e <= end => total,
+            other => return Err(HttpError::RangeNotHonored(format!("Content-Range {other:?} does not match requested {start}-{end}"))),
+        };
+        Ok(RangeStream { resp, total })
     }
 }
 
@@ -606,9 +624,15 @@ impl reqwest::dns::Resolve for CachingResolver {
 
 pub struct RangeStream {
     resp: reqwest::Response,
+    total: Option<u64>,
 }
 
 impl RangeStream {
+    /// The file's total size according to this answer's `Content-Range` (`None`: `*`, not said).
+    pub fn total(&self) -> Option<u64> {
+        self.total
+    }
+
     pub fn into_stream(self) -> impl Stream<Item = Result<Bytes>> + Send {
         use futures_util::StreamExt;
         self.resp.bytes_stream().map(|r| r.map_err(HttpError::from))
@@ -623,6 +647,18 @@ pub fn response_stream(resp: reqwest::Response) -> impl Stream<Item = Result<Byt
 
 fn hdr(resp: &reqwest::Response, name: header::HeaderName) -> Option<String> {
     resp.headers().get(name).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
+}
+
+/// No `Content-Encoding`, or `identity`: the bytes are the file's own.
+fn identity_encoding(resp: &reqwest::Response) -> bool {
+    hdr(resp, header::CONTENT_ENCODING)
+        .is_none_or(|v| v.split(',').all(|p| p.trim().is_empty() || p.trim().eq_ignore_ascii_case("identity")))
+}
+
+/// A strong entity tag (`"..."`); a weak one (`W/"..."`) only says "about the same".
+pub fn is_strong_etag(v: &str) -> bool {
+    let v = v.trim();
+    v.len() >= 2 && v.starts_with('"') && v.ends_with('"')
 }
 
 fn info_from_headers(orig: &Url, resp: &reqwest::Response) -> ResourceInfo {
@@ -817,6 +853,66 @@ mod tests {
         assert_eq!(names, ["referer", "cookie", "user-agent", "authorization"], "only allowed names, injection attempts dropped");
         assert!(e.headers[1].1.is_sensitive() && e.headers[3].1.is_sensitive(), "cookies and credentials are marked sensitive");
         assert!(RequestExtras::from_pairs(&[]).is_empty());
+    }
+
+    /// A server that answers every request with `answer` (a whole raw HTTP response).
+    async fn answering(answer: &'static str) -> Url {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let _ = sock.read(&mut buf).await;
+                    let _ = sock.write_all(answer.as_bytes()).await;
+                });
+            }
+        });
+        Url::parse(&format!("http://{addr}/f.bin")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn ranged_answers_are_checked_before_their_bytes_are_used() {
+        let client = HttpClient::new(&ClientConfig::default()).unwrap();
+        let ok = answering("HTTP/1.1 206 Partial Content\r\nETag: \"v1\"\r\nContent-Range: bytes 5-9/100\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
+        let r = client.get_range(&ok, 5, 9, Some("\"v1\"")).await.unwrap();
+        assert_eq!(r.total(), Some(100), "the answer's total is passed on for the caller to compare");
+
+        // Another strong ETag than the one asked for in If-Range (a server that ignores If-Range).
+        let r = client.get_range(&ok, 5, 9, Some("\"v0\"")).await;
+        assert!(matches!(r, Err(HttpError::SourceChanged(_))), "{:?}", r.err());
+        // A weak validator proves nothing either way: not refused on that ground.
+        assert!(client.get_range(&ok, 5, 9, Some("W/\"v0\"")).await.is_ok());
+
+        let gz = answering("HTTP/1.1 206 Partial Content\r\nContent-Encoding: gzip\r\nContent-Range: bytes 5-9/100\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
+        assert!(matches!(client.get_range(&gz, 5, 9, None).await, Err(HttpError::RangeNotHonored(_))), "compressed ranges are refused");
+        let identity = answering("HTTP/1.1 206 Partial Content\r\nContent-Encoding: identity\r\nContent-Range: bytes 5-9/100\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
+        assert!(client.get_range(&identity, 5, 9, None).await.is_ok());
+
+        let whole = answering("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
+        assert!(matches!(client.get_range(&whole, 5, 9, None).await, Err(HttpError::RangeNotHonored(_))), "200 to a range");
+        let shifted = answering(
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-8/100\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+        )
+        .await;
+        assert!(matches!(client.get_range(&shifted, 5, 9, None).await, Err(HttpError::RangeNotHonored(_))), "another start");
+        let beyond = answering(
+            "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 5-12/100\r\nContent-Length: 8\r\nConnection: close\r\n\r\nhello123",
+        )
+        .await;
+        assert!(matches!(client.get_range(&beyond, 5, 9, None).await, Err(HttpError::RangeNotHonored(_))), "past the asked end");
+        let missing = answering("HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello").await;
+        assert!(matches!(client.get_range(&missing, 5, 9, None).await, Err(HttpError::RangeNotHonored(_))), "no Content-Range");
+    }
+
+    #[tokio::test]
+    async fn a_compressed_answer_is_never_cut_into_ranges() {
+        let client = HttpClient::new(&ClientConfig::default()).unwrap();
+        let gz = answering("HTTP/1.1 206 Partial Content\r\nContent-Encoding: gzip\r\nContent-Range: bytes 0-0/100\r\nContent-Length: 1\r\nConnection: close\r\n\r\nx").await;
+        let i = client.probe(&gz).await.unwrap();
+        assert!(!i.range_verified, "ranges of compressed bytes are not the file's");
     }
 
     #[tokio::test]

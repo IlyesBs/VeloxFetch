@@ -68,6 +68,13 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
 * Only http(s) redirects are followed (capped). `Accept-Encoding: identity` so byte ranges are
   meaningful. `Range` responses are validated against what was requested (status, `Content-Range`);
   `If-Range` guards against the file changing mid-download.
+* **Resume integrity** (`docs/resume-integrity.md`):
+  * a ranged answer is refused if it is compressed, carries another strong ETag, or states another total size;
+  * completed segments are hashed and re-verified before being trusted after a crash or an outside change of the
+    `.part` file;
+  * a broken segment map is never resumed or finished.
+  * A segment hash proves only that local bytes did not change. End-to-end authenticity needs a strong validator or
+    a trusted checksum, and is not claimed otherwise.
 * Downloads land in a `.part` file and are renamed only after size (and checksum, if supplied)
   verification. A checksum mismatch deletes the file.
 * **Checksum trust:** a checksum is only honoured when supplied by the caller. The engine never

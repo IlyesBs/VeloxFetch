@@ -706,6 +706,7 @@
   "e.folder": "That folder is not one VeloxFetch may write to. Choose the folder again, then Retry.",
   "e.webPage": "The site sent a web page instead of the file (usually a sign-in or \"file not available\" page), so nothing was saved. Download it from your browser with \"Send cookies\" turned on in the VeloxFetch extension, or check that the file is shared publicly.",
   "e.checksum": "The file is not the one expected: its checksum does not match, so it was not kept.",
+  "e.sourceChanged": "The file changed on the server during the download, so its new parts were not mixed with the saved ones. Retry checks the server again and starts over safely if needed.",
   "e.exists": "A file with this name already exists in the folder. Rename or move it, then Retry.",
   "e.incomplete": "The server sent less than it announced. Retry continues the download.",
   "e.redirect": "The link redirected to an address on this computer or network, which is not allowed.",

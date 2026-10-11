@@ -35,10 +35,15 @@ pub(super) struct DiagRecord {
 
 impl DiagRecord {
     fn push(&mut self, level: &str, text: String, at: i64) {
+        self.push_event(level, text, at, false);
+    }
+
+    fn push_event(&mut self, level: &str, text: String, at: i64, noise: bool) {
         if self.events.len() >= MAX_EVENTS {
-            self.events.remove(0);
+            let i = self.events.iter().position(|e| e.noise).unwrap_or(0);
+            self.events.remove(i);
         }
-        self.events.push(DiagEventDto { at, level: level.to_string(), text });
+        self.events.push(DiagEventDto { at, level: level.to_string(), text, noise });
     }
 
     fn avg_speed(&self) -> u64 {
@@ -63,7 +68,8 @@ impl DiagRecord {
         for ev in p.events() {
             let at = ev.at.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
             let (level, text) = describe(&ev.kind);
-            self.push(level, redactor.redact(&text).into_owned(), at);
+            let noise = matches!(ev.kind, RunEventKind::Retrying { .. } | RunEventKind::Throttled { .. });
+            self.push_event(level, redactor.redact(&text).into_owned(), at, noise);
         }
     }
 }
@@ -105,6 +111,20 @@ fn describe(kind: &RunEventKind) -> (&'static str, String) {
         RunEventKind::WaitingForServer => {
             ("info", "The server is preparing the file (it answers when it is ready): waiting for it".to_string())
         }
+        RunEventKind::Reverified { checked, invalid: 0, unhashed, .. } => (
+            "info",
+            format!(
+                "The saved part changed since it was last saved (a crash or an outside change): {checked} finished parts checked again, all intact{}",
+                if *unhashed > 0 { format!("; {unhashed} older parts could not be checked") } else { String::new() }
+            ),
+        ),
+        RunEventKind::Reverified { checked, invalid, invalid_bytes, .. } => (
+            "warn",
+            format!(
+                "The saved part changed since it was last saved: {invalid} of {checked} finished parts no longer match their check and are downloaded again ({})",
+                human_bytes(*invalid_bytes)
+            ),
+        ),
     }
 }
 
@@ -150,7 +170,13 @@ impl DownloadManager {
     /// Average speed and time spent transferring over every finished attempt (`(0, 0)` if none), for the
     /// detail view once the live numbers of a run are gone.
     pub(super) async fn stored_average(&self, id: i64) -> (u64, u64) {
-        let d = self.load_diag(id).await;
+        let _consistent = self.inner.diag_lock.lock().await;
+        let mut d = self.load_diag(id).await;
+        // A run that just ended counts before its numbers are saved, like after.
+        if let Some(p) = self.inner.finishing.lock().unwrap().get(&id).cloned() {
+            d.bytes = d.bytes.saturating_add(p.received());
+            d.active_ms = d.active_ms.saturating_add(p.transfer_started().map_or(0, |t| t.elapsed().as_millis() as u64));
+        }
         (d.avg_speed(), d.active_ms / 1000)
     }
 
@@ -193,6 +219,8 @@ impl DownloadManager {
                         run_ms = p.transfer_started().map_or(0, |t| t.elapsed().as_millis() as u64);
                         d.add_run(p, tracker_peak, &redactor);
                     }
+                    // Saved below, under the same lock the diagnostics are read with: never shown twice, never missing.
+                    self.inner.finishing.lock().unwrap().remove(&id);
                     let now = ::diagnostics::now_ms();
                     let prior_bytes = d.bytes;
                     match res {
@@ -286,8 +314,9 @@ impl DownloadManager {
         let rec = self.load(id).await?;
         let dto = self.to_dto(&rec);
         let redactor = self.redactor();
+        let _consistent = self.inner.diag_lock.lock().await;
         let mut d = self.load_diag(id).await;
-        let live = self.active_handle_progress(id);
+        let live = self.active_handle_progress(id).or_else(|| self.inner.finishing.lock().unwrap().get(&id).cloned());
         if let Some(p) = &live {
             let peak = self.inner.trackers.lock().unwrap().get(&id).map_or(0, |t| t.peak);
             d.add_run(p, peak, &redactor);

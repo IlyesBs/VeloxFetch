@@ -467,6 +467,37 @@ Results (Linux):
 Not yet checked: a complete AppImage built by the script (the release build runs only when asked).
 
 
+## Resume integrity (October 2026)
+
+See `docs/resume-integrity.md` §8. Tests:
+* `crates/downloader-core/src/verify.rs` (6);
+* `crates/http-client` ranged-answer checks (2 new);
+* `tests/integration/tests/reverify.rs` (11): 3 runs in a row green. Added: a same-size change with no `ETag`,
+  and one with an unchanged date, are caught at the joins mid-run and the retry gives entirely the new version; a
+  change while paused with the same date is caught and never mixed;
+* `tests/integration/tests/crash.rs`: killed while invalidating a changed segment (1 new; whole suite 33 green). The
+  join checks cost 1 KiB per request: recovery still stays under the suite's "file + 64 KiB" budget;
+* `engine.rs` `event_tests`: a flood of retries never pushes out the run's milestones;
+* stress: 30 parallel copies of `reverify` (16 threads each) and 25 runs in a row, all green after the fixes below.
+  Under load they first showed two real problems, both fixed: milestones evicted by retry lines, and diagnostics
+  read in the moment between a run's end and the saving of its timeline;
+* `relink.rs` and `reverify.rs` delete their folders when they finish. Leftover test folders in a RAM-backed `/tmp`
+  (11 GB after many runs of the older suites) slowed the whole machine.
+
+Results (Linux, 2026-10-11):
+* Rust workspace 766 passed (after the join checks, timeline fixes and test-folder sweep); clippy (`--locked`,
+  `-D warnings`) and fmt clean; vitest 130; tsc clean;
+* `tests/integration/src/lib.rs` `sweep_stale_test_folders`: once per test process (Linux), removes `velox-*-<pid>-*`
+  temp folders of test processes that have ended, so the temp folder no longer fills up (36 MB after a full run;
+  it was 11 GB);
+* policy 42/42. The usual commands (`cargo test --workspace`, `cargo clippy --all-targets`, the gate) leave a clean
+  `target/debug/velox-desktop`. Only an ad-hoc `cargo build --workspace --all-targets` builds it with the crash-test
+  hook (feature unification), which the policy check then rightly refuses;
+* e2e views, ipc, intelligence, usability, browser, ui ×4: all pass.
+* `desktop-ui.mjs`: the profile drop-down check read the field before the app's `profiles` event had re-rendered
+  it (a controlled field). It failed 2 of 4 runs. It now waits for the field (up to 5 s); 3 of 3 runs pass. This is
+  a test race, not an app bug: the field shows the pick once the event arrives.
+
 ## Use a new link (October 2026)
 
 See `docs/new-link-recovery.md` §8. Tests:

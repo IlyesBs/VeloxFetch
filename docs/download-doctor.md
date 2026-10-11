@@ -237,3 +237,12 @@ comes with a real button on the Details page: **Use a new link…**. It opens th
 `docs/new-link-recovery.md`. Download Doctor's diagnosis and retry policy are unchanged: a 401 / 403 / 404 is still
 never retried endlessly, and expired links are still told apart from real refusals by the evidence it already has.
 
+## Source changed and re-verification (October 2026)
+
+* New failure `source_changed`: a ranged answer described another version of the file (another strong ETag, or
+  another total in `Content-Range`). Category Integrity, Critical, retryable → **Restart safely**. A retry probes
+  again; the saved part is not continued for another version, so the download starts over cleanly.
+* The timeline says when saved segments were checked again after a crash or an outside change, and how many no
+  longer matched (they are downloaded again).
+* Rules and limits: `docs/resume-integrity.md`.
+

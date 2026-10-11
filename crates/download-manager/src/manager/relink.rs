@@ -206,6 +206,7 @@ impl DownloadManager {
                 Ok(Ok(bytes)) if bytes == saved => {}
                 Ok(Ok(_)) => return Ok(Sample::Differed),
                 Ok(Err(DownloadError::Http(http_client::HttpError::RangeNotHonored(_)))) => return Err(SampleError::Ranges),
+                Ok(Err(DownloadError::Http(http_client::HttpError::SourceChanged(_)))) => return Ok(Sample::Differed),
                 Ok(Err(e)) => return Err(SampleError::Refused(e.http_status())),
                 Err(_) => return Err(SampleError::Refused(None)),
             }

@@ -321,6 +321,9 @@ pub struct DiagEventDto {
     pub level: String,
     /// Already cleaned of secrets.
     pub text: String,
+    /// A retry or a throttling notice: the first to go when the timeline is full (milestones stay).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub noise: bool,
 }
 
 /// Local diagnostics of one download, over every attempt. Nothing in it is a secret: link credentials, query

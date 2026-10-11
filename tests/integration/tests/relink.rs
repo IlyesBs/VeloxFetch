@@ -19,6 +19,15 @@ struct Env {
     db: PathBuf,
 }
 
+impl Drop for Env {
+    // The test's folder goes away with it (the temp folder may be in memory).
+    fn drop(&mut self) {
+        if let Some(base) = self.root.parent() {
+            let _ = std::fs::remove_dir_all(base);
+        }
+    }
+}
+
 fn env(name: &str) -> Env {
     let base = std::env::temp_dir().join(format!("velox-relink-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);

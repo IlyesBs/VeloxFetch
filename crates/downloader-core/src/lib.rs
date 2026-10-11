@@ -14,6 +14,7 @@ pub mod retry;
 pub mod scheduler;
 pub mod segment;
 pub mod store;
+pub mod verify;
 
 pub use adaptive::{AdaptiveConfig, AdaptiveController, AdaptiveGate, Sample};
 pub use engine::{

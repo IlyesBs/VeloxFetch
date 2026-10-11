@@ -883,3 +883,36 @@ async fn a_database_that_cannot_be_written_never_produces_a_corrupt_file() {
     }
     recover_and_finish(&base, &srv, &url, &data).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_crash_while_a_changed_segment_is_being_invalidated_is_detected_again_and_never_trusted() {
+    // Paused cleanly part-way, then one byte of a finished part changes on disk. The next run finds it and is killed
+    // just before saving the invalidation: the following start must find it again (idempotent) and finish exactly.
+    let (srv, data, base) = slow_server("reverify-crash", 6 * MB, 12).await;
+    let url = srv.url(&format!("/{FILE}"));
+    {
+        let m = DownloadManager::new(config(&base)).await.unwrap();
+        let d = m.create_download(NewDownload { url: url.clone(), filename: Some(FILE.into()), ..Default::default() }).await.unwrap();
+        let t = Instant::now();
+        while m.get_download(d.id).await.unwrap().downloaded < 2 * MB as u64 {
+            assert!(t.elapsed() < Duration::from_secs(20), "never got going");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        m.pause_download(d.id).await.unwrap();
+        m.shutdown().await;
+    }
+    let store = SqliteStore::open(db_path(&base)).unwrap();
+    let rec = store.list().unwrap().into_iter().next().unwrap();
+    let seg = rec.segments.iter().find(|s| s.is_complete() && s.hash.is_some()).expect("a hashed finished part").clone();
+    drop(store);
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        std::thread::sleep(Duration::from_millis(20));
+        let mut f = std::fs::OpenOptions::new().write(true).open(downloader_core::part_path(&rec.destination)).unwrap();
+        f.seek(SeekFrom::Start(seg.start + 3)).unwrap();
+        f.write_all(&[data[seg.start as usize + 3] ^ 0x55]).unwrap();
+    }
+    crash_at("run", &url, &base, "reverify.before_save").await;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::ZERO;
+    recover_and_finish(&base, &srv, &url, &data).await;
+}

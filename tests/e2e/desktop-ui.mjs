@@ -247,6 +247,8 @@ try {
   await waitFor(() => q("[data-testid=select-menu]"), "the list again");
   const clicked = (await page(`(() => { const o = [...document.querySelectorAll('[data-testid=select-menu] [role=option]')].find((r) => /Fast/.test(r.textContent)); if (!o) return 'no row'; o.click(); return 'clicked'; })()`)).ok;
   await waitFor(async () => (await invoke("get_profiles")).ok?.active === "fast", "the pick to apply", 5000).catch(() => {});
+  // The field is controlled by the app's state: it shows the pick once the app's "profiles" event has arrived.
+  await waitFor(async () => (await page(`document.querySelector('${sw}').value`)).ok === "fast", "the field to show the pick", 5000).catch(() => {});
   const picked = { clicked, active: (await invoke("get_profiles")).ok?.active, value: (await page(`document.querySelector('${sw}').value`)).ok, open: await q("[data-testid=select-menu]"), opts: (await page(`[...document.querySelector('${sw}').options].map((o) => o.value + ':' + o.text).join()`)).ok };
   check("choosing a row works like the system list (the app's state changes)", picked.active === "fast" && picked.value === "fast" && !picked.open, JSON.stringify(picked));
   await page(`(() => { const s = document.querySelector('${sw}'); s.focus(); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return true; })()`);

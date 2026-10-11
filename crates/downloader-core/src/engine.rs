@@ -141,6 +141,10 @@ pub enum RunEventKind {
     Renamed { to: String },
     /// The server did not answer the quick check: it is preparing the file. Waiting for it (one request).
     WaitingForServer,
+    /// The `.part` file changed since its segment hashes were saved (a crash after more writes, an outside change):
+    /// its completed segments were hashed again before being trusted. `invalid` ones were emptied and are
+    /// downloaded again; `unhashed` ones (saved by an older version) could not be checked.
+    Reverified { checked: usize, invalid: usize, unhashed: usize, invalid_bytes: u64 },
 }
 
 #[derive(Debug, Clone)]
@@ -267,7 +271,11 @@ impl ProgressHandle {
     fn note(&self, kind: RunEventKind) {
         let mut ev = self.0.events.lock().unwrap_or_else(|p| p.into_inner());
         if ev.len() >= MAX_RUN_EVENTS {
-            ev.pop_front();
+            // A flood of retries drops the oldest retry, never the run's milestones (resume, start over, re-checks).
+            match ev.iter().position(|e| matches!(e.kind, RunEventKind::Retrying { .. } | RunEventKind::Throttled { .. })) {
+                Some(i) => drop(ev.remove(i)),
+                None => drop(ev.pop_front()),
+            }
         }
         ev.push_back(RunEvent { at: std::time::SystemTime::now(), kind });
     }
@@ -908,6 +916,7 @@ impl Downloader {
                         for s in &mut rec.segments {
                             s.status = if s.is_complete() { SegmentStatus::Completed } else { SegmentStatus::Pending };
                         }
+                        self.reverify_if_touched(&mut rec, &progress).await?;
                         (rec, true)
                     }
                     Err(reason) => {
@@ -957,6 +966,7 @@ impl Downloader {
                     content_type: None,
                     server: None,
                     request_headers: Vec::new(),
+                    part_stamp: None,
                 };
                 (self.plan_fresh(rec, &info).await?, false)
             }
@@ -1043,12 +1053,32 @@ impl Downloader {
             Err(e) => {
                 rec.status = DownloadStatus::Failed;
                 rec.last_error = Some(e.to_string());
+                if matches!(e, DownloadError::Http(HttpError::SourceChanged(_))) {
+                    // The saved part belongs to another version than the server's now: never continued. Without its
+                    // validators the resume check refuses it and the download starts over (saved before anything else).
+                    rec.etag = None;
+                    rec.last_modified = None;
+                    rec.part_stamp = None;
+                }
                 let _ = self.persist(&mut rec).await;
                 return Err(e);
             }
         };
         // Sequential transfers report the byte count they wrote; parallel ones the planned size.
         let size = if parallel { total } else { progress.snapshot().downloaded };
+        if parallel {
+            // Never finalize from a segment map with a gap, an overlap or a part that is not complete.
+            let segs = progress.snapshot().segments;
+            let problem = crate::verify::coverage_problem(&segs, total)
+                .or_else(|| segs.iter().find(|s| !s.is_complete()).map(|s| format!("segment {} is not complete", s.id)));
+            if let Some(why) = problem {
+                let e = DownloadError::Internal(format!("cannot finish: {why}"));
+                rec.status = DownloadStatus::Failed;
+                rec.last_error = Some(e.to_string());
+                let _ = self.persist(&mut rec).await;
+                return Err(e);
+            }
+        }
 
         // ---- verify + finalize ---------------------------------------------------------------
         rec.status = DownloadStatus::Verifying;
@@ -1128,8 +1158,41 @@ impl Downloader {
             Ok(m) => return Err(format!(".part size {} != expected {:?}", m.len(), rec.total_size)),
             Err(_) => return Err(".part file missing".into()),
         }
-        if rec.segments.iter().any(|s| s.downloaded > s.len()) {
-            return Err("stored segment state is inconsistent".into());
+        if let Some(why) = crate::verify::coverage_problem(&rec.segments, rec.total_size.unwrap_or(0)) {
+            return Err(format!("stored segment state is inconsistent: {why}"));
+        }
+        Ok(())
+    }
+
+    /// Before trusting saved segments again: if the `.part` file is not exactly as it was when their hashes were saved
+    /// (see `verify`), hash every completed one again and empty the ones that changed. The emptied state is saved
+    /// before any writer starts, so a crash now just runs the check again (the stamp still differs).
+    async fn reverify_if_touched(&self, rec: &mut DownloadRecord, progress: &ProgressHandle) -> Result<()> {
+        let part = part_path(&rec.destination);
+        let p = part.clone();
+        let now = blocking(move || Ok(crate::verify::stamp(&p))).await?;
+        if rec.part_stamp.is_some() && rec.part_stamp == now {
+            return Ok(()); // untouched since the last checkpoint: nothing to read
+        }
+        let mut segs = rec.segments.clone();
+        let r = blocking(move || crate::verify::reverify(&part, &mut segs).map(|r| (r, segs)).map_err(DownloadError::from)).await?;
+        let (report, segs) = r;
+        if report.checked == 0 && report.unhashed == 0 {
+            return Ok(());
+        }
+        tracing::info!(checked = report.checked, invalid = report.invalid, unhashed = report.unhashed, "saved segments checked again");
+        progress.note(RunEventKind::Reverified {
+            checked: report.checked,
+            invalid: report.invalid,
+            unhashed: report.unhashed,
+            invalid_bytes: report.invalid_bytes,
+        });
+        if report.invalid > 0 {
+            rec.segments = segs;
+            rec.downloaded = rec.segments.iter().map(|s| s.downloaded).sum();
+            rec.part_stamp = None;
+            failpoint::hit("reverify.before_save");
+            self.persist(rec).await?;
         }
         Ok(())
     }
@@ -1154,6 +1217,7 @@ impl Downloader {
         rec.server = info.server.clone();
         rec.total_size = info.content_length;
         rec.downloaded = 0;
+        rec.part_stamp = None; // new segments: no hashes yet
         match info.content_length {
             Some(size) if info.supports_parallel() && size > 0 => {
                 let (_, ceiling) = planner::connection_limits(size, self.max_connections(), self.cfg.min_segment_size);
@@ -1252,6 +1316,8 @@ impl Downloader {
         let group = cancel.child_token();
         let mut set = JoinSet::new();
         let claims = Arc::new(Claims::new(progress.snapshot().segments.len()));
+        // Joins between bytes written by different requests, checked before the file may finish (see `Joins`).
+        let joins = Arc::new(Mutex::new(Joins::default()));
         let pending: Vec<Segment> = progress.snapshot().segments.into_iter().filter(|s| !s.is_complete()).collect();
         // Segments take connection slots in the order they are spawned (the gate is first come, first served).
         // Each segment's first connection queues in this order (`acquire_in_turn`); retries queue behind.
@@ -1259,6 +1325,7 @@ impl Downloader {
             let id = seg.id;
             let first_try = std::sync::atomic::AtomicBool::new(true);
             let claims = claims.clone();
+            let joins = joins.clone();
             let (client, url, part, group, progress, validator, policy, gate, throttle, controller, extras) = (
                 self.client(),
                 url.clone(),
@@ -1298,8 +1365,8 @@ impl Downloader {
                             }
                         },
                         |_| {
-                            let (client, url, part, group, progress, validator, throttle, gate, extras, claims) =
-                                (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras, &claims);
+                            let (client, url, part, group, progress, validator, throttle, gate, extras, claims, joins) =
+                                (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras, &claims, &joins);
                             let mut in_turn = first_try.swap(false, std::sync::atomic::Ordering::Relaxed);
                             async move {
                                 // A connection slot is held only while a request is actually in flight, never
@@ -1365,14 +1432,36 @@ impl Downloader {
                                         extras
                                     };
                                     progress.set_status(id, SegmentStatus::Downloading);
+                                    // Overlap check: a request that continues saved bytes starts a little earlier, and those
+                                    // bytes must be the ones on disk. A server that changed the file (even with no version
+                                    // tag at all) is caught at every join, before anything new is written.
+                                    let back = overlap_before(progress, &cur, from);
+                                    if back == 0 && from > 0 {
+                                        // Nothing saved before it yet: this join is checked later, by the tail of the
+                                        // request that writes the bytes before it (or a final look).
+                                        joins.lock().unwrap().unverified.insert(from);
+                                    }
+                                    // A run that ends at a part's end reads a little past it: the tail is kept (hashed) to
+                                    // check the join with whatever request writes the next part.
+                                    // Only needed when the part after it already started with nothing saved before it.
+                                    let tail_needed = capped.is_none() && end + 1 < total && joins.lock().unwrap().unverified.contains(&(end + 1));
+                                    let tail_end = if tail_needed { (end + OVERLAP).min(total - 1) } else { end };
                                     let sent = Instant::now();
-                                    let stream = client.get_range_with(url, from, end, validator.as_deref(), extras).await?;
+                                    let stream = client.get_range_with(url, from - back, tail_end, validator.as_deref(), extras).await?;
+                                    // The answer's total must be the download's: another size is another file, whose
+                                    // bytes must never be written among the saved ones.
+                                    if stream.total().is_some_and(|t| t != total) {
+                                        return Err(HttpError::SourceChanged(format!("Content-Range total {:?}, expected {total}", stream.total())).into());
+                                    }
                                     gate.server_accepted();
                                     progress.record_latency(sent.elapsed());
                                     progress.note_status(206); // `get_range_with` accepts nothing else
                                     progress.note_peak(gate.peak_active());
                                     let mut stream = std::pin::pin!(stream.into_stream());
                                     let mut excess = None;
+                                    if back > 0 {
+                                        excess = check_overlap(&mut stream, part, from - back, back, id).await?;
+                                    }
                                     let request_bytes = AtomicU64::new(0);
                                     let capped_since = std::sync::OnceLock::new();
                                     for (i, claim) in run.iter().enumerate() {
@@ -1455,6 +1544,23 @@ impl Downloader {
                                             None => progress.set_status(seg, SegmentStatus::Completed),
                                         }
                                     }
+                                    let last = run.last().map(|c| c.id);
+                                    if tail_end > end && last.is_some_and(|l| progress.segment(l).is_some_and(|s| s.is_complete() && s.end == end)) {
+                                        let want = tail_end - end;
+                                        let mut tail = bytes::BytesMut::new();
+                                        if let Some(x) = excess.take() {
+                                            tail.extend_from_slice(&x);
+                                        }
+                                        while (tail.len() as u64) < want {
+                                            match tokio::time::timeout(Duration::from_secs(10), stream.next()).await {
+                                                Ok(Some(Ok(c))) => tail.extend_from_slice(&c),
+                                                _ => break, // no tail: that join gets a final look instead
+                                            }
+                                        }
+                                        if tail.len() as u64 >= want {
+                                            joins.lock().unwrap().tails.insert(end + 1, tail_digest(&tail[..want as usize]));
+                                        }
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -1492,8 +1598,78 @@ impl Downloader {
         match first_err {
             Some(DownloadError::Cancelled) | None if cancel.is_cancelled() => Err(DownloadError::Cancelled),
             Some(e) => Err(e),
-            None => Ok(gate.peak_active().max(1)),
+            None => {
+                let joins = std::mem::take(&mut *joins.lock().unwrap());
+                self.check_joins(url, part, total, validator.as_deref(), extras, joins, cancel).await?;
+                Ok(gate.peak_active().max(1))
+            }
         }
+    }
+
+    /// Every join between two requests' bytes that was not checked when the second request began: compared with the
+    /// tail the first request read past its end; without a tail, with a small window fetched now. A difference means
+    /// two versions of the file met there: `SourceChanged`, the file is not finished.
+    #[allow(clippy::too_many_arguments)]
+    async fn check_joins(
+        &self,
+        url: &Url,
+        part: &Path,
+        total: u64,
+        validator: Option<&str>,
+        extras: &RequestExtras,
+        joins: Joins,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let mut file = tokio::fs::File::open(part).await?;
+        for b in joins.unverified {
+            if cancel.is_cancelled() {
+                return Err(DownloadError::Cancelled);
+            }
+            let len = OVERLAP.min(total - b);
+            let mut saved = vec![0u8; len as usize];
+            tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(b)).await?;
+            tokio::io::AsyncReadExt::read_exact(&mut file, &mut saved).await?;
+            let same = match joins.tails.get(&b) {
+                Some(d) => *d == tail_digest(&saved),
+                None => {
+                    // A final look: the bytes on both sides of the join, fetched again in one request.
+                    let start = b - OVERLAP.min(b);
+                    let mut before = vec![0u8; (b - start) as usize];
+                    tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start)).await?;
+                    tokio::io::AsyncReadExt::read_exact(&mut file, &mut before).await?;
+                    let body = self.fetch_exact(url, start, b + len - 1, validator, extras).await?;
+                    body[..before.len()] == before[..] && body[before.len()..] == saved[..]
+                }
+            };
+            if !same {
+                return Err(HttpError::SourceChanged(format!("the bytes at offset {b} come from another version of the file")).into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Exactly the bytes `start..=end`, from one checked ranged request (retried like a segment).
+    async fn fetch_exact(&self, url: &Url, start: u64, end: u64, validator: Option<&str>, extras: &RequestExtras) -> Result<Vec<u8>> {
+        let client = self.client();
+        retry::with_retry(
+            &self.cfg.retry,
+            &CancellationToken::new(),
+            |_, _, _| {},
+            |_| async {
+                let mut body = std::pin::pin!(client.get_range_with(url, start, end, validator, extras).await?.into_stream());
+                let want = (end - start + 1) as usize;
+                let mut out = Vec::with_capacity(want);
+                while out.len() < want {
+                    match body.next().await {
+                        Some(c) => out.extend_from_slice(&c?),
+                        None => return Err(DownloadError::ShortBody { index: 0, got: out.len() as u64, expected: want as u64 }),
+                    }
+                }
+                out.truncate(want);
+                Ok(out)
+            },
+        )
+        .await
     }
 
     /// Single-connection transfer. Not resumable: every attempt restarts from byte 0.
@@ -1785,6 +1961,72 @@ fn spawn_sampler(
 /// Durable checkpoint. Order matters for crash safety: snapshot the counters, fsync the
 /// data those counters describe, and only then commit the counters. A crash can therefore
 /// lose progress, but the database never claims bytes the disk doesn't have.
+/// Joins of one parallel run that still need checking, and the tails read past requests' ends (offset → digest).
+#[derive(Default)]
+struct Joins {
+    unverified: std::collections::BTreeSet<u64>,
+    tails: std::collections::HashMap<u64, [u8; 32]>,
+}
+
+fn tail_digest(b: &[u8]) -> [u8; 32] {
+    use sha2::Digest;
+    sha2::Sha256::digest(b).into()
+}
+
+/// Bytes re-fetched before a request's start to check the join (see `overlap_before`).
+pub const OVERLAP: u64 = 1024;
+
+/// How many bytes before `from` are already saved and final, to fetch again and compare: the segment's own written
+/// prefix (written by an earlier, finished request), else the end of the complete segment just before it.
+fn overlap_before(progress: &ProgressHandle, cur: &Segment, from: u64) -> u64 {
+    if from == 0 {
+        return 0;
+    }
+    if cur.downloaded > 0 {
+        return cur.downloaded.min(OVERLAP);
+    }
+    // `Completed` is set only once its writer has flushed (counters move as bytes are handed to the file, a little
+    // earlier): only then are its last bytes certainly readable.
+    let prev = progress.snapshot().segments.into_iter().find(|s| s.end + 1 == from);
+    prev.filter(|s| s.is_complete() && s.status == SegmentStatus::Completed).map_or(0, |s| s.len().min(OVERLAP))
+}
+
+/// Read the first `len` bytes of a ranged answer (they repeat saved bytes at `at`) and compare them with the
+/// `.part` file. Equal: returns what came after them, to write. Different: `SourceChanged`, nothing is written.
+async fn check_overlap<S>(stream: &mut std::pin::Pin<&mut S>, part: &Path, at: u64, len: u64, seg: usize) -> Result<Option<bytes::Bytes>>
+where
+    S: futures_util::Stream<Item = std::result::Result<bytes::Bytes, HttpError>>,
+{
+    let mut got = bytes::BytesMut::with_capacity(len as usize);
+    while (got.len() as u64) < len {
+        match stream.next().await {
+            Some(chunk) => got.extend_from_slice(&chunk?),
+            None => return Err(DownloadError::ShortBody { index: seg, got: got.len() as u64, expected: len }),
+        }
+    }
+    let rest = got.split_off(len as usize);
+    let read_saved = || async {
+        let mut saved = vec![0u8; len as usize];
+        let mut f = tokio::fs::File::open(part).await?;
+        tokio::io::AsyncSeekExt::seek(&mut f, std::io::SeekFrom::Start(at)).await?;
+        tokio::io::AsyncReadExt::read_exact(&mut f, &mut saved).await?;
+        Ok::<_, DownloadError>(saved)
+    };
+    let mut same = got[..] == read_saved().await?[..];
+    // Belt and braces: a writer's very last bytes on their way to the file. Look again (disk only) before deciding.
+    for wait in [50, 200, 750] {
+        if same {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(wait)).await;
+        same = got[..] == read_saved().await?[..];
+    }
+    if !same {
+        return Err(HttpError::SourceChanged(format!("the {len} bytes before offset {} differ from the saved ones", at + len)).into());
+    }
+    Ok((!rest.is_empty()).then(|| rest.freeze()))
+}
+
 async fn checkpoint(
     store: &Arc<dyn DownloadStore>,
     rec: &mut DownloadRecord,
@@ -1799,8 +2041,32 @@ async fn checkpoint(
         f.sync_data().await?;
     }
     failpoint::hit("checkpoint.after_fsync"); // data is durable, the counters are not yet
+    let mut segments = snap.segments;
+    if rec.resumable {
+        // Segments completed since the last checkpoint are hashed now, from synced bytes, and saved in the same write
+        // as their counters (see `verify`). The stamp is taken after: a clean stop's last checkpoint runs once every
+        // writer has stopped, so its stamp is exact.
+        crate::verify::carry_hashes(&rec.segments, &mut segments);
+        let (p, mut hashed) = (part.to_path_buf(), segments.clone());
+        let (result, stamp) = blocking(move || {
+            let r = crate::verify::hash_new(&p, &mut hashed).map(|_| hashed);
+            Ok((r, crate::verify::stamp(&p)))
+        })
+        .await?;
+        match result {
+            Ok(h) => {
+                segments = h;
+                rec.part_stamp = stamp;
+            }
+            Err(e) => {
+                // Saved without the new hashes and without a stamp: checked again before being trusted.
+                tracing::warn!(error = %e, "could not hash completed segments; they will be checked again on resume");
+                rec.part_stamp = None;
+            }
+        }
+    }
     rec.downloaded = snap.downloaded;
-    rec.segments = snap.segments;
+    rec.segments = segments;
     control.sync_into(rec);
     let (store, snapshot) = (store.clone(), rec.clone());
     rec.id = Some(blocking(move || store.save(&snapshot)).await?);
@@ -1834,5 +2100,24 @@ mod capped_tests {
         assert_eq!(capped_connections(3 * 1024 * 1024, 100.0 * kb, 32), None, "near what it gets anyway: untouched");
         assert_eq!(capped_connections(800 * 1024, 0.0, 32), None, "not measured yet: untouched");
         assert_eq!(capped_connections(10 * 1024, 100.0 * kb, 1), Some(1), "never more than it had");
+    }
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[test]
+    fn a_flood_of_retries_never_pushes_out_the_runs_milestones() {
+        let p = ProgressHandle::new();
+        p.note(RunEventKind::Reverified { checked: 3, invalid: 1, unhashed: 0, invalid_bytes: 10 });
+        p.note(RunEventKind::Resuming { from: 5 });
+        for n in 0..200 {
+            p.note(RunEventKind::Retrying { part: Some(1), attempt: n, error: "reset".into(), delay: Duration::ZERO });
+        }
+        let ev = p.events();
+        assert_eq!(ev.len(), MAX_RUN_EVENTS);
+        assert!(matches!(ev[0].kind, RunEventKind::Reverified { .. }) && matches!(ev[1].kind, RunEventKind::Resuming { .. }));
+        assert!(matches!(&ev[MAX_RUN_EVENTS - 1].kind, RunEventKind::Retrying { attempt: 199, .. }), "the newest retries are kept");
     }
 }
