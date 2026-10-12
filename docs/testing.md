@@ -620,3 +620,11 @@ and the unit tests 3 of 5; after it, 11 runs of the e2e in a row pass.
 
 Also run without a regression: `desktop-ipc`, `desktop-usability` (Sign in from the card), `desktop-intelligence`,
 `desktop-views`, `desktop-ui`, `desktop-card-flash`, and every Rust test.
+
+## `desktop-diagnostics.mjs`: Retry found by its id (October 2026)
+
+The suite failed at "second attempt" since "Use a new link" (`feat_session_link_refresh`): it pressed
+`[data-testid=detail-error] button:last-child`, which now matches the Doctor panel's "Use a new link…" before the
+Retry button. The app was right; the test pressed the wrong button. The Retry button of the details' error box has
+its own id (`detail-retry`) and the test uses it: 3 runs in a row pass.
+

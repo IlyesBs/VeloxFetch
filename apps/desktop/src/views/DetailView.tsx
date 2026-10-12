@@ -159,7 +159,7 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
                   <Icon name="folder" size={15} /> {t("doc.btn.openFolder")}
                 </button>
               )}
-              <button className="btn" onClick={() => void actions.retry(id)}>
+              <button className="btn" data-testid="detail-retry" onClick={() => void actions.retry(id)}>
                 <Icon name="retry" size={15} /> {t(doctorButtons(d.doctor ?? NO_DOCTOR).find((b) => b.action === "retry")?.label ?? "mj.retry")}
               </button>
             </div>
