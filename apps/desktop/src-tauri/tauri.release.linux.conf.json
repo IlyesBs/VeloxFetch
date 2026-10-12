@@ -12,23 +12,19 @@
     },
     "linux": {
       "deb": {
-        "depends": [
+        "recommends": [
           "gstreamer1.0-plugins-base",
           "gstreamer1.0-plugins-good",
-          "gstreamer1.0-libav"
-        ],
-        "recommends": [
+          "gstreamer1.0-libav",
           "libayatana-appindicator3-1",
           "gstreamer1.0-plugins-bad",
           "gstreamer1.0-pulseaudio | gstreamer1.0-pipewire"
         ]
       },
       "rpm": {
-        "depends": [
-          "gstreamer1-plugins-base",
-          "gstreamer1-plugins-good"
-        ],
         "recommends": [
+          "gstreamer1-plugins-base",
+          "gstreamer1-plugins-good",
           "libayatana-appindicator-gtk3",
           "gstreamer1-plugin-libav",
           "gstreamer1-plugins-bad-free",

@@ -340,8 +340,9 @@ Details: `docs/download-intelligence.md`.
     "not there yet" that stops the player.
   - The start of the file is fetched first, even under a speed limit.
   - The player reconnects by itself, and says plainly when a format cannot be played on this computer.
-- **Linux packages:** the `.deb` and `.rpm` install the GStreamer plugins the player needs, and the AppImage carries
-  them. Details: `docs/smart-throttle-and-preview.md`.
+- **Linux packages:** the `.deb` and `.rpm` recommend the GStreamer plugins the player needs (a system that cannot
+  install a codec still installs the app), and the AppImage carries an allow-list of software playback plugins,
+  never the machine's hardware ones (they crashed it at start on other computers). Details: `docs/smart-throttle-and-preview.md`.
 
 ### Clipboard (opt-in)
 - When a copied text holds download links, the app offers to download them.
@@ -647,6 +648,8 @@ bash scripts/build-release.sh
 * the GStreamer plugins, with their folders found on Debian / Ubuntu, Fedora / openSUSE and Arch.
 
 If they still cannot be installed, it builds the AppImage without the bundle and warns; it never fails for this.
+Only the allow-listed software playback plugins go in (`scripts/appimage-media.sh`: 44 instead of 273 on Debian 13);
+VA-API, NVIDIA, QSV, V4L2, Vulkan and KMS plugins never do. The `.deb` / `.rpm` only recommend the media packages.
 Details: `docs/release-process.md`.
 
 **Signing:** not done yet, because it needs the owner's certificates.
@@ -805,6 +808,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-12 | `fix_linux_packaging_media` | Fix | Linux packages: the `.deb` required `gstreamer1.0-libav` (and base / good), so `apt` refused to install on systems whose FFmpeg libraries are pinned or mixed ("held broken packages"): the media packages are now Recommends in the `.deb` and `.rpm`, and the preview says "can't play" when a codec is absent. The AppImage crashed at start (`Segmentation fault`) because the bundler copied all 273 system GStreamer plugins, hardware ones (VA-API, NVIDIA, QSV, V4L2, Vulkan, KMS) included: the build now stages an allow-list of 44 software playback plugins, with a deny rule for hardware / device / network plugins, and the AppImage keeps its own GStreamer cache. | `docs/release-process.md` |
 | 2026-10-12 | `fix_npm_advisory` | Fix | The UI bundler's `source-map-js` moved from 1.2.1 to 1.2.2 (GHSA-68fv-2mgg-jv7q, a denial of service through crafted source maps; build time only, never shipped). Lockfile only. The release gate passes in full. | `docs/security.md` |
 | 2026-10-11 | `feat_chunk_reverification` | Feature / Fix | Resume integrity: per-segment SHA-256 saved with the segment (after `fsync`, same commit) and re-verified at resume when the `.part` file changed since (crash, outside change), so only changed parts are fetched again. Ranged answers refused when compressed, carrying another strong ETag (a server ignoring `If-Range` could mix two versions: fixed), or stating another total. Join checks (1 KiB overlaps and tails at every join) catch a same-size change even with no version tag; after a source change the saved part is never continued. The segment map is checked at resume and before finishing. New failure `source_changed` in Download Doctor. Schema v7 (backward compatible). | `docs/resume-integrity.md` |
 | 2026-10-11 | `feat_session_link_refresh` | Feature | Use a new link: a paused or failed download (expired signed link, ended session, mirror gone) continues from a fresh link (pasted, from the Doctor, or re-clicked in the browser). Saved bytes are reused only on proof of the same file: strong ETag + size + matching 64 KiB samples, and working ranges and a validator. "Likely" needs the user's word. Another file is refused and nothing changes. Same-origin credentials only, no secrets in logs, bounded (no retries, one check at a time). New command `use_new_link` (main window only); `Downloader::sample_range`. | `docs/new-link-recovery.md` |

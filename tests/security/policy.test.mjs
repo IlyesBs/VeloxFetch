@@ -763,3 +763,43 @@ test("smart throttle: process and executable names only (paths only when listed)
   assert.ok(!/processes|ProcessRefreshKind|sockets|connections\(/.test(io), "no per-program or per-connection traffic");
   assert.match(core, /MIN_FLOOR_BPS: u64 = 32 \* 1024;/, "the reserved minimum can never be zero: downloads never stop");
 });
+
+test("linux packages: media plugins never block the install, the AppImage never carries hardware plugins", { skip: process.platform === "win32" && "needs bash" }, async () => {
+  // .deb / .rpm: a media package the system cannot install (mixed or pinned repositories) must not stop the app
+  // from installing; the preview then says "can't play" for that format.
+  const linux = JSON.parse(read("apps", "desktop", "src-tauri", "tauri.release.linux.conf.json")).bundle.linux;
+  for (const kind of ["deb", "rpm"]) {
+    const hard = (linux[kind].depends ?? []).filter((d) => /gst|libav|ffmpeg/i.test(d));
+    assert.deepEqual(hard, [], `${kind}: media packages are recommended, never required`);
+    assert.ok(linux[kind].recommends.some((d) => /libav/.test(d)), `${kind}: the codecs are still recommended`);
+  }
+  // AppImage: only the allow-listed software plugins are handed to the bundler.
+  const build = read("scripts", "build-release.sh");
+  assert.match(build, /\. scripts\/appimage-media\.sh/);
+  assert.match(build, /stage_appimage_gst_plugins "\$\(gst_plugins_dir\)"/);
+  assert.match(build, /export GSTREAMER_PLUGINS_DIR="\$PWD\/\$gst_staged"/);
+  assert.doesNotMatch(build, /GSTREAMER_PLUGINS_DIR="\$\(gst_plugins_dir\)"/, "never the whole system folder");
+
+  const { execFileSync } = await import("node:child_process");
+  const os = await import("node:os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "velox-gst-"));
+  try {
+    const src = path.join(tmp, "system");
+    fs.mkdirSync(src);
+    const hardware = ["va", "vaapi", "nvcodec", "qsv", "msdk", "v4l2codecs", "video4linux2", "vulkan", "kms", "pipewire", "soup", "onnx"];
+    const software = ["coreelements", "typefindfunctions", "playback", "app", "audioconvert", "isomp4", "libav", "matroska", "vpx"];
+    for (const n of [...hardware, ...software, "x264", "festival"]) fs.writeFileSync(path.join(src, `libgst${n}.so`), n);
+    const stage = (from, to) =>
+      execFileSync("bash", ["-c", '. "$1"; stage_appimage_gst_plugins "$2" "$3"', "-", path.join(ROOT, "scripts", "appimage-media.sh"), from, to], { encoding: "utf8" }).trim();
+    const dst = path.join(tmp, "staged");
+    assert.equal(stage(src, dst), "", "every required plugin found");
+    assert.deepEqual(fs.readdirSync(dst).sort(), software.map((n) => `libgst${n}.so`).sort(), "software playback only");
+    // Even a list edited by mistake never lets a hardware plugin through.
+    const list = execFileSync("bash", ["-c", '. "$1"; for n in va nvcodec qsv vulkan kms v4l2codecs pipewire; do [[ "$n" =~ $APPIMAGE_GST_DENY_RE ]] || echo "$n"; done', "-", path.join(ROOT, "scripts", "appimage-media.sh")], { encoding: "utf8" });
+    assert.equal(list.trim(), "", "the deny rule covers the hardware plugins");
+    fs.rmSync(path.join(src, "libgstlibav.so"));
+    assert.equal(stage(src, dst), "libav", "a missing required plugin is reported (the AppImage is then built without the bundle)");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -39,6 +39,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# The AppImage's media plugin list (stage_appimage_gst_plugins).
+# shellcheck source=scripts/appimage-media.sh
+. scripts/appimage-media.sh
 
 install=1
 gate=full
@@ -251,7 +254,18 @@ case "$os" in
       have patchelf || patchelf_user_install || true
       missing="$(appimage_missing)"
     fi
-    if [ -n "$(gst_plugins_dir)" ]; then export GSTREAMER_PLUGINS_DIR="$(gst_plugins_dir)"; fi
+    # Only the software playback plugins go in (scripts/appimage-media.sh): the system folder also holds hardware
+    # plugins (VA-API, NVIDIA, QSV, V4L2, Vulkan...) that crash the AppImage on another computer.
+    if [ -n "$(gst_plugins_dir)" ]; then
+      gst_staged="target/appimage-gstreamer-plugins"
+      gst_missing="$(stage_appimage_gst_plugins "$(gst_plugins_dir)" "$gst_staged")"
+      if [ -z "$gst_missing" ]; then
+        export GSTREAMER_PLUGINS_DIR="$PWD/$gst_staged"
+        note "AppImage media plugins: $(ls "$gst_staged" | wc -l) software playback plugins"
+      else
+        missing="$missing$gst_missing"
+      fi
+    fi
     if [ -n "$(gst_helpers_dir)" ]; then export GSTREAMER_HELPERS_DIR="$(gst_helpers_dir)"; fi
     if [ -n "$missing" ]; then
       # Never a failed build for it: the AppImage is made without the media bundle (it then plays through the

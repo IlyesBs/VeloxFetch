@@ -678,3 +678,15 @@ Full rules: `docs/new-link-recovery.md` §6.
   in the app. `npm audit` is clean for the desktop UI and the browser extension, and the release gate
   (`scripts/security-gate.mjs`) passes in full.
 
+## Linux packages: install and start on every system (October 2026)
+
+* The `.deb` / `.rpm` only **recommend** the GStreamer packages. A system whose codec libraries are pinned or come
+  from mixed repositories can no longer be left with a half-configured package (`apt` "held broken packages").
+* The AppImage carries an **allow-list** of software playback plugins (`scripts/appimage-media.sh`). Hardware and
+  driver plugins (VA-API, NVIDIA, Intel QSV, V4L2, Vulkan, KMS), capture devices and network-service plugins
+  (`soup`, `curl`, `rtsp`, `webrtc`) are never carried: they ran another computer's driver code inside the app
+  and crashed it. Less code carried also means less code that can be reached through a crafted media file.
+* The AppImage's GStreamer uses its own plugin cache (`media_env.rs`); a cache path the user set is kept. Nothing
+  else in the environment changes, and installed packages are not affected.
+* Checked by the policy test "linux packages: ...": no media package is required, the build script hands the
+  bundler only the staged folder, and a staging run on a fake folder keeps only the allowed plugins.

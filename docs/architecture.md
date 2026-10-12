@@ -582,3 +582,12 @@ Full description: `docs/video-details.md`.
 `apps/desktop/src/ui/selectMenu.ts`, installed in `main.tsx`: every native `<select>` opens an app-drawn, themed
 list in place of the system one, which no CSS can colour. The value is set through the native setter, followed by
 a real `change` event, so components are unchanged. Details: `docs/ui-performance.md`.
+
+## Linux media packaging
+
+* `.deb` / `.rpm`: the system's GStreamer plays the preview. Its packages are recommended, not required
+  (`tauri.release.linux.conf.json`); a format nobody can decode shows "can't play" on the card.
+* AppImage: `scripts/build-release.sh` sources `scripts/appimage-media.sh`, stages the allow-listed plugins into
+  `target/appimage-gstreamer-plugins` and passes that folder to linuxdeploy (`GSTREAMER_PLUGINS_DIR`).
+* At start, `media_env::prepare` (first call of `run`, before any thread) points the AppImage's GStreamer at its own
+  cache file. Inherited by the web view's processes. Details: `docs/release-process.md`.

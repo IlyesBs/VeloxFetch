@@ -267,9 +267,9 @@ Causes and fixes:
 
 | Package | GStreamer packages |
 |---|---|
-| `.deb` | Depends on `gstreamer1.0-plugins-base` (playback, Ogg/Vorbis/Opus), `gstreamer1.0-plugins-good` (WAV, MP4/MOV, Matroska/WebM, FLAC, MP3, HTTP), `gstreamer1.0-libav` (H.264, AAC, HEVC...). Recommends `gstreamer1.0-plugins-bad` and a sound output (`gstreamer1.0-pulseaudio \| gstreamer1.0-pipewire`). |
-| `.rpm` | Depends on `gstreamer1-plugins-base` and `gstreamer1-plugins-good`. Recommends `gstreamer1-plugin-libav`, `gstreamer1-plugins-bad-free` and `gstreamer1-plugin-openh264` (Fedora ships H.264 that way). |
-| AppImage | `bundleMediaFramework: true`: GStreamer and its plugins travel inside the AppImage, so it plays on a system without them. |
+| `.deb` | Recommends `gstreamer1.0-plugins-base` (playback, Ogg/Vorbis/Opus), `gstreamer1.0-plugins-good` (WAV, MP4/MOV, Matroska/WebM, FLAC, MP3, HTTP), `gstreamer1.0-libav` (H.264, AAC, HEVC...), `gstreamer1.0-plugins-bad` and a sound output (`gstreamer1.0-pulseaudio \| gstreamer1.0-pipewire`). Recommended, never required: `apt` installs them by default, and a system that cannot (pinned or mixed codec libraries) still installs the app. |
+| `.rpm` | Recommends `gstreamer1-plugins-base`, `gstreamer1-plugins-good`, `gstreamer1-plugin-libav`, `gstreamer1-plugins-bad-free` and `gstreamer1-plugin-openh264` (Fedora ships H.264 that way). |
+| AppImage | `bundleMediaFramework: true`: GStreamer and an allow-list of software playback plugins travel inside the AppImage (`scripts/appimage-media.sh`), so it plays on a system without them. The machine's hardware plugins (VA-API, NVIDIA, QSV, V4L2, Vulkan...) are never carried: they crashed the AppImage on other computers. It keeps its own plugin cache (`media_env.rs`). |
 
 All of this is in `tauri.release.linux.conf.json`. Windows (Media Foundation in WebView2) and macOS (AVFoundation)
 decode with the system's own frameworks: nothing to install.

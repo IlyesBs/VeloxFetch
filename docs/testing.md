@@ -579,3 +579,22 @@ lessons:
   it to settle and takes this screenshot without a size;
 * `scrollIntoView` on a row could scroll the page and close the list. The menu now scrolls only itself, and closes
   on a scroll only if the field really moved.
+
+## Linux packages: media plugins (October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/security/policy.test.mjs` "linux packages: ..." | no GStreamer / codec package in the `.deb` / `.rpm` Depends (still recommended); the build script sources `appimage-media.sh` and gives the bundler only the staged folder; staging a fake folder with hardware and software plugins keeps exactly the software ones; the deny rule covers the hardware names; a missing required plugin is reported |
+| `apps/desktop/src-tauri/src/media_env.rs` (2) | the AppImage gets its own GStreamer cache (XDG cache folder, relative one ignored); nothing changes outside an AppImage, when the user set a cache, or without a home folder |
+
+Checked by hand on Debian 13 (GStreamer 1.26), no AppImage rebuild:
+* `scripts/appimage-media.sh stage` keeps 44 of the 273 system plugins;
+* with only them (`GST_PLUGIN_SYSTEM_PATH_1_0`), `gst-launch-1.0 playbin` plays MP4 / MOV (H.264, HEVC, AAC),
+  WebM (VP8, VP9, AV1), MKV, AVI, MPEG-TS, MP3, M4A, WAV, FLAC, Ogg and Opus. A folder without them fails, as
+  expected;
+* the existing AppDir with its plugins cut down to the same 44 plays them through its own bundled libraries, and
+  the app starts from it;
+* `desktop-preview.mjs` passes (22 checks, "it plays while downloading" included) with the app restricted to them;
+* `apt-get -s install` of a package that *requires* an uninstallable codec fails ("held broken packages" class);
+  the same package that only *recommends* it installs.
+* Mutation: the old linux config makes the policy test fail; a hardware plugin added to the list is still kept out.

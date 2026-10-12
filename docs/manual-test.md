@@ -333,7 +333,7 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 
 ## V. Live preview on each OS (once per OS, after installing the release package)
 1. Linux: install the `.deb` (or `.rpm`) on a clean system. The package manager also installs the GStreamer
-   plugins it lists (`apt` / `dnf` shows them). The AppImage runs without them.
+   plugins it recommends (`apt` / `dnf` shows them). The AppImage runs without them. See also AC.
 2. Start downloading a large MP4 (and an MP3), press **Watch while downloading** at once: picture or sound within a
    few seconds; it keeps playing as the download goes on, never stops with an error; seeking back works.
 3. Throttle the download (a low speed limit), then press Watch: the start still comes first (the "ready from the
@@ -416,3 +416,12 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    value changes and applies. Escape closes without changing.
 3. Near the bottom of the window the list opens upwards. In Arabic it lines up on the right.
 4. Scroll the page while a list is open: it closes.
+
+## AC. Linux packages (once per distribution family: Debian/Ubuntu, Fedora, Arch)
+1. Install the `.deb` (or `.rpm`) with `apt install ./VeloxFetch_*.deb` (`dnf install ./...rpm`): it installs and
+   configures; the GStreamer packages come along as recommended ones when the system can install them.
+2. On a system where `gstreamer1.0-libav` cannot be installed (or with `--no-install-recommends`): the app still
+   installs and starts; an H.264 preview says "can't play" after a few seconds, the download is unaffected.
+3. Run the AppImage on a machine with an NVIDIA or Intel / AMD GPU (VA-API drivers installed): it starts, and the
+   preview of an MP4 plays. `unsquashfs -l VeloxFetch*.AppImage | grep gstreamer-1.0/` lists no `va`, `vaapi`,
+   `nvcodec`, `qsv`, `v4l2codecs`, `vulkan` or `kms` plugin.
