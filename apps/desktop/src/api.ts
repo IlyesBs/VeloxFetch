@@ -126,8 +126,9 @@ export const api = {
   /** Remove a finished video download from the list; `deleteFiles` also deletes its saved files from the disk. */
   clearMediaJob: (id: number, deleteFiles = false) => call<void>("clear_media_job", { id, deleteFiles }),
   listPendingDownloads: () => call<PendingDownload[]>("list_pending_downloads"),
-  confirmPendingDownload: (token: number, filename?: string, start = true, folderToken?: number) =>
-    call<Download>("confirm_pending_download", { request: { token, filename, start, folderToken } }),
+  /** `login`: the user name and password the site asks for (sealed with the download, never sent back). */
+  confirmPendingDownload: (token: number, filename?: string, start = true, folderToken?: number, login?: { username: string; password: string }) =>
+    call<Download>("confirm_pending_download", { request: { token, filename, start, folderToken, ...login } }),
   getStorage: () => call<Storage>("get_storage"),
   setOrganize: (enabled: boolean) => call<Storage>("set_organize", { enabled }),
   setFolderNames: (names: Record<string, string>) => call<Storage>("set_folder_names", { request: { names } }),

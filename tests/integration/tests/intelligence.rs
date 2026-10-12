@@ -171,7 +171,10 @@ async fn the_confirmation_dialog_gets_the_analysis_and_the_download_still_works(
     assert!(codes(&a).contains(&FindingCode::SessionSent));
     assert!(!serde_json::to_string(&a).unwrap().contains("sid=1"), "the cookie never reaches the result");
     assert!(nothing_written("pending"));
-    let d = m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await.unwrap();
+    let d = m
+        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .await
+        .unwrap();
     until("the download", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
 }
 
@@ -184,7 +187,17 @@ async fn a_failed_analysis_leaves_the_download_available() {
     let a = m.list_pending()[0].analysis.clone().unwrap();
     assert_eq!(a.error_code.as_deref(), Some("http_500"));
     // The user can still add it (the download then reports the server's error the usual way).
-    let d = m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: Some(false), folder_token: None }).await.unwrap();
+    let d = m
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: Some(false),
+            folder_token: None,
+            username: None,
+            password: None,
+        })
+        .await
+        .unwrap();
     assert_eq!(m.get_download(d.id).await.unwrap().status, DownloadStatus::Queued);
 }
 

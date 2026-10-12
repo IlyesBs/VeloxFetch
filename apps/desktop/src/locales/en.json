@@ -558,6 +558,8 @@
   "pend.backUsual": "Go back to the usual folder",
   "pend.private": "Sent from a private window: cookies were not shared.",
   "pend.later": "Download later",
+  "pend.signIn": "Sign in to this site",
+  "pend.signInWhen": "only if it asks for a user name and password",
   "pend.start": "Start download",
   "sign.ok": "Signed in: the download starts again",
   "sign.title": "Sign in to {host}",

@@ -609,3 +609,14 @@ Checked by hand on Debian 13 (GStreamer 1.26), no AppImage rebuild:
 
 Proof: on the code before the fix the new e2e fails 4–5 checks (moved cards at 0.31 opacity, 108–371 grid jumps)
 and the unit tests 3 of 5; after it, 11 runs of the e2e in a row pass.
+
+## Sign-in in the browser confirmation (October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/integration/tests/pending.rs::a_sign_in_typed_in_the_confirmation_is_used_and_never_shown` | the check finds `authRequired`; a password without a user name, `:` in the user name and a control character are refused and the request keeps waiting; `Debug` hides the sign-in; with it the protected file downloads byte for byte; the UI's data never holds it |
+| `pending.rs::without_a_sign_in_the_protected_download_fails_asking_for_one` | no sign-in: the download fails with `needs: signIn` (the card and details offer Sign in) |
+| `tests/e2e/desktop-browser.mjs` (+6) | the real native host hands over a protected link: the popup's sign-in part opens by itself and says why; a password alone is pointed out and the popup stays; typing the user name clears the message; the sign-in downloads the file; the list never shows it; a bad sign-in in the IPC answer is refused |
+
+Also run without a regression: `desktop-ipc`, `desktop-usability` (Sign in from the card), `desktop-intelligence`,
+`desktop-views`, `desktop-ui`, `desktop-card-flash`, and every Rust test.
