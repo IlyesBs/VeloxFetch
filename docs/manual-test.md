@@ -425,3 +425,10 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 3. Run the AppImage on a machine with an NVIDIA or Intel / AMD GPU (VA-API drivers installed): it starts, and the
    preview of an MP4 plays. `unsquashfs -l VeloxFetch*.AppImage | grep gstreamer-1.0/` lists no `va`, `vaapi`,
    `nvcodec`, `qsv`, `v4l2codecs`, `vulkan` or `kms` plugin.
+
+## AD. No flashing when a download starts (once per OS: Windows, Linux, macOS)
+1. Have a few finished downloads and two paused ones. On Downloads, resume one paused download, then add a new
+   link: the new card fades in once; no other card blinks, fades or jumps.
+2. On Active, pause and resume downloads: cards move between Running, Waiting and Paused without fading.
+3. Watch a running card's connection grid while its speed changes (a speed limit switched on and off): the lit
+   cells keep pulsing smoothly, faster or slower, never all blinking at once.

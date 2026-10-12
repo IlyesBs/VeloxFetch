@@ -80,11 +80,12 @@ try {
     const card = document.querySelector('[data-testid^=download-][data-status=downloading]');
     const m = card.querySelector('.matrix');
     return { cells: m.children.length, lit: m.querySelectorAll('i.on').length, label: m.getAttribute('aria-label'),
-             pulse: m.style.getPropertyValue('--pulse'), anim: getComputedStyle(m.querySelector('i.on') ?? m).animationName };
+             pulse: m.getAnimations({ subtree: true }).filter((a) => a.animationName === 'flicker').map((a) => a.playbackRate), anim: getComputedStyle(m.querySelector('i.on') ?? m).animationName };
   })()`);
   check("the matrix is 8x8 (64 cells)", matrix.cells === 64, JSON.stringify(matrix));
   check("lit cells = the download's live connections, and say so to screen readers", matrix.lit > 0 && matrix.label.startsWith(`${matrix.lit} of 64`), JSON.stringify(matrix));
-  check("lit cells pulse with a CSS animation timed by throughput", matrix.anim === "flicker" && /^\d+(\.\d+)?s$/.test(matrix.pulse), JSON.stringify(matrix));
+  // the pace follows the throughput through the animations' playback rate (a duration change made the cells jump)
+  check("lit cells pulse with a CSS animation timed by throughput", matrix.anim === "flicker" && matrix.pulse.length === matrix.lit && matrix.pulse.every((r) => r > 0 && r <= 1.6 / 0.45 + 1e-9), JSON.stringify(matrix));
   const fill = await ev(`getComputedStyle(document.querySelector('[data-testid^=download-][data-status=downloading] [role=progressbar] > div')).backgroundImage`);
   check("the running progress track is the accent gradient", fill.includes("linear-gradient"), fill);
 

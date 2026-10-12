@@ -390,6 +390,9 @@ link --analyze_media--> qualities / audio / subtitles (nothing written)
   styles there carry no box shadows or drop-shadow filters (rings become outlines, the glass highlight a top border);
   the window-wide backdrop is a picture drawn once (`aurora.ts`) on every platform. Six running downloads: 23 -> 62
   fps on a real screen, 22 -> 62 on a virtual display. `tests/e2e/desktop-perf.mjs` measures it.
+* No flash when lists change (issue #20): an item's entrance animation plays once (`ui/entrance.ts`), so cards that
+  React moves or re-creates (a download starting, a card changing section) never fade out and in again; the
+  connection grid's pulse changes pace through `playbackRate`, never its duration (`ThreadMatrix.retime`).
 * Start-up: the window is created hidden and shown from a layout effect (at commit, ~60 ms of page time; a passive
   effect was held back to ~310 ms in the hidden window), over a background in the interface's theme colour.
 

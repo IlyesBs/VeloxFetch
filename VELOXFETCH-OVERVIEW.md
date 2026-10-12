@@ -492,6 +492,8 @@ More: `docs/architecture.md`.
   interface has no shadows (selected and focused rings become outlines), and the window-wide backdrop is a picture
   drawn once on every system. Six running downloads: 23 -> 62 fps. Linux's web view itself stops at 60 fps, whatever
   the screen; Windows uses the screen's rate.
+- **No flashing:** starting, resuming or pausing a download never makes the cards fade out and in (each card fades
+  in once, when it is new), and the connection grid changes its pulse smoothly (issue #20).
 - **Starts fast:** the window appears as soon as the interface is on the page (~60 ms of page time, it was ~310 ms),
   over the interface's own background colour (no dark flash before a light theme).
 
@@ -808,6 +810,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-12 | `fix_card_flash` | Fix | Issue #20: starting a download made the cards flash. The entrance animation (fade in from nothing) replayed on every card React moved (a download going up the list) or re-created (a card changing section on Active): it now plays once per card (`ui/entrance.ts`), for Smart queue rows too. The connection grid's pulse changed its duration with the speed, so all lit cells jumped at once: the pace now changes through the playback rate. | `docs/ui-performance.md` |
 | 2026-10-12 | `fix_linux_packaging_media` | Fix | Linux packages: the `.deb` required `gstreamer1.0-libav` (and base / good), so `apt` refused to install on systems whose FFmpeg libraries are pinned or mixed ("held broken packages"): the media packages are now Recommends in the `.deb` and `.rpm`, and the preview says "can't play" when a codec is absent. The AppImage crashed at start (`Segmentation fault`) because the bundler copied all 273 system GStreamer plugins, hardware ones (VA-API, NVIDIA, QSV, V4L2, Vulkan, KMS) included: the build now stages an allow-list of 44 software playback plugins, with a deny rule for hardware / device / network plugins, and the AppImage keeps its own GStreamer cache. | `docs/release-process.md` |
 | 2026-10-12 | `fix_npm_advisory` | Fix | The UI bundler's `source-map-js` moved from 1.2.1 to 1.2.2 (GHSA-68fv-2mgg-jv7q, a denial of service through crafted source maps; build time only, never shipped). Lockfile only. The release gate passes in full. | `docs/security.md` |
 | 2026-10-11 | `feat_chunk_reverification` | Feature / Fix | Resume integrity: per-segment SHA-256 saved with the segment (after `fsync`, same commit) and re-verified at resume when the `.part` file changed since (crash, outside change), so only changed parts are fetched again. Ranged answers refused when compressed, carrying another strong ETag (a server ignoring `If-Range` could mix two versions: fixed), or stating another total. Join checks (1 KiB overlaps and tails at every join) catch a same-size change even with no version tag; after a source change the saved part is never continued. The segment map is checked at resume and before finishing. New failure `source_changed` in Download Doctor. Schema v7 (backward compatible). | `docs/resume-integrity.md` |
