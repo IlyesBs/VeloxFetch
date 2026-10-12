@@ -12,6 +12,7 @@ mod authz;
 mod bridge;
 mod clipboard;
 mod desktop;
+mod media_env;
 mod preview_server;
 mod smart_throttle;
 mod webview_guard;
@@ -705,6 +706,8 @@ fn install_video_tools_cli() -> i32 {
 }
 
 pub fn run() {
+    // Before any thread: the web view's processes inherit it (Linux AppImage only, see media_env.rs).
+    media_env::prepare();
     if std::env::args().skip(1).any(|a| a == "--install-video-tools") {
         std::process::exit(install_video_tools_cli());
     }

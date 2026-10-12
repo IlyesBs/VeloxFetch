@@ -62,7 +62,25 @@ extension), and `scripts/package-release.mjs` collects `release/`:
     Debian/Ubuntu `/usr/lib/<arch>-linux-gnu`, Fedora/openSUSE `/usr/lib64`, Arch `/usr/lib`). The plugin only
     guesses the Debian path.
 * **If something is still missing**, the AppImage is built without its media bundle, with a loud warning, instead
-  of failing the whole release. The `.deb` / `.rpm` depend on the GStreamer packages either way.
+  of failing the whole release. The `.deb` / `.rpm` recommend the GStreamer packages either way.
+* **CI** (`build.yml`, Ubuntu 22.04) runs the same script and gets the same checks.
+
+**Linux packages that install and start everywhere (October 2026).** Two failures were reported on a Debian-based
+system with mixed repositories:
+
+| Package | Failure | Cause | Fix |
+|---|---|---|---|
+| `.deb` | `apt` refused to install: `gstreamer1.0-libav : Depends: libavfilter9 (>= 7:6.0)`, "held broken packages"; `velox-fetch` left unconfigured | the package *required* `gstreamer1.0-libav` (and base / good); on a system whose FFmpeg libraries are pinned or come from another repository, that codec package cannot be installed | the media packages are now **Recommends** (`.deb` and `.rpm`), never Depends. `apt` / `dnf` still install them by default when they can; when they cannot, the app installs anyway and the preview card says "can't play" for the formats it cannot decode. WebKitGTK itself only recommends them too |
+| AppImage | `Segmentation fault (core dumped)` at start | linuxdeploy's GStreamer plugin copies **every** file of the plugin folder it is given. The system folder also holds hardware plugins (VA-API `va` / `vaapi`, NVIDIA `nvcodec`, Intel `qsv`, `v4l2codecs`, `vulkan`, `kms`...) and device / service plugins. Inside the AppImage they run against another computer's graphics driver and crash during plugin discovery or playback | the script stages an **allow-list** of software playback plugins (`scripts/appimage-media.sh`, `stage_appimage_gst_plugins`: 44 plugins on Debian 13 instead of 273) and hands only that folder to the bundler. A deny rule keeps hardware, GPU, device, capture and network-service plugins out even if the list is edited by mistake. If a required plugin is missing, the AppImage is built without the media bundle (warning), never with a partial one |
+
+The AppImage's GStreamer also keeps its own plugin cache (`~/.cache/app.velox.fetch/gstreamer-1.0/`,
+`apps/desktop/src-tauri/src/media_env.rs`) instead of sharing `~/.cache/gstreamer-1.0/` with the system's
+GStreamer, which may be another version with other plugin folders. A cache the user set (`GST_REGISTRY_1_0`) is kept.
+
+Checked on Debian 13 (GStreamer 1.26): the 44 staged plugins play MP4 / MOV (H.264, HEVC, AAC), WebM (VP8, VP9,
+AV1, Opus, Vorbis), MKV, AVI, MPEG-TS, MP3, M4A, WAV, FLAC, Ogg and Opus. The live-preview end-to-end test passes
+with the app restricted to them. An `apt` simulation of a package whose codec cannot be installed fails with the
+old layout and installs with the new one.
 * **CI** (`build.yml`, Ubuntu 22.04) runs the same script and gets the same checks.
 
 The zips are written by the script itself (no zip tool needed; Unix permissions are kept so the programs stay
