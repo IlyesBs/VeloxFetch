@@ -390,6 +390,30 @@ try {
   await sleep(600);
   check("Download later adds it to the list without starting it", (await list()).find((d) => d.filename === "later.bin")?.status !== "downloading" && (await list()).find((d) => d.filename === "later.bin")?.status !== "completed");
 
+  // A site that asks for a user name and password: the popup's sign-in part opens by itself once the check
+  // before the download found it, a password without a user name is caught there, and the sign-in is used.
+  const typeIn = (sel, v) => page(`(() => { const el = document.querySelector('[data-testid=${sel}]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(v)}); el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await asker.ask(dl("auth/members.bin"));
+  await waitFor(async () => (await dlg("pending-host")) !== null, "popup for the protected file");
+  await waitFor(async () => (await page("document.querySelector('[data-testid=pending-signin]')?.open")).ok === true, "the sign-in part to open by itself", 20000);
+  check("the popup says the site asks for a user name and password, with the fields ready",
+    /asks for a user name and password/.test((await dlg("pending-signin")) ?? "") && (await page("!!document.querySelector('[data-testid=pending-username]') && document.querySelector('[data-testid=pending-password]').type === 'password'")).ok === true);
+  await typeIn("pending-password", "pass");
+  await click("[data-testid=pending-start]");
+  await waitFor(async () => (await dlg("pending-signin-error")) !== null, "the missing user name to be pointed out");
+  check("a password without a user name is caught in the popup, which stays open", (await dlg("pending-dialog")) !== null && !(await list()).some((d) => d.filename === "members.bin"));
+  await typeIn("pending-username", "user");
+  await sleep(150);
+  check("typing the user name clears the message", (await dlg("pending-signin-error")) === null);
+  await h.screenshot(path.join(SHOTS, "confirm-signin-dark.png"), { width: 1000, height: 860 });
+  await click("[data-testid=pending-start]");
+  await waitFor(async () => (await list()).some((d) => d.filename === "members.bin" && d.status === "completed"), "the protected download", 30000);
+  check("the sign-in typed in the popup downloads the protected file", (await dlg("pending-dialog")) === null);
+  const protectedOne = (await list()).find((d) => d.filename === "members.bin");
+  check("the app never shows the sign-in back", !/pass|dXNlcjpwYXNz/.test(JSON.stringify(protectedOne)), JSON.stringify(protectedOne));
+  const badLogin = await invoke("confirm_pending_download", { request: { token: 999998, username: "a:b", password: "x" } });
+  check("a bad sign-in in the answer is refused", !!badLogin.err);
+
   await asker.ask(dl("q1.bin"));
   await asker.ask(dl("q2.bin"));
   await waitFor(async () => /2 downloads are waiting/.test((await dlg("pending-count")) ?? ""), "the waiting counter");

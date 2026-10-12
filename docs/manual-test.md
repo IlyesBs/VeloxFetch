@@ -432,3 +432,12 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 2. On Active, pause and resume downloads: cards move between Running, Waiting and Paused without fading.
 3. Watch a running card's connection grid while its speed changes (a speed limit switched on and off): the lit
    cells keep pulsing smoothly, faster or slower, never all blinking at once.
+
+## AE. Sign-in in the browser confirmation (once per OS: Windows, Linux, macOS)
+1. With "Ask me before a download from the browser starts" on, download from the browser a file on a site that asks
+   for a user name and password (HTTP authentication): the popup's "Sign in to this site" part is open and says the
+   server asks for them.
+2. Type only a password, press Start: "A password needs a user name." and the popup stays. Type the user name: the
+   message goes. Start: the file downloads.
+3. Wrong password: the download fails with "Sign in…" on its card and in its details; signing in there works.
+4. On a normal site the part stays closed and nothing changes.

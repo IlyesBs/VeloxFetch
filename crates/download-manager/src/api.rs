@@ -745,7 +745,7 @@ pub struct PendingDto {
     pub analysis: Option<crate::intelligence::AnalysisDto>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfirmPending {
     pub token: u64,
@@ -755,6 +755,24 @@ pub struct ConfirmPending {
     pub start: Option<bool>,
     /// Save somewhere else this once: a folder the user picked in the native dialog (see `pick_folder`).
     pub folder_token: Option<u64>,
+    /// HTTP authentication for a site that asks for it, typed in the confirmation. Sealed with the download like
+    /// the Add dialog's, never in the link, the events or the logs.
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+// Hand-written so that logging a confirmation can never print the sign-in typed into it.
+impl std::fmt::Debug for ConfirmPending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfirmPending")
+            .field("token", &self.token)
+            .field("filename", &self.filename)
+            .field("start", &self.start)
+            .field("folder_token", &self.folder_token)
+            .field("username", &self.username.as_ref().map(|_| "***"))
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .finish()
+    }
 }
 
 /// A folder the user picked in the native dialog and the app accepted. The token stands for it.

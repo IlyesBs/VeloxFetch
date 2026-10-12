@@ -113,6 +113,9 @@ connection, this computer, the link or the sign-in), whether retrying helps (now
 not at all), and what to do. While the app retries on its own, it shows what it retries and when. See
 [`docs/download-doctor.md`](docs/download-doctor.md).
 
+The confirmation for a download from the browser can also take the site's user name and password (its "Sign in to
+this site" part opens by itself when the server asks for them).
+
 Download Intelligence: before a download starts, the confirmation dialog (links from the browser or the clipboard)
 and the Add dialog's **Check link** show:
 - the file, its size and type;

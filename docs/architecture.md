@@ -594,3 +594,11 @@ a real `change` event, so components are unchanged. Details: `docs/ui-performanc
   `target/appimage-gstreamer-plugins` and passes that folder to linuxdeploy (`GSTREAMER_PLUGINS_DIR`).
 * At start, `media_env::prepare` (first call of `run`, before any thread) points the AppImage's GStreamer at its own
   cache file. Inherited by the web view's processes. Details: `docs/release-process.md`.
+
+## Sign-in in the browser confirmation
+
+`PendingDialog.tsx` has a "Sign in to this site" part (user name, password), open by itself when the pending
+download's analysis says `access: authRequired`. `api.confirmPendingDownload(..., login)` sends them in
+`ConfirmPending` (`username`, `password`); `manager/pending.rs::confirm_pending` validates them before taking the
+request, then sets them on the `NewDownload`, and `create_inner` seals them like the Add dialog's. Without a sign-in a
+protected download fails with `needs: signIn`, and its card and details page still offer **Sign in…**.

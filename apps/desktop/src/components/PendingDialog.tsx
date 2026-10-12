@@ -55,10 +55,20 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
   }, [p.filename]);
   useEffect(() => start.current?.focus(), []);
 
+  // The site's user name and password, when it asks for them (HTTP authentication). Opened by itself when the
+  // check before the download found that the server asks; available for any download.
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
+  const [loginError, setLoginError] = useState(false);
+  const asksLogin = p.analysis?.access === "authRequired";
+
   const confirm = async (startNow: boolean) => {
+    if (pass && !user.trim()) return setLoginError(true);
+    setLoginError(false);
     setBusy(true);
     const renamed = name.trim() && name.trim() !== p.filename ? name.trim() : undefined;
-    await act(() => api.confirmPendingDownload(p.token, renamed, startNow, folder?.token), startNow ? undefined : t("pend.added"));
+    const login = user.trim() ? { username: user.trim(), password: pass } : undefined;
+    await act(() => api.confirmPendingDownload(p.token, renamed, startNow, folder?.token, login), startNow ? undefined : t("pend.added"));
     setBusy(false);
   };
   const change = async () => {
@@ -167,6 +177,49 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
         </Row>
       </dl>
       {p.analysis && <IntelligencePanel a={p.analysis} />}
+      <details className="group mt-3 rounded-lg border border-line" open={asksLogin || !!user || !!pass || undefined} data-testid="pending-signin">
+        <summary className="flex cursor-pointer select-none items-center gap-2 px-3 py-2 text-[13px] font-medium">
+          <Icon name="lock" size={14} />
+          {t("pend.signIn")}
+          <span className="font-normal text-dim">{asksLogin ? t("intel.f.authRequired") : t("pend.signInWhen")}</span>
+        </summary>
+        <div className="grid grid-cols-2 gap-3 border-t border-line p-3">
+          <label className="space-y-1.5">
+            <span className="label">{t("addd.user")}</span>
+            <input
+              className="input"
+              data-testid="pending-username"
+              value={user}
+              disabled={busy}
+              onChange={(e) => {
+                setUser(e.target.value);
+                setLoginError(false);
+              }}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <label className="space-y-1.5">
+            <span className="label">{t("net.pass")}</span>
+            <input
+              className="input"
+              data-testid="pending-password"
+              type="password"
+              value={pass}
+              disabled={busy}
+              onChange={(e) => setPass(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !busy && name.trim() && void confirm(true)}
+              autoComplete="off"
+            />
+          </label>
+          {loginError && (
+            <p className="col-span-2 text-xs text-bad" role="alert" data-testid="pending-signin-error">
+              {t("addd.passNeedsUser")}
+            </p>
+          )}
+          <p className="col-span-2 text-xs text-dim">{t("sign.kept")}</p>
+        </div>
+      </details>
       {target !== null && (
         <div className="mt-3 space-y-2 rounded-lg border border-line px-3 py-2 text-xs" data-testid="pending-relink">
           <p>{t("nl.pendingAsk")}</p>

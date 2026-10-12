@@ -379,7 +379,11 @@ async fn the_confirmation_shows_where_the_file_will_go_and_can_send_it_elsewhere
     *e.srv.state.content_disposition.lock().unwrap() = None;
 
     // Confirm the first one normally (sorted), the second into a folder chosen in the dialog.
-    let d1 = e.m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await.unwrap();
+    let d1 = e
+        .m
+        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .await
+        .unwrap();
     assert_eq!(rel(&done(&e.m, d1.id).await, &e.root), "Video/movie.mkv");
     let target = folder(&e.base);
     let pick = e.m.register_pick(&target).unwrap();
@@ -389,6 +393,8 @@ async fn the_confirmation_shows_where_the_file_will_go_and_can_send_it_elsewhere
             filename: Some("mine.flac".into()),
             start: None,
             folder_token: Some(pick.token),
+            username: None,
+            password: None,
         })
         .await
         .unwrap();

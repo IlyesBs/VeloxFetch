@@ -503,7 +503,8 @@ More: `docs/architecture.md`.
   2. it goes through native messaging to `velox-native-host`, which validates again;
   3. it crosses the local pipe / socket (mutual HMAC authentication, a new token every run);
   4. the app validates a third time;
-  5. a confirmation window opens;
+  5. a confirmation window opens (with a "Sign in to this site" part, opened by itself when the server asks for a
+     user name and password);
   6. the download is created.
 - Only two commands exist: `ping` and `download`.
 - The host starts the app only for a download, never for a `ping`, and only a program it found itself (never one
@@ -810,6 +811,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-12 | `fix_pending_signin` | Fix | The browser confirmation popup can take the site's user name and password: its "Sign in to this site" part opens by itself when the check found that the server asks for them. Checked before the request is taken (a mistake keeps it waiting), sealed with the download like the Add dialog's, never shown back or logged. Without it, the card and details still offer Sign in. | `docs/security.md` |
 | 2026-10-12 | `fix_card_flash` | Fix | Issue #20: starting a download made the cards flash. The entrance animation (fade in from nothing) replayed on every card React moved (a download going up the list) or re-created (a card changing section on Active): it now plays once per card (`ui/entrance.ts`), for Smart queue rows too. The connection grid's pulse changed its duration with the speed, so all lit cells jumped at once: the pace now changes through the playback rate. | `docs/ui-performance.md` |
 | 2026-10-12 | `fix_linux_packaging_media` | Fix | Linux packages: the `.deb` required `gstreamer1.0-libav` (and base / good), so `apt` refused to install on systems whose FFmpeg libraries are pinned or mixed ("held broken packages"): the media packages are now Recommends in the `.deb` and `.rpm`, and the preview says "can't play" when a codec is absent. The AppImage crashed at start (`Segmentation fault`) because the bundler copied all 273 system GStreamer plugins, hardware ones (VA-API, NVIDIA, QSV, V4L2, Vulkan, KMS) included: the build now stages an allow-list of 44 software playback plugins, with a deny rule for hardware / device / network plugins, and the AppImage keeps its own GStreamer cache. | `docs/release-process.md` |
 | 2026-10-12 | `fix_npm_advisory` | Fix | The UI bundler's `source-map-js` moved from 1.2.1 to 1.2.2 (GHSA-68fv-2mgg-jv7q, a denial of service through crafted source maps; build time only, never shipped). Lockfile only. The release gate passes in full. | `docs/security.md` |

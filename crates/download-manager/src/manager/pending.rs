@@ -200,6 +200,14 @@ impl DownloadManager {
     /// The user said yes: create (and, unless told otherwise, start) the download.
     pub async fn confirm_pending(&self, req: ConfirmPending) -> Result<DownloadDto, ManagerError> {
         let rename = req.filename.as_deref().map(validate::filename).transpose()?;
+        // Checked before the request is taken: a mistyped sign-in leaves it waiting, to be corrected.
+        let username = req.username.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(str::to_string);
+        let password = req.password.filter(|p| !p.is_empty());
+        match (&username, &password) {
+            (Some(u), p) => drop(validate::credentials(u, p.as_deref().unwrap_or(""))?),
+            (None, Some(_)) => return Err(ManagerError::invalid("a password needs a user name")),
+            (None, None) => {}
+        }
         if self.inner.pending.lock().unwrap().entries.iter().any(|e| e.dto.token == req.token && e.dto.media.is_some()) {
             return Err(ManagerError::invalid("this is a video: choose its quality in the video dialog"));
         }
@@ -213,6 +221,10 @@ impl DownloadManager {
         new.start = Some(req.start.unwrap_or(true));
         if req.folder_token.is_some() {
             new.folder_token = req.folder_token;
+        }
+        if username.is_some() {
+            new.username = username;
+            new.password = password;
         }
         self.create_inner(new, entry.headers).await
     }

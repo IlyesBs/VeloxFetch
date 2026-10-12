@@ -558,6 +558,8 @@
   "pend.backUsual": "Revenir au dossier habituel",
   "pend.private": "Envoyé depuis une fenêtre privée : les cookies n’ont pas été partagés.",
   "pend.later": "Télécharger plus tard",
+  "pend.signIn": "Se connecter à ce site",
+  "pend.signInWhen": "seulement s'il demande un nom d'utilisateur et un mot de passe",
   "pend.start": "Démarrer le téléchargement",
   "sign.ok": "Connecté : le téléchargement redémarre",
   "sign.title": "Se connecter à {host}",

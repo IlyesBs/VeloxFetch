@@ -163,6 +163,7 @@ node tests/e2e/real-browser.mjs     # the built extension in a real Brave with a
 * The same validation as any download runs when it is parked (URL scheme, file name, browser headers, no cookies from private windows), and again when it is confirmed (a renamed file is validated like any file name).
 * The size/type shown come from one probe request made with the browser's referrer/cookies (same request the download would send first).
 * The setting "Ask me before a download from the browser starts" is on by default; off = the previous behaviour (start at once).
+* **Sign-in in the confirmation (October 2026).** A site that asks for a user name and password (HTTP authentication) can be answered in the dialog itself: its "Sign in to this site" part opens by itself when the check before the download found a `401`. The user name and password travel only in `confirm_pending_download` (closed field set), are checked before the request is taken (a mistake leaves it waiting: `:` or control characters in the user name, a password without a user name), and are then sealed with the download exactly like the Add dialog's. They never go back to the UI, into events or into logs (`ConfirmPending`'s `Debug` prints `***`). They are sent the same way as credentials typed in the Add dialog, under the same redirect rules.
 * The extension drops the browser's own copy immediately (so the browser's "Save as" window and copy do not linger); if VeloxFetch cannot take the link, the browser downloads it again itself.
 
 ## Phase 12: security engineering (hardening gate)

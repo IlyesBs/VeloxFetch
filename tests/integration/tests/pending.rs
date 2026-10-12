@@ -72,12 +72,24 @@ async fn nothing_starts_until_the_user_confirms() {
     }
     assert!(saw_pending >= 2, "the UI is told twice: {saw_pending}");
 
-    let d = m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await.unwrap();
+    let d = m
+        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .await
+        .unwrap();
     until("download to finish", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
     assert_eq!(m.get_download(d.id).await.unwrap().filename, "ubuntu.iso");
     assert!(m.list_pending().is_empty(), "the request is gone once confirmed");
     assert!(
-        m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await.is_err(),
+        m.confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            folder_token: None,
+            username: None,
+            password: None
+        })
+        .await
+        .is_err(),
         "cannot confirm twice"
     );
 }
@@ -107,15 +119,29 @@ async fn the_user_can_rename_and_the_name_is_validated() {
     let p = m.add_pending(req(&srv, "/a.bin"), ctx()).await.unwrap();
     for bad in ["..\\..\\evil.exe", "a/b.bin", "CON", "x\0y"] {
         assert!(
-            m.confirm_pending(ConfirmPending { token: p.token, filename: Some(bad.into()), start: None, folder_token: None })
-                .await
-                .is_err(),
+            m.confirm_pending(ConfirmPending {
+                token: p.token,
+                filename: Some(bad.into()),
+                start: None,
+                folder_token: None,
+                username: None,
+                password: None
+            })
+            .await
+            .is_err(),
             "{bad:?}"
         );
         assert_eq!(m.list_pending().len(), 1, "a refused rename keeps the request waiting");
     }
     let d = m
-        .confirm_pending(ConfirmPending { token: p.token, filename: Some("mine.bin".into()), start: Some(false), folder_token: None })
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: Some("mine.bin".into()),
+            start: Some(false),
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     assert_eq!(d.filename, "mine.bin");
@@ -147,7 +173,10 @@ async fn the_confirmed_download_carries_the_browser_headers() {
     let srv = serve(random_data(MB, 11)).await;
     let m = manager("headers").await;
     let p = m.add_pending(req(&srv, "/h.bin"), ctx()).await.unwrap();
-    let d = m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await.unwrap();
+    let d = m
+        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .await
+        .unwrap();
     until("finish", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
     let heads = srv.state.request_heads.lock().unwrap().clone();
     assert!(heads.iter().all(|h| h.contains("cookie: sid=1") && h.contains("referer: https://shop.example/p")), "{heads:?}");
@@ -165,4 +194,63 @@ async fn the_confirmation_setting_defaults_to_on_and_persists() {
     assert!(!again.browser_confirm(), "kept across restarts");
     again.set_browser_confirm(true).await.unwrap();
     assert!(again.browser_confirm());
+}
+
+/// A browser download from a site that asks for a user name and password: they are typed in the confirmation,
+/// a mistake there leaves the request waiting, and they never show up in what the UI or the logs get.
+#[tokio::test]
+async fn a_sign_in_typed_in_the_confirmation_is_used_and_never_shown() {
+    let data = random_data(MB, 11);
+    let srv = serve(data.clone()).await;
+    let m = manager("signin").await;
+    let p = m.add_pending(req(&srv, "/auth/members.bin"), ctx()).await.unwrap();
+    until("the check to finish", || async {
+        let l = m.list_pending();
+        l.len() == 1 && !l[0].probing && l[0].analysis.is_some()
+    })
+    .await;
+    let found = m.list_pending().remove(0).analysis.unwrap();
+    assert_eq!(found.access, download_manager::intelligence::Access::AuthRequired, "the dialog knows the site asks for a sign-in");
+
+    let confirm = |username: Option<&str>, password: Option<&str>| ConfirmPending {
+        token: p.token,
+        filename: None,
+        start: None,
+        folder_token: None,
+        username: username.map(Into::into),
+        password: password.map(Into::into),
+    };
+    // Mistakes are refused and the request keeps waiting, to be corrected in the same dialog.
+    for (u, pw) in [(None, Some("pass")), (Some("us:er"), Some("pass")), (Some("user"), Some("bad\u{7}"))] {
+        assert!(m.confirm_pending(confirm(u, pw)).await.is_err(), "{u:?}");
+        assert_eq!(m.list_pending().len(), 1, "still waiting after {u:?}");
+    }
+    let shown = format!("{:?}", confirm(Some("user"), Some("pass")));
+    assert!(!shown.contains("pass\"") && !shown.contains("\"user\""), "never logged: {shown}");
+
+    let d = m.confirm_pending(confirm(Some(" user "), Some("pass"))).await.unwrap();
+    until("download to finish", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
+    let done = m.get_download(d.id).await.unwrap();
+    assert!(std::fs::read(&done.destination).unwrap() == data[..], "the protected file, byte for byte");
+    let json =
+        serde_json::to_string(&done).unwrap() + &serde_json::to_string(&m.list_downloads(ListFilter::default()).await.unwrap()).unwrap();
+    assert!(!json.contains("dXNlcjpwYXNz") && !json.contains("\"pass\""), "the UI never gets the sign-in: {json}");
+    assert!(m.list_pending().is_empty());
+}
+
+#[tokio::test]
+async fn without_a_sign_in_the_protected_download_fails_asking_for_one() {
+    let srv = serve(random_data(MB, 12)).await;
+    let m = manager("nosignin").await;
+    let p = m.add_pending(req(&srv, "/auth/members.bin"), ctx()).await.unwrap();
+    let d = m
+        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .await
+        .unwrap();
+    until("download to fail", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Failed }).await;
+    assert_eq!(
+        m.get_download(d.id).await.unwrap().needs,
+        Some(download_manager::explain::Needs::SignIn),
+        "the card and details offer Sign in"
+    );
 }

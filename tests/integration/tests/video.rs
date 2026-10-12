@@ -196,7 +196,17 @@ async fn a_video_from_the_browser_waits_for_the_dialog_and_never_hands_cookies_t
     assert!(matches!(rx.try_recv(), Ok(download_manager::ManagerEvent::Pending { .. })));
 
     // It is a video: the file confirmation does not apply.
-    let m = invalid(e.m.confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None }).await);
+    let m = invalid(
+        e.m.confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
+        .await,
+    );
     assert!(m.contains("video"), "{m}");
 
     // The dialog looks at it through the waiting request (the UI cannot swap the link).
