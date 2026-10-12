@@ -58,6 +58,7 @@ node tests/e2e/desktop-queue.mjs # queue limits, pause/resume, scheduler, power 
 node tests/e2e/desktop-smart-queue.mjs # several queues, rules, start at, order, timeline, Add dialog choices, hostile IPC
 node tests/e2e/desktop-browser.mjs # real native host process <-> real app (hostile input, auth, limits)
 node tests/e2e/desktop-folders.mjs    # download folders, sorting by type
+node tests/e2e/desktop-card-flash.mjs # starting downloads never makes the cards flash (issue #20)
 node tests/e2e/desktop-usability.mjs  # icons, open / show in folder, search, sign-in, network, shortcuts, paste / drop
 node tests/e2e/desktop-diagnostics.mjs  # diagnostics card, Settings > Diagnostics, log file, no secret anywhere
 node tests/e2e/desktop-video.mjs  # video bar hand-over -> video dialog -> file (stand-in yt-dlp), DRM refusals, 64 connections

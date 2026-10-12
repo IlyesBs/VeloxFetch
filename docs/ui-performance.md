@@ -107,3 +107,33 @@ not the `.input` surface the other fields use, so it looked different from them 
 * e2e `desktop-ui.mjs`, real app, light and dark: the app's list opens, with a background equal to the theme's
   `--solid` under the field's surface layer; Escape keeps the value; a click picks (the profile really changes); the
   keyboard opens and picks.
+
+## Cards no longer flash when a download starts (issue #20, October 2026)
+
+**Symptom.** Starting a download made the cards of the list fade out and back in ("appear and gone"). The
+connection grid of a running card also blinked while its speed settled.
+
+**Causes** (measured in the real app, `tests/e2e/desktop-card-flash.mjs`):
+1. Every card carried `.rise`, the entrance animation (fade in from opacity 0, 220 ms, `both`). A browser restarts
+   an element's CSS animations whenever the element is put back into the page, and React does exactly that:
+   * Downloads list (sorted by state): a download going from waiting or paused to running moves up, and React
+     re-inserts every card it passes;
+   * Active page: a card that changes section (waiting / running / paused) is a new element.
+   Each of those cards dropped to ~30 % opacity and faded back in. Smart queue rows had the same class.
+2. The grid's pulse speed followed the download's speed through the `--pulse` variable, i.e. the animations'
+   **duration**. A new duration moves each animation to another point of its beat: every lit cell jumped at once
+   (100–370 jumps in a few seconds of a starting download).
+
+**Fixes.**
+1. `ui/entrance.ts`, `useEntrance(key)`: an item gets `.rise` only the first time it is drawn in the window, and loses
+   it as soon as the animation ended (`animationend`, or after 600 ms if it was never painted). Moved, re-sorted or
+   re-created cards keep their look. Used by `DownloadCard` and `SmartQueueRow`. A brand-new download still fades in
+   once.
+2. `ThreadMatrix`: the duration stays the stylesheet's (`--pulse: 1.6s`); the pace is set with the animations'
+   `playbackRate` (`retime`), which keeps each animation where it is. Only the pulse (`flicker`) is retimed, never
+   the cells' colour transition. Without the Web Animations API (not seen: WebView2, WebKitGTK and WKWebView all
+   have it) the cells pulse at the base pace.
+
+**Results** (Linux, before → after): existing cards replaying their entrance 2–3 → 0; lowest opacity of an existing
+card 0.31 → 1.0; grid jumps 108–371 → 0. No change to the other UI tests (views, usability, ui, queue, smart queue,
+perf, redesign).

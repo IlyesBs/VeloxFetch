@@ -21,6 +21,7 @@ import {
 } from "../smartQueue";
 import type { Download, Priority, QueueInfo, Queues } from "../types";
 import { Icon, type IconName } from "../ui/icons";
+import { useEntrance } from "../ui/entrance";
 import { Menu, ProgressBar, type MenuItem } from "../ui/primitives";
 import { PrimaryAction } from "./DownloadCard";
 import { formatWhen } from "./when";
@@ -272,6 +273,7 @@ export const SmartQueueRow = memo(function SmartQueueRow({ id, position, order, 
   const t = useT();
   const d = useDownload(id);
   const byId = useStore((s) => s.byId);
+  const [rise, risen] = useEntrance(`queue:${id}`);
   if (!d) return null;
   const state = visualState(d, q);
   const why = waitReason(d, q, queues);
@@ -291,7 +293,7 @@ export const SmartQueueRow = memo(function SmartQueueRow({ id, position, order, 
   const up = canMove(order, byId, d.id, -1, q);
   const down = canMove(order, byId, d.id, 1, q);
   return (
-    <li className={`card card-hover rise flex items-center gap-3 p-3 ${done ? "opacity-75" : ""}`} data-testid={`queue-${d.id}`} data-state={state}>
+    <li className={`card card-hover ${rise} flex items-center gap-3 p-3 ${done ? "opacity-75" : ""}`} onAnimationEnd={risen} data-testid={`queue-${d.id}`} data-state={state}>
       <span className="num grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent-soft text-xs font-semibold text-accent">{position}</span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">

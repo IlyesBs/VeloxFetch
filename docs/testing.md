@@ -598,3 +598,14 @@ Checked by hand on Debian 13 (GStreamer 1.26), no AppImage rebuild:
 * `apt-get -s install` of a package that *requires* an uninstallable codec fails ("held broken packages" class);
   the same package that only *recommends* it installs.
 * Mutation: the old linux config makes the policy test fail; a hardware plugin added to the list is still kept out.
+
+## Cards no longer flash when a download starts (issue #20, October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/e2e/desktop-card-flash.mjs` (11) | a realistic list (3 finished, 2 paused); a paused download resumed and a new one added from the bar on the dashboard, then cards changing section on Active, with the server's speed swinging: the scenario really moves cards; no card already there replays its entrance; each stays at full opacity (sampled every frame); the new card fades in once; the grid's lit cells never restart and never jump in their beat; the pulse still follows the speed; no page errors |
+| `apps/desktop/src/cardFlash.test.ts` (5) | an item is drawn with its entrance once; the fallback outlasts the animation; cards and queue rows take the class from the hook; `retime` changes the pulse only, from the stylesheet's base; the duration is never set inline |
+| `tests/e2e/desktop-redesign.mjs` | "lit cells pulse ..." now reads the pulse's playback rate |
+
+Proof: on the code before the fix the new e2e fails 4–5 checks (moved cards at 0.31 opacity, 108–371 grid jumps)
+and the unit tests 3 of 5; after it, 11 runs of the e2e in a row pass.

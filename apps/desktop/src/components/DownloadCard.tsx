@@ -6,6 +6,7 @@ import { useDownload } from "../hooks";
 import { t, useT } from "../i18n";
 import type { Density } from "../prefs";
 import type { Download, FileKind } from "../types";
+import { useEntrance } from "../ui/entrance";
 import { Icon, type IconName } from "../ui/icons";
 import { ContextMenu, Menu, ProgressBar, StatusChip, type MenuItem } from "../ui/primitives";
 import { canRedownload, redownloadIsPrimary } from "../redownload";
@@ -109,6 +110,7 @@ export const DownloadCard = memo(function DownloadCard({ id, onOpen, density = "
   const closeMenu = useCallback(() => setMenuAt(null), []);
   const closeSignIn = useCallback(() => setSignIn(false), []);
   const closeConfirm = useCallback(() => setConfirm(false), []);
+  const [rise, risen] = useEntrance(`download:${id}`);
   if (!d) return null;
   const done = d.status === "completed";
   const frac = done ? 1 : fraction(d.downloaded, d.totalSize);
@@ -126,7 +128,8 @@ export const DownloadCard = memo(function DownloadCard({ id, onOpen, density = "
 
   return (
     <article
-      className={`task @container rise cursor-pointer ${density === "compact" ? "task-compact px-4 py-3" : "p-4"} ${running ? "is-live" : ""}`}
+      className={`task @container ${rise} cursor-pointer ${density === "compact" ? "task-compact px-4 py-3" : "p-4"} ${running ? "is-live" : ""}`}
+      onAnimationEnd={risen}
       data-testid={`download-${d.id}`}
       data-status={d.status}
       onClick={() => onOpen(d.id)}

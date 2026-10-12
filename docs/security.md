@@ -690,3 +690,8 @@ Full rules: `docs/new-link-recovery.md` §6.
   else in the environment changes, and installed packages are not affected.
 * Checked by the policy test "linux packages: ...": no media package is required, the build script hands the
   bundler only the staged folder, and a staging run on a fake folder keeps only the allowed plugins.
+
+## Cards no longer flash when a download starts (October 2026)
+
+* UI only: how cards animate (`ui/entrance.ts`, `ThreadMatrix.tsx`). No command, permission, data or network change;
+  no style is injected (the CSP still forbids it: the animation speed goes through the Web Animations API).
