@@ -49,11 +49,16 @@ pub struct Segment {
     pub status: SegmentStatus,
     #[serde(default)]
     pub retry_count: u32,
+    /// `sha256:<hex>` of the segment's bytes as they were on disk (after `fsync`) when its completion was saved.
+    /// It detects a later change of those local bytes; it does not prove they are what the server meant. Cleared
+    /// whenever the segment is not complete. `None` for segments saved by older versions.
+    #[serde(default)]
+    pub hash: Option<String>,
 }
 
 impl Segment {
     pub fn new(id: usize, start: u64, end: u64) -> Self {
-        Self { id, start, end, downloaded: 0, status: SegmentStatus::Pending, retry_count: 0 }
+        Self { id, start, end, downloaded: 0, status: SegmentStatus::Pending, retry_count: 0, hash: None }
     }
 
     pub fn len(&self) -> u64 {

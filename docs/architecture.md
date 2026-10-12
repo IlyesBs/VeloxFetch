@@ -86,6 +86,14 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   `paused` (resumable) or reset to restart cleanly.
 * Before resuming, the remote resource is re-validated (strong ETag, else `Last-Modified`, plus
   size). If it changed, the download restarts instead of splicing old and new bytes.
+* **Resume integrity** (`docs/resume-integrity.md`):
+  * every completed segment is hashed (SHA-256) by the checkpoint that first saves it complete, after the `fsync`,
+    in the same commit, together with the `.part` file's stamp;
+  * at resume, a different stamp (crash, outside change) re-hashes the completed segments, and a changed one is
+    emptied and fetched again;
+  * every ranged answer must be uncompressed, carry the download's strong ETag (when both have one) and the
+    download's total in `Content-Range`, or it is refused (`source_changed` / `range_not_honored`);
+  * the segment map must cover the file exactly, at resume and before finishing.
 
 ## Performance model
 
@@ -481,7 +489,7 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 
 ## State and versioning
 
-`PRAGMA user_version` tracks schema migrations (currently v6: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places). A database from a newer build is
+`PRAGMA user_version` tracks schema migrations (currently v7: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places, v7 segment hashes and the `.part` stamp). A database from a newer build is
 refused rather than corrupted.
 
 ## Download Profiles

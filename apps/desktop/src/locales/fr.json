@@ -706,6 +706,7 @@
   "e.folder": "VeloxFetch n’a pas le droit d’écrire dans ce dossier. Choisissez de nouveau le dossier, puis réessayez.",
   "e.webPage": "Le site a envoyé une page web au lieu du fichier (souvent une page de connexion ou « fichier indisponible »), donc rien n’a été enregistré. Téléchargez-le depuis votre navigateur avec « Envoyer les cookies » activé dans l’extension VeloxFetch, ou vérifiez que le fichier est partagé publiquement.",
   "e.checksum": "Le fichier n’est pas celui attendu : sa somme de contrôle ne correspond pas, il n’a donc pas été conservé.",
+  "e.sourceChanged": "Le fichier a changé sur le serveur pendant le téléchargement : ses nouvelles parties n’ont pas été mélangées aux parties enregistrées. Réessayer vérifie à nouveau le serveur et recommence en toute sécurité si nécessaire.",
   "e.exists": "Un fichier de ce nom existe déjà dans le dossier. Renommez-le ou déplacez-le, puis réessayez.",
   "e.incomplete": "Le serveur a envoyé moins que prévu. Réessayer poursuit le téléchargement.",
   "e.redirect": "Le lien a redirigé vers une adresse de cet ordinateur ou de ce réseau, ce qui n’est pas autorisé.",

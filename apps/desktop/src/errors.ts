@@ -18,6 +18,7 @@ const BY_CODE: Record<string, Key> = {
   folder_not_allowed: "e.folder",
   web_page: "e.webPage",
   checksum_mismatch: "e.checksum",
+  source_changed: "e.sourceChanged",
   file_exists: "e.exists",
   incomplete: "e.incomplete",
   redirect_refused: "e.redirect",

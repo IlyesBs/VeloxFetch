@@ -110,6 +110,9 @@ struct Inner {
     scheduler: Arc<SlotScheduler>,
     active: Mutex<HashMap<i64, Active>>,
     trackers: Mutex<HashMap<i64, Tracker>>,
+    /// Runs that just ended, until their numbers and timeline are saved (`diag.rs`): the diagnostics never show a
+    /// finished download without its last run.
+    finishing: Mutex<HashMap<i64, ProgressHandle>>,
     events: broadcast::Sender<ManagerEvent>,
     /// Bytes received from the network since start (sum of per-download progress).
     session_bytes: AtomicU64,
@@ -274,6 +277,7 @@ impl DownloadManager {
             scheduler,
             active: Mutex::new(HashMap::new()),
             trackers: Mutex::new(HashMap::new()),
+            finishing: Mutex::new(HashMap::new()),
             events,
             session_bytes: AtomicU64::new(0),
             idle_ticks: AtomicU8::new(0),
@@ -422,6 +426,7 @@ impl DownloadManager {
             content_type: None,
             server: None,
             request_headers,
+            part_stamp: None,
         };
         let id = self.save(&rec).await?;
         self.place_new(id, req.queue_id, start_at).await;
@@ -822,7 +827,14 @@ impl DownloadManager {
     async fn finish(&self, id: i64, res: Result<(), DownloadError>) {
         // Settle the network-bytes total for whatever arrived since the last tick (fast downloads
         // can finish between two ticks and would otherwise never be counted).
-        let ended = self.inner.active.lock().unwrap().remove(&id);
+        let ended = {
+            let mut active = self.inner.active.lock().unwrap();
+            let ended = active.remove(&id);
+            if let Some(a) = &ended {
+                self.inner.finishing.lock().unwrap().insert(id, a.progress.clone());
+            }
+            ended
+        };
         let tracker = self.inner.trackers.lock().unwrap().remove(&id);
         let (last, peak) = tracker.map_or((0, 0), |t| (t.last_received, t.peak));
         if let Some(a) = &ended {

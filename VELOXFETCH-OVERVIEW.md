@@ -109,6 +109,21 @@ Details: `docs/redownload.md`.
 - **Safe:** never overwrites (a file still there keeps its name; the copy gets `name (1)`), deletes only partial
   data inside the download folders, and refuses running, paused or waiting downloads.
 
+### Resume integrity
+Details: `docs/resume-integrity.md`.
+
+- **Every ranged answer is checked before its bytes are written:** `206`, the exact start, uncompressed, the
+  download's strong ETag (when both have one), and the download's total size. Otherwise it is refused, so two
+  versions of a file are never combined (`source_changed`).
+- **Finished parts are hashed** (SHA-256) when they are saved, after `fsync`, in the same commit. After a crash or an
+  outside change of the `.part` file, they are checked again at resume. Only a changed part is fetched again; a clean
+  pause re-reads nothing.
+- **Never finished from a broken segment map** (a gap, an overlap, a part not complete).
+- **Join checks for servers without a version tag:** every request that continues saved bytes starts 1 KiB early,
+  and those bytes must match; requests read 1 KiB past their end when needed, and every other join is compared before the file
+  may finish. A same-size change with no tag (or an unchanged date) is caught, and the retry starts clean.
+- A checksum given for the file still proves every byte before it is finished.
+
 ### Use a new link (expired links, sessions, mirrors)
 Details: `docs/new-link-recovery.md`.
 
@@ -773,6 +788,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Download Profiles | `docs/download-profiles.md` |
 | Download again | `docs/redownload.md` |
 | Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
+| Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
@@ -789,6 +805,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-11 | `feat_chunk_reverification` | Feature / Fix | Resume integrity: per-segment SHA-256 saved with the segment (after `fsync`, same commit) and re-verified at resume when the `.part` file changed since (crash, outside change), so only changed parts are fetched again. Ranged answers refused when compressed, carrying another strong ETag (a server ignoring `If-Range` could mix two versions: fixed), or stating another total. Join checks (1 KiB overlaps and tails at every join) catch a same-size change even with no version tag; after a source change the saved part is never continued. The segment map is checked at resume and before finishing. New failure `source_changed` in Download Doctor. Schema v7 (backward compatible). | `docs/resume-integrity.md` |
 | 2026-10-11 | `feat_session_link_refresh` | Feature | Use a new link: a paused or failed download (expired signed link, ended session, mirror gone) continues from a fresh link (pasted, from the Doctor, or re-clicked in the browser). Saved bytes are reused only on proof of the same file: strong ETag + size + matching 64 KiB samples, and working ranges and a validator. "Likely" needs the user's word. Another file is refused and nothing changes. Same-origin credentials only, no secrets in logs, bounded (no retries, one check at a time). New command `use_new_link` (main window only); `Downloader::sample_range`. | `docs/new-link-recovery.md` |
 | 2026-10-11 | `fix_select_colors` (55e4736) | Fix | Every drop-down opens a list drawn by the app in the theme's colours (same surface as the fields), on Windows, Linux and macOS. The system list ignored all CSS: grey on Linux. Keyboard, right-to-left, ARIA. The field has the same surface as other fields. No component changed. | `docs/ui-performance.md` |
 | 2026-10-11 | `fix_connections_64` (07c8002) | Fix | Up to 64 connections everywhere: the Fast profile is 64 (was 32). The planner no longer holds files of 50–200 MB at 32 or 10–50 MB at 16: from 10 MB a download may use all 64, still bounded by the setting and the 256 KB minimum piece. | `docs/download-profiles.md`, `docs/testing.md` |

@@ -370,6 +370,16 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 6. A running or paused download has no "Download again" in its menu.
 7. Repeat 1–2 in French and Arabic: the texts are translated, and the layout is right-to-left in Arabic.
 
+## AB. Resume integrity (once per OS: Windows, Linux, macOS)
+1. Start a large download (several GB), pause it at about 40 %, then resume: it continues at once (no long
+   pause before the speed shows).
+2. Pause again. Quit VeloxFetch. With a hex editor, change one byte near the start of the `.part` file. Start
+   VeloxFetch and resume: Details → timeline says finished parts "no longer match their check and are downloaded
+   again". The percentage drops by about one part only. The finished file matches the publisher's checksum.
+3. While a download runs, end VeloxFetch from the task manager / `kill -9`. Start it and resume: the timeline says
+   the finished parts were checked again, "all intact". The download continues from where it was (not 0 %).
+4. Repeat 1–3 in French and Arabic: the texts are translated.
+
 ## AA. Use a new link (once per OS: Windows, Linux, macOS)
 1. Start a large download, pause it at about 30 %. Right-click its card: **Use a new link…** is there (it is not
    there for a running or finished download).

@@ -30,6 +30,8 @@ pub enum Failure {
     Redirect,
     /// The server stopped honouring byte ranges in the middle of a transfer.
     RangeRejected,
+    /// A ranged answer described another version of the file (another strong `ETag` or total size).
+    SourceChanged,
     DiskFull,
     /// The folder or file cannot be written (permissions, a file open elsewhere).
     Permission,
@@ -280,6 +282,7 @@ impl Failure {
             "tls" => Failure::Tls,
             "redirect_refused" | "redirect_loop" => Failure::Redirect,
             "range_not_honored" => Failure::RangeRejected,
+            "source_changed" => Failure::SourceChanged,
             "disk_full" => Failure::DiskFull,
             "access_denied" => Failure::Permission,
             "folder_not_allowed" => Failure::FolderNotAllowed,
@@ -341,6 +344,8 @@ pub fn diagnose(e: &Evidence) -> Diagnosis {
         },
         Failure::Redirect => (C::Redirect, Src::Link, R::NotRetryable),
         Failure::RangeRejected => (C::RangeFailure, Src::Server, R::Retryable),
+        // The saved parts are kept apart from the new version; a retry checks the server and starts over if needed.
+        Failure::SourceChanged => (C::Integrity, Src::Content, R::Retryable),
         Failure::DiskFull => (C::DiskFull, Src::ThisComputer, R::RetryAfterUserAction),
         Failure::Permission => (C::Permission, Src::ThisComputer, R::RetryAfterUserAction),
         Failure::FolderNotAllowed => (C::FolderNotAllowed, Src::ThisComputer, R::RetryAfterUserAction),
@@ -440,6 +445,7 @@ pub fn diagnose(e: &Evidence) -> Diagnosis {
         C::ConnectionReset => "connection_reset".to_string(),
         C::Redirect => "redirect".to_string(),
         C::RangeFailure if http_status.is_none() => "range_not_honored".to_string(),
+        C::Integrity if failure == Failure::SourceChanged => "source_changed".to_string(),
         C::Integrity => "checksum_mismatch".to_string(),
         C::Persistence => "persistence".to_string(),
         C::InvalidResource => "invalid_request".to_string(),
@@ -477,6 +483,7 @@ fn code_of(f: Failure) -> &'static str {
         Failure::Http(_) => "http",
         Failure::Redirect => "redirect",
         Failure::RangeRejected => "range_not_honored",
+        Failure::SourceChanged => "source_changed",
         Failure::DiskFull => "disk_full",
         Failure::Permission => "access_denied",
         Failure::FolderNotAllowed => "folder_not_allowed",
@@ -636,6 +643,7 @@ mod tests {
             ("connection_reset", Failure::ConnectionReset),
             ("disk_full", Failure::DiskFull),
             ("range_not_honored", Failure::RangeRejected),
+            ("source_changed", Failure::SourceChanged),
             ("persistence", Failure::Persistence),
             ("redirect_loop", Failure::Redirect),
             ("whatever", Failure::Unknown),

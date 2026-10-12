@@ -50,8 +50,15 @@ ALTER TABLE queue ADD COLUMN start_at TEXT;
 ALTER TABLE queue ADD COLUMN pinned   INTEGER NOT NULL DEFAULT 0;
 ";
 
+/// v7: segment re-verification. Each completed segment's hash (`sha256:<hex>`, NULL = not hashed: older versions or
+/// not complete) and the `.part` file's stamp when the hashes were saved (NULL = unknown: re-hash before trusting).
+const SCHEMA_V7: &str = "
+ALTER TABLE segments  ADD COLUMN hash       TEXT;
+ALTER TABLE downloads ADD COLUMN part_stamp TEXT;
+";
+
 /// Applied in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6];
+const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7];
 const SCHEMA_VERSION: i32 = MIGRATIONS.len() as i32;
 
 const SCHEMA_V1: &str = "
@@ -630,8 +637,8 @@ impl DownloadStore for SqliteStore {
                 tx.execute(
                     "INSERT INTO downloads (url, filename, destination, total_size, downloaded_size, status, etag,
                         last_modified, resumable, checksum, last_error, created_at, updated_at,
-                        priority, category, speed_limit, content_type, server, request_headers)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                        priority, category, speed_limit, content_type, server, request_headers, part_stamp)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
                     params![
                         rec.url,
                         rec.filename,
@@ -650,7 +657,8 @@ impl DownloadStore for SqliteStore {
                         rec.speed_limit.map(|v| v as i64),
                         rec.content_type,
                         rec.server,
-                        headers
+                        headers,
+                        rec.part_stamp
                     ],
                 )
                 .map_err(db_err)?;
@@ -662,7 +670,7 @@ impl DownloadStore for SqliteStore {
                         "UPDATE downloads SET url=?2, filename=?3, destination=?4, total_size=?5, downloaded_size=?6,
                             status=?7, etag=?8, last_modified=?9, resumable=?10, checksum=?11, last_error=?12,
                             updated_at=?13, priority=?14, category=?15, speed_limit=?16, content_type=?17, server=?18,
-                            request_headers=?19 WHERE id=?1",
+                            request_headers=?19, part_stamp=?20 WHERE id=?1",
                         params![
                             id,
                             rec.url,
@@ -682,7 +690,8 @@ impl DownloadStore for SqliteStore {
                             rec.speed_limit.map(|v| v as i64),
                             rec.content_type,
                             rec.server,
-                            headers
+                            headers,
+                            rec.part_stamp
                         ],
                     )
                     .map_err(db_err)?;
@@ -696,16 +705,27 @@ impl DownloadStore for SqliteStore {
         {
             let mut st = tx
                 .prepare_cached(
-                    "INSERT INTO segments (download_id, idx, start_offset, end_offset, downloaded, status, retry_count)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                    "INSERT INTO segments (download_id, idx, start_offset, end_offset, downloaded, status, retry_count, hash)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                      ON CONFLICT(download_id, idx) DO UPDATE SET start_offset = excluded.start_offset,
                         end_offset = excluded.end_offset, downloaded = excluded.downloaded,
-                        status = excluded.status, retry_count = excluded.retry_count",
+                        status = excluded.status, retry_count = excluded.retry_count, hash = excluded.hash",
                 )
                 .map_err(db_err)?;
             for s in &rec.segments {
-                st.execute(params![id, s.id as i64, s.start as i64, s.end as i64, s.downloaded as i64, s.status.as_str(), s.retry_count])
-                    .map_err(db_err)?;
+                // A hash only ever describes a complete segment (never saved for one that is not).
+                let hash = s.hash.as_deref().filter(|_| s.is_complete());
+                st.execute(params![
+                    id,
+                    s.id as i64,
+                    s.start as i64,
+                    s.end as i64,
+                    s.downloaded as i64,
+                    s.status.as_str(),
+                    s.retry_count,
+                    hash
+                ])
+                .map_err(db_err)?;
             }
         }
         failpoint::hit("store.before_commit"); // everything written, nothing committed: must vanish
@@ -776,7 +796,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
         .query_row(
             "SELECT url, filename, destination, total_size, downloaded_size, status, etag, last_modified,
                     resumable, checksum, last_error, priority, category, speed_limit, content_type, server,
-                    request_headers
+                    request_headers, part_stamp
              FROM downloads WHERE id = ?1",
             [id],
             |r| {
@@ -800,6 +820,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
                     content_type: r.get(14)?,
                     server: r.get(15)?,
                     request_headers: decode_headers(r.get::<_, Option<String>>(16)?, sealer),
+                    part_stamp: r.get(17)?,
                 })
             },
         )
@@ -808,7 +829,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
     let Some(mut rec) = rec else { return Ok(None) };
     let mut st = conn
         .prepare_cached(
-            "SELECT idx, start_offset, end_offset, downloaded, status, retry_count
+            "SELECT idx, start_offset, end_offset, downloaded, status, retry_count, hash
              FROM segments WHERE download_id = ?1 ORDER BY idx",
         )
         .map_err(db_err)?;
@@ -821,6 +842,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
                 downloaded: r.get::<_, i64>(3)? as u64,
                 status: SegmentStatus::parse(&r.get::<_, String>(4)?).unwrap_or(SegmentStatus::Pending),
                 retry_count: r.get(5)?,
+                hash: r.get(6)?,
             })
         })
         .map_err(db_err)?
@@ -859,6 +881,7 @@ mod tests {
             content_type: Some("application/zip".into()),
             server: Some("nginx".into()),
             request_headers: vec![("referer".into(), "https://a.test/".into()), ("cookie".into(), "sid=1".into())],
+            part_stamp: None,
         }
     }
 

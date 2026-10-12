@@ -133,6 +133,20 @@ fn classify(raw: &str) -> (String, Option<Needs>, String) {
     if lower.contains("redirect") && (lower.contains("too many") || lower.contains("loop") || lower.contains("error following")) {
         return say("The link keeps redirecting (too many redirects or a loop), so the file could not be reached.", None, "redirect_loop");
     }
+    if lower.contains("file changed on the server") {
+        return say(
+            "The file changed on the server during the download, so its new parts were not mixed with the saved ones. Retry checks the server again and starts over safely if needed.",
+            None,
+            "source_changed",
+        );
+    }
+    if lower.contains("cannot finish:") {
+        return say(
+            "The saved parts do not cover the whole file, so it was not finished. Retry downloads what is missing.",
+            None,
+            "incomplete",
+        );
+    }
     if lower.contains("did not honor range") {
         return say(
             "The server stopped sending parts of the file, so the saved part cannot be continued as it is. Retry checks the server again and starts over safely if needed.",
@@ -198,6 +212,11 @@ mod tests {
         assert_eq!(error_code("request failed: error sending request for url (https://x.test/): operation timed out"), "timeout");
         assert_eq!(error_code("request failed: error sending request for url (https://x.test/)"), "connection");
         assert_eq!(error_code("checksum mismatch: expected a, got b"), "checksum_mismatch");
+        assert_eq!(
+            error_code("the file changed on the server during the download: Content-Range total Some(5), expected 4"),
+            "source_changed"
+        );
+        assert_eq!(error_code("internal error: cannot finish: segment 3 is not complete"), "incomplete");
         assert_eq!(error_code("the server sent a web page instead of the file `a.zip`"), "web_page");
         assert_eq!(error_code("something odd"), "other");
         assert_eq!(error_code("request failed: error following redirect for url (https://x.test/): too many redirects"), "redirect_loop");

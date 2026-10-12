@@ -21,6 +21,7 @@ pub(super) fn failure_of(e: &DownloadError) -> Failure {
             HttpError::Status { status, .. } => Failure::Http(*status),
             HttpError::SlowToAnswer | HttpError::Stalled => Failure::Timeout,
             HttpError::RangeNotHonored(_) => Failure::RangeRejected,
+            HttpError::SourceChanged(_) => Failure::SourceChanged,
             HttpError::InvalidUrl(_) | HttpError::UnsupportedScheme(_) | HttpError::InvalidHeader(_) => Failure::InvalidRequest,
             HttpError::InvalidProxy(_) => Failure::ProxyInvalid,
             HttpError::Transport(t) => transport_failure(t),
