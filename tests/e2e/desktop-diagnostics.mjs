@@ -80,7 +80,8 @@ try {
   await h.screenshot(path.join(SHOTS, "detail-diagnostics-failed.png"), { width: 1100, height: 760 });
 
   // Retry: a second attempt, counted live.
-  await click("[data-testid=detail-error] button:last-child");
+  // By its id: the error box has other buttons now (the Doctor's "Use a new link…" comes first).
+  await click("[data-testid=detail-retry]");
   await waitFor(async () => (await text("[data-testid=diag-attempts]")) === "2", "second attempt", 15000);
   check("Retry counts a second attempt", (await text("[data-testid=diag-events]")).includes("Retried (attempt 2)"));
 
