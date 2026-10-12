@@ -337,10 +337,17 @@ impl AdaptiveController {
 /// Concurrency limit that can change while permits are held.
 ///
 /// Raising adds permits at once. Lowering takes effect as running work finishes: surplus permits
-/// are destroyed instead of returned, so already-running segments are never interrupted.
+/// are destroyed instead of returned. Which connections stop at once depends on who lowered it (see
+/// [`AdaptiveGate::set_limit`] and [`AdaptiveGate::set_limit_soft`]): a request still waiting for the server's answer
+/// always gives way first, a connection that is transferring only for a speed limit or the user's settings.
 pub struct AdaptiveGate {
     sem: Arc<Semaphore>,
     limit: AtomicUsize,
+    /// Connections that are transferring may go on while no more than this many are open (never below `limit`):
+    /// raised with the limit, lowered only by [`AdaptiveGate::set_limit`].
+    keep: AtomicUsize,
+    /// The limit went down (wakes requests still waiting for an answer: see [`GatePermit::until_over_limit`]).
+    lowered: Notify,
     pending_forget: AtomicUsize,
     active: AtomicUsize,
     peak: AtomicUsize,
@@ -376,6 +383,8 @@ impl AdaptiveGate {
         Arc::new(Self {
             sem: Arc::new(Semaphore::new(limit)),
             limit: AtomicUsize::new(limit),
+            keep: AtomicUsize::new(limit),
+            lowered: Notify::new(),
             pending_forget: AtomicUsize::new(0),
             active: AtomicUsize::new(0),
             peak: AtomicUsize::new(0),
@@ -547,8 +556,25 @@ impl AdaptiveGate {
         self.ranked.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// A speed limit or the user's settings: the connections over the new limit stop where they are, transferring
+    /// or not (a lower limit that waited for parts to finish could take minutes under a low speed limit).
     pub fn set_limit(&self, new: usize) {
         let new = new.max(1);
+        self.keep.store(new, Ordering::SeqCst);
+        self.resize(new);
+    }
+
+    /// The download's own judgement (more connections brought nothing, the speed dipped, errors, a server that
+    /// refuses more): no new request over the limit, and requests still waiting for an answer give way, but a
+    /// connection that is transferring finishes its request. On a slow server, cutting one throws away the bytes on
+    /// their way and the time to get a new answer, which a single unbroken connection (a browser's) never loses.
+    pub fn set_limit_soft(&self, new: usize) {
+        let new = new.max(1);
+        self.keep.fetch_max(new, Ordering::SeqCst);
+        self.resize(new);
+    }
+
+    fn resize(&self, new: usize) {
         let cur = self.limit.swap(new, Ordering::SeqCst);
         if new > cur {
             let mut add = new - cur;
@@ -566,6 +592,7 @@ impl AdaptiveGate {
             let need = cur - new;
             let forgotten = self.sem.forget_permits(need);
             self.pending_forget.fetch_add(need - forgotten, Ordering::SeqCst);
+            self.lowered.notify_waiters();
         }
     }
 }
@@ -584,7 +611,18 @@ impl GatePermit {
         self.gate.wait_hold().await;
     }
 
+    /// Before a new request, or while one waits for the server's answer: is this connection one too many?
     pub fn give_way(&self) -> bool {
+        self.over(&self.gate.limit)
+    }
+
+    /// While transferring: is this connection one too many for a limit that cuts transfers (see
+    /// [`AdaptiveGate::set_limit`])? Requests still waiting for an answer leave first (they lose nothing).
+    pub fn give_way_transferring(&self) -> bool {
+        self.over(&self.gate.keep)
+    }
+
+    fn over(&self, limit: &AtomicUsize) -> bool {
         if self.leaving.load(Ordering::SeqCst) {
             return true;
         }
@@ -593,13 +631,27 @@ impl GatePermit {
         let picked = g
             .shedding
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |leaving| {
-                (g.active.load(Ordering::SeqCst) > g.limit.load(Ordering::SeqCst) + leaving).then_some(leaving + 1)
+                (g.active.load(Ordering::SeqCst) > limit.load(Ordering::SeqCst) + leaving).then_some(leaving + 1)
             })
             .is_ok();
         if picked {
             self.leaving.store(true, Ordering::SeqCst);
         }
         picked
+    }
+
+    /// Resolves once this connection is one too many for the limit ([`give_way`](Self::give_way)): a request still
+    /// waiting for the server's answer stops waiting then (it has received nothing, so it loses nothing).
+    pub async fn until_over_limit(&self) {
+        loop {
+            let lowered = self.gate.lowered.notified();
+            tokio::pin!(lowered);
+            lowered.as_mut().enable();
+            if self.give_way() {
+                return;
+            }
+            lowered.await;
+        }
     }
 }
 
@@ -950,6 +1002,47 @@ mod tests {
         assert_eq!((g.active(), stay.len()), (2, 2));
         assert!(stay.iter().all(|p| !p.give_way()), "the limit is met: the others stay");
         assert!(tokio::time::timeout(Duration::from_millis(50), g.acquire()).await.is_err(), "no third slot");
+    }
+
+    #[tokio::test]
+    async fn the_downloads_own_lower_limit_stops_new_and_waiting_requests_never_a_transfer() {
+        // Issue #21: cutting a transfer on a slow server loses what is on its way and the wait for a new answer.
+        let g = AdaptiveGate::new(6);
+        let held: Vec<GatePermit> = futures_util::future::join_all((0..6).map(|_| g.acquire())).await;
+        g.set_limit_soft(2);
+        assert!(held.iter().all(|p| !p.give_way_transferring()), "every transfer goes on");
+        let waiting: Vec<bool> = held.iter().map(|p| p.give_way()).collect();
+        assert_eq!(waiting.iter().filter(|l| **l).count(), 4, "requests still waiting for an answer give way: {waiting:?}");
+        let mut held = held;
+        let stay: Vec<GatePermit> = held.drain(..).zip(waiting).filter_map(|(p, l)| (!l).then_some(p)).collect();
+        assert_eq!(g.active(), 2);
+        assert!(tokio::time::timeout(Duration::from_millis(50), g.acquire()).await.is_err(), "no new request over the limit");
+        // A speed limit or the user's settings cut transfers too.
+        g.set_limit(1);
+        assert_eq!(stay.iter().filter(|p| p.give_way_transferring()).count(), 1);
+        // Raised again: the transfers it allows are kept by a later lowering of its own.
+        drop(stay);
+        g.set_limit_soft(3);
+        let three: Vec<GatePermit> = futures_util::future::join_all((0..3).map(|_| g.acquire())).await;
+        g.set_limit_soft(1);
+        assert!(three.iter().all(|p| !p.give_way_transferring()));
+    }
+
+    #[tokio::test]
+    async fn a_request_waiting_for_its_answer_is_told_when_it_is_one_too_many() {
+        let g = AdaptiveGate::new(2);
+        let a = g.acquire().await;
+        let b = g.acquire().await;
+        let wait_b = tokio::spawn(async move {
+            b.until_over_limit().await;
+            b
+        });
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(!wait_b.is_finished(), "within the limit: it keeps waiting");
+        g.set_limit_soft(1);
+        let b = tokio::time::timeout(Duration::from_secs(1), wait_b).await.expect("woken by the lower limit").unwrap();
+        assert!(b.give_way());
+        assert!(!a.give_way(), "only one of the two");
     }
 
     #[tokio::test]

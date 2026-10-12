@@ -628,3 +628,19 @@ The suite failed at "second attempt" since "Use a new link" (`feat_session_link_
 Retry button. The app was right; the test pressed the wrong button. The Retry button of the details' error box has
 its own id (`detail-retry`) and the test uses it: 3 runs in a row pass.
 
+## Slow servers (issue #21, October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/integration/tests/slow_server.rs::fewer_connections_never_cut_a_transfer_only_requests_still_waiting` | a server serving one request at a time (`State::one_at_a_time`): the count goes up, brings nothing, goes down; the requests given up were all still waiting (`State::cut_after_chunks` < 3 chunks), no transfer cut, no retry, file exact |
+| `slow_server.rs::parts_that_start_together_check_their_joins_without_extra_requests_at_the_end` | 16 fixed connections, parts started side by side: no 2 KiB "final look" request, file exact |
+| `slow_server.rs::a_slow_servers_broken_answer_continues_where_it_stopped` | a server slow to answer breaks its answer halfway: 2 GETs, the second from the saved bytes less 1 KiB with `If-Range`, < 1.1× the file sent, exact |
+| `slow_server.rs::a_slow_server_that_cannot_continue_starts_again_from_zero_and_is_not_asked_again` | `/norange/`: asked once for the rest, refused, then from 0 (never asked again), exact |
+| `slow_server.rs::a_file_changed_on_the_server_after_the_break_is_never_joined_to_the_saved_part` | the file changes (same size, new ETag) between the break and the rest: the new version whole |
+| `adaptive.rs::the_downloads_own_lower_limit_stops_new_and_waiting_requests_never_a_transfer` | soft lowering: transfers stay, waiting requests and new ones give way; `set_limit` cuts transfers; `keep` follows raises |
+| `adaptive.rs::a_request_waiting_for_its_answer_is_told_when_it_is_one_too_many` | `until_over_limit` waits within the limit, wakes on a lower one, for exactly the extra one |
+
+Proof: on the engine before the fix, 4 of the 5 integration tests fail (a transfer cut after 12 chunks, joins
+fetched at the end, the broken answer restarted from 0, and the range asked again). The 5th guards integrity.
+`diagnostics.rs` (two 503s counted as two retries) caught a race in the first version: an answer already there is
+now read before giving way. Benchmark: `docs/slow-servers.md`.

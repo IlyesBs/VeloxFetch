@@ -478,6 +478,10 @@ More: `docs/architecture.md`.
 
   The tightest one governs.
 - **Measured:** on a real ~24 Mbit/s line, 64 connections, a stable 2.6 to 2.9 MiB/s (the line's maximum).
+- **Slow servers (issue #21):** the download's own lowerings are soft. They stop new requests and the ones still
+  waiting for an answer, never a transfer; only a speed limit or the user's settings cut transfers. Joins are
+  checked from 1 KiB tails, not from extra requests at the end. A one-connection transfer that breaks continues from
+  its saved bytes when the server proves it is the same file. See `docs/slow-servers.md`.
 
 ### 4.3 Live UI at 60 FPS
 - The manager never forwards each network write. Every 200 ms it sends **one "tick"**: all progress plus the
@@ -795,6 +799,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Download again | `docs/redownload.md` |
 | Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
 | Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
+| Slow servers (as fast as a browser) | `docs/slow-servers.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
@@ -811,6 +816,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-12 | `fix_slow_server_speed` | Fix | Issue #21: a slow server downloaded slower than in a browser. (1) Lowering the connection count (a step that brought nothing, a dip, errors, 429 / 503) cut the connection that was transferring and kept the requests still waiting for an answer: now requests waiting give way and transfers finish (`set_limit_soft`); only a speed limit or the user's settings cut transfers. (2) Joins of parts started side by side were checked at the end, one request after the other: now from 1 KiB tails read with the request, the rest 4 at a time. (3) A one-connection transfer (server slow to answer) restarted from byte 0 after each broken connection: now it continues with `Range` + `If-Range` when the server proves the same file (206 at the offset, same total and version, last KiB identical), else from 0 as before. On a 10–50 KB/s server answering in 2 s: 226 s → 213.6 s next to curl's 210 s (the first check's wait is the difference). | `docs/slow-servers.md` |
 | 2026-10-12 | `fix_diagnostics_e2e_retry` | Test | `desktop-diagnostics.mjs` pressed the error box's last button, which became "Use a new link…" when that feature came: the details' Retry button now has its own id (`detail-retry`) and the test uses it. No change in behaviour. | `docs/testing.md` |
 | 2026-10-12 | `fix_pending_signin` | Fix | The browser confirmation popup can take the site's user name and password: its "Sign in to this site" part opens by itself when the check found that the server asks for them. Checked before the request is taken (a mistake keeps it waiting), sealed with the download like the Add dialog's, never shown back or logged. Without it, the card and details still offer Sign in. | `docs/security.md` |
 | 2026-10-12 | `fix_card_flash` | Fix | Issue #20: starting a download made the cards flash. The entrance animation (fade in from nothing) replayed on every card React moved (a download going up the list) or re-created (a card changing section on Active): it now plays once per card (`ui/entrance.ts`), for Smart queue rows too. The connection grid's pulse changed its duration with the speed, so all lit cells jumped at once: the pace now changes through the playback rate. | `docs/ui-performance.md` |

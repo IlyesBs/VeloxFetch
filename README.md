@@ -157,6 +157,9 @@ not a duplicate: the new download gets its own name and nothing is ever replaced
 [`docs/smart-duplicate-detection.md`](docs/smart-duplicate-detection.md).
 
 Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 16 -> 64 while that makes it faster).
+On a slow server it is at least as fast as a browser. Going down in connections never cuts a transfer, and a broken
+one-connection transfer continues where it stopped (only when the server proves it is the same file). See
+[`docs/slow-servers.md`](docs/slow-servers.md).
 
 Diagnostics stay on the computer: the app writes a small rotating log to `<app data>/logs/velox.log`
 (Settings > Diagnostics > Open log folder) with passwords, cookies, tokens and link query values removed.

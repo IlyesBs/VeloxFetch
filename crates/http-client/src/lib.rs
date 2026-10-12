@@ -540,7 +540,38 @@ impl HttpClient {
         if_range: Option<&str>,
         extras: &RequestExtras,
     ) -> Result<RangeStream> {
-        let mut r = self.req(Method::GET, url, extras).header(header::RANGE, format!("bytes={start}-{end}"));
+        self.range_on(&self.inner, url, start, end, if_range, extras).await
+    }
+
+    /// [`get_range_with`](Self::get_range_with) for a server that prepares the file before answering
+    /// ([`HttpError::SlowToAnswer`]): waits as long as [`get_patient`](Self::get_patient). Read its body with
+    /// [`patient_range_stream`](Self::patient_range_stream).
+    pub async fn get_range_patient(
+        &self,
+        url: &Url,
+        start: u64,
+        end: u64,
+        if_range: Option<&str>,
+        extras: &RequestExtras,
+    ) -> Result<RangeStream> {
+        self.range_on(&self.patient, url, start, end, if_range, extras).await
+    }
+
+    /// The body of a [`get_range_patient`](Self::get_range_patient) answer (see [`patient_stream`](Self::patient_stream)).
+    pub fn patient_range_stream(&self, r: RangeStream) -> impl Stream<Item = Result<Bytes>> + Send {
+        self.patient_stream(r.resp)
+    }
+
+    async fn range_on(
+        &self,
+        client: &reqwest::Client,
+        url: &Url,
+        start: u64,
+        end: u64,
+        if_range: Option<&str>,
+        extras: &RequestExtras,
+    ) -> Result<RangeStream> {
+        let mut r = self.req_on(client, Method::GET, url, extras).header(header::RANGE, format!("bytes={start}-{end}"));
         if let Some(hv) = if_range.and_then(|v| HeaderValue::from_str(v).ok()) {
             r = r.header(header::IF_RANGE, hv);
         }

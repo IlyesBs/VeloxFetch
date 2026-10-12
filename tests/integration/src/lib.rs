@@ -21,6 +21,8 @@
 //! | `/signed/<token>/..` | the file, or `403` once `<token>` is in `State::expired` (a signed link that expired) |
 //! | `/noetag/..` | the file, without an `ETag` (nothing proves its version) |
 //! | `../dated/..` | (anywhere in the path) also sends a fixed `Last-Modified` |
+//!
+//! Server-wide knobs live in [`State`] (pace, failures, a slow answer, one request at a time...).
 
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -73,6 +75,12 @@ pub struct State {
     pub route_delay: Mutex<Duration>,
     /// Tokens of `/signed/<token>/..` links that have expired: answered with `403`.
     pub expired: Mutex<std::collections::HashSet<String>>,
+    /// Serve one data request at a time: the others wait for their answer meanwhile (a server with one slot per
+    /// client, or simply a busy one).
+    pub one_at_a_time: AtomicBool,
+    turn: tokio::sync::Semaphore,
+    /// For every answer the client stopped reading: the 32 KiB body chunks it had been sent before.
+    pub cut_after_chunks: Mutex<Vec<usize>>,
 }
 
 pub struct Server {
@@ -161,6 +169,9 @@ pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
         routes: Mutex::new(Default::default()),
         route_delay: Mutex::new(Duration::ZERO),
         expired: Mutex::new(Default::default()),
+        one_at_a_time: AtomicBool::new(false),
+        turn: tokio::sync::Semaphore::new(1),
+        cut_after_chunks: Mutex::new(Vec::new()),
     });
     let l = TcpListener::bind(addr).await.unwrap();
     let addr = l.local_addr().unwrap();
@@ -285,6 +296,7 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
     if is_data_get && take(&st.fail_next) {
         return s.write_all(simple("503 Service Unavailable", "Retry-After: 0\r\n").as_bytes()).await.is_ok() && keep_alive;
     }
+    let _turn = if is_data_get && st.one_at_a_time.load(Ordering::SeqCst) { Some(st.turn.acquire().await.unwrap()) } else { None };
 
     let (status, body, hdrs): (&str, &[u8], String) = match (range.as_deref(), method.as_str()) {
         (Some(r), "GET") if total > 0 => {
@@ -359,6 +371,7 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
     let chunks = body.chunks(32 * 1024).count();
     for (i, chunk) in body.chunks(32 * 1024).enumerate() {
         if s.write_all(chunk).await.is_err() {
+            st.cut_after_chunks.lock().unwrap().push(i);
             ok = false;
             break;
         }
