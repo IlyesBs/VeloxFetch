@@ -670,3 +670,11 @@ Full rules: `docs/new-link-recovery.md` §6.
 * No new command or capability. The page reads the job list the main window already gets, and its buttons call the
   existing media commands.
 * It shows the job's own link, folder and file names, as the list does. No tool names (checked by e2e).
+
+## Dependency advisories (October 2026)
+
+* `source-map-js` 1.2.1 → 1.2.2 in the desktop UI's lockfile (GHSA-68fv-2mgg-jv7q: event-loop denial of service
+  through crafted source-map offsets). It is a build-time dependency of the bundler (Vite / Tailwind), never shipped
+  in the app. `npm audit` is clean for the desktop UI and the browser extension, and the release gate
+  (`scripts/security-gate.mjs`) passes in full.
+
