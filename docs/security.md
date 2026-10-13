@@ -311,7 +311,8 @@ and were added with the same rules as everything else (threats 17 and 18 in `doc
 * **Speed limits per kind of file** (Settings > Speed); a download without a category of its own shares the limit of its kind.
 * **Errors in plain words** (`download_manager::explain`), with the engine's message kept for the details view.
 * **Smart Duplicate Detection** (`check_duplicate`, main window only, read-only, no network): it answers with the file
-  name, ids, state, confidence and file state, never with the link, its query / signature, credentials or a path. A
+  name, ids, state, confidence and file state, never with the link, its query / signature, credentials or a path (a
+  download not started yet is named by its link's last path part, made safe, else "download": never the link). A
   match never deletes, cancels, pauses or overwrites anything; the prompt's actions are the existing commands with
   their checks (`FileTarget` ids, download folders, programs never opened). A finished file is only looked at
   (`metadata`) inside the download folders, and never read or hashed. A taken file name is a separate "name

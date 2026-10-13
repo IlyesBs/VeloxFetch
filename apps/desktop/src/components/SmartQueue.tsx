@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { actions } from "../actions";
-import { formatEta, fraction, hostOf, percent } from "../format";
+import { formatEta, formatPercent, fraction, hostOf } from "../format";
 import { useDownload, useStore } from "../hooks";
 import { localError } from "../errors";
 import { t as tr, useT, type Key } from "../i18n";
@@ -305,7 +305,7 @@ export const SmartQueueRow = memo(function SmartQueueRow({ id, position, order, 
         </div>
         <p className="truncate text-xs text-dim" data-testid="sq-why">
           {why ? reasonText(why, d, q) : state === "failed" ? (d.error ? localError(d.errorCode, d.error) : hostOf(d.url)) : hostOf(d.url)}
-          {showBar && d.totalSize ? ` · ${percent(d.downloaded, d.totalSize)}%` : ""}
+          {showBar && d.totalSize ? ` · ${formatPercent(d.downloaded, d.totalSize)}` : ""}
         </p>
         {showBar && <ProgressBar className="mt-1.5" value={frac} live={state === "downloading"} tone={state === "downloading" ? "accent" : state === "retrying" || state === "paused" ? "warn" : "dim"} label={d.filename} />}
       </div>

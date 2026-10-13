@@ -152,6 +152,12 @@ matches:
 * The DTO carries the file name, ids, status, reason, confidence and file state. It never carries the link, the
   path, credentials, cookies or query parameters. Test: `secrets_of_the_link_are_never_part_of_the_answer` checks
   that the signature, token, user name, password and path are absent.
+* A download that has not started yet has no file name (it is chosen when it starts). Until October 2026 the match
+  was then told with an empty name ("In your list:  · same link", "downloaded before: ."). It is now named by what
+  its link suggests: the last part of the path, made safe, else the word "download". Never the whole link, which
+  may carry a token (`fix_queue_percent_duplicate_name`; tests
+  `a_download_that_has_not_started_yet_is_named_by_its_link`,
+  `a_waiting_download_without_a_name_in_its_path_never_shows_its_link`).
 * Nothing is deleted, cancelled, paused or overwritten because of a match. The prompt's actions are the existing
   commands, with their existing checks.
 * No path from the UI. The file actions use `FileTarget` ids (`download` / `history`), resolved and checked in Rust.
@@ -173,7 +179,8 @@ matches:
 | Where | What |
 |---|---|
 | `download-manager` unit tests (`intelligence::tests`, 6 new + 2 updated) | conservative normalisation (host case, default port, fragment vs. query, path case, scheme, port, signed links, malformed stored link); version rules (same / changed ETag, changed size, size only, date, no server answer); checksums (same under another site, changed on the same link, different elsewhere); order (running first, surer first, failed claims no file); file state mapping |
-| `tests/integration/tests/duplicates.rs` (9) | real server + database: finished download found with its file, scheme case and fragment equivalent, another query / another path not a duplicate, Check link `exact` then `possible` after the server's file changes, own-name conflict, a second copy never replaces the first; edited and deleted file; running, paused (state unchanged by the check), failed, cancelled; history-only and after a restart; checksum match under another link, other or invalid checksum; another file with the same name is a name conflict, not a duplicate, and is untouched; two identical requests at once; secrets absent; malformed links refused |
+| `tests/integration/tests/duplicates.rs` (11) | a waiting (never started) download is named by its link, in the answer and in the Check link warning; without a name in its path it is "download", never the link |
+| `tests/integration/tests/duplicates.rs` (first 9) | real server + database: finished download found with its file, scheme case and fragment equivalent, another query / another path not a duplicate, Check link `exact` then `possible` after the server's file changes, own-name conflict, a second copy never replaces the first; edited and deleted file; running, paused (state unchanged by the check), failed, cancelled; history-only and after a restart; checksum match under another link, other or invalid checksum; another file with the same name is a name conflict, not a duplicate, and is untouched; two identical requests at once; secrets absent; malformed links refused |
 | `apps/desktop/src/duplicates.test.ts` (9) | prompt per state and file state; Open only when openable; a changed version noted; history-only has no View; every combination still offers a download, and every sentence exists in en/fr/ar; window fallback |
 | `apps/desktop/src/intelligence.test.ts` | name-conflict lines (other file vs. own copy, with and without a predicted name); new keys in every language |
 | `tests/e2e/desktop-usability.mjs` | the real prompt for a finished file says it is there and offers Open, Show in folder, Download again |

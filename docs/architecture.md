@@ -261,7 +261,8 @@ The read-only check before a download (full description: `docs/download-intellig
     numbered name it would get (`downloader_core::numbered_name`, the engine's rule).
 * **`check_duplicate`** (Smart Duplicate Detection): the same matching for the Add bar, with no network request. The
   link is prepared as `create_download` stores it (credentials split, share links made direct). It returns
-  `DuplicateDto | null`; the UI's `duplicates.ts` turns that into a prompt for each state. It is advisory: nothing
+  `DuplicateDto | null` (a never-started download is named by its link's last path part); the UI's `duplicates.ts`
+  turns that into a prompt for each state. It is advisory: nothing
   existing is changed, and the engine's `claim_name` still keeps every copy in its own file.
 * **`Downloader::connection_plan(size)`** is `planner::connection_limits` with the engine's current settings, so the
   recommended start is the engine's own; the adaptive controller still tunes it while the download runs.

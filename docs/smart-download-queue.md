@@ -144,6 +144,9 @@ Limits: 16 queues, names up to 40 characters. The busy limit is at least 64 KB/s
 
 ## 5. The queue page
 
+A row's share of the file is shown with one decimal ("12.0%"), like the cards and the details page
+(`formatPercent`). Until October 2026 it showed the raw number ("11.992703192112195%").
+
 **From top to bottom:**
 1. The controls card it always had: downloads at once, connections, pause everything.
 2. The queue tabs. Each shows the number still to do, a dot while it downloads, and an icon when it is closed.
@@ -213,7 +216,7 @@ All five are main-window only:
 | `apps/desktop/src/smartQueue.test.ts` (12) | States, reasons, order, moves, next download, timeline, quick times, rule chips, editor checks, store |
 | `apps/desktop/src/selectors.test.ts` (1) | No store selector builds a new array or object on each read (that loops React; found by the e2e test) |
 | `tests/security/policy.test.mjs` (+1) | Main window only, strict requests, validated rules, no socket or request to read the connection, no power action from the queues |
-| `tests/e2e/desktop-smart-queue.mjs` (47 checks) | The real app: tabs, editor and setups, a closed window holding a download, Start / Pause, Start at with the timeline, Start now, moving with the arrows changing which one gets the slot, the Add dialog, Clear completed, delete, hostile IPC, no CSP or script errors |
+| `tests/e2e/desktop-smart-queue.mjs` (48 checks) | A running row's percentage has one decimal (fails with the raw number). The real app: tabs, editor and setups, a closed window holding a download, Start / Pause, Start at with the timeline, Start now, moving with the arrows changing which one gets the slot, the Add dialog, Clear completed, delete, hostile IPC, no CSP or script errors |
 
 ## 8. Limits and next steps
 

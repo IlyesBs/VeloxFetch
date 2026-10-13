@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatEta, formatRelative, formatSpeed, fraction, hostOf, isStreamLink, isVideoPage, opensVideoDialog, parseRate, percent } from "./format";
+import { formatBytes, formatEta, formatRelative, formatSpeed, fraction, hostOf, isStreamLink, isVideoPage, opensVideoDialog, parseRate, percent, formatPercent } from "./format";
 
 describe("format", () => {
   it("formats bytes and speeds", () => {
@@ -27,6 +27,10 @@ describe("format", () => {
     expect(percent(5, 0)).toBe(0);
     expect(percent(5, null)).toBe(0);
     expect(percent(500, 100)).toBe(100);
+    // Shown with one decimal everywhere (the queue's rows showed the raw number).
+    expect(formatPercent(1_234_567, 10_294_967)).toBe("12.0%");
+    expect(formatPercent(0, 0)).toBe("0.0%");
+    expect(formatPercent(7, 7)).toBe("100.0%");
     expect(fraction(1, 4)).toBe(0.25);
   });
 
