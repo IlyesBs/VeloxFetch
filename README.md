@@ -5,7 +5,8 @@ desktop shell (React + TypeScript + Tailwind).
 
 **Version 1.0.0.** Release gate and steps: [`docs/release-candidate.md`](docs/release-candidate.md). Publishing to
 users (one command, the public repository `IlyesBs/VeloxFetch-releases`, texts and screenshots):
-[`docs/publishing.md`](docs/publishing.md).
+[`docs/publishing.md`](docs/publishing.md). The public page names only the systems that have been built (macOS
+appears once it is).
 
 **Interface:** every field, drop-downs included, is drawn in the theme's colours on Windows, Linux and macOS
 ([`docs/ui-performance.md`](docs/ui-performance.md)).

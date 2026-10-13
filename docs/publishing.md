@@ -70,9 +70,17 @@ release/publish/v1.0.0/
 
 ## The texts and pictures
 
-* `docs/publish/README-public.md`: the public front page. Problem → answer table, every feature, install per system
-  (first start on Windows without a paid certificate: More info > Run anyway; macOS: Open Anyway), how to check a
-  file's SHA-256, privacy, FAQ, and short French and Arabic sections.
+* `docs/publish/README-public.md`: the public front page, written for users, not engineers: what VeloxFetch does for
+  them (faster, never starts over, explains failures, no lag in games and calls, night downloads, videos, checks
+  before downloading, the browser), the rest in one list, the pictures, which file to download, the Windows first
+  start (More info > Run anyway), privacy, a short FAQ, and French and Arabic sections. No technical detail
+  (October 2026, the owner's request).
+* **Systems not built yet are never promised.** A line ending with `<!-- mac -->` is kept only when the release has
+  macOS packages (`<!-- no-mac -->` only when it has none), and `{{PLATFORMS}}` / `{{PLATFORMS_FR}}` /
+  `{{PLATFORMS_AR}}` / `{{PLATFORMS_LIST}}` name the systems that are there ("Windows and Linux"). Until a macOS
+  build exists, no text says macOS (`render` in `publish-kit.mjs`).
+* `node scripts/publish-kit.mjs page --systems Windows,Linux --out <folder>`: only the README and its pictures, to
+  update the public page between releases.
 * `docs/publish/release-notes.md`: the release text; `{{VERSION}}`, `{{DOWNLOADS}}` (table by system with sizes) and
   `{{SYSTEMS}}` are filled in by the kit.
 * `docs/publish/listings.md`: basics, taglines (50 / 80 / 132 characters), short and long descriptions, feature list,
@@ -110,6 +118,8 @@ free software (they require the source to be public).
 * preflight: no key yet (says how to make one), an untrusted key, a missing or wrong key file, a key file inside the
   project, versions that disagree;
 * the built app: without the key, or a debug build, refused;
+* macOS lines only with macOS packages: none of the three texts names macOS, a `.dmg`, a marker or a placeholder for
+  a Windows + Linux release; all name macOS once it is built; the page command;
 * **the whole script** in a throwaway copy of the project: a throwaway key made and its passphrase typed at a
   pseudo-terminal (`tests/release/pty-run.py`), refused without a key and with uncommitted changes, then a Linux
   release plus a Windows folder merged, signed and verified with the app's key; every published file in
