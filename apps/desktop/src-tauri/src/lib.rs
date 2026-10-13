@@ -327,6 +327,110 @@ command!(fetch_video_tools, FetchVideoTools, () -> VideoToolsDto, |m| async {
     Ok::<_, download_manager::ManagerError>(m.fetch_video_tools().await)
 });
 
+// Updates (Phase 19, docs/auto-update.md): the manager checks the signed manifest and downloads the package; the
+// install itself (a verified installer, an AppImage replaced, the system's package installer) is done here.
+command!(get_update_status, GetUpdateStatus, () -> download_manager::UpdateDto, |m| async {
+    Ok::<_, download_manager::ManagerError>(m.update_status())
+});
+command!(check_for_updates, CheckForUpdates, () -> download_manager::UpdateDto, |m| async {
+    Ok::<_, download_manager::ManagerError>(m.check_for_updates().await)
+});
+command!(download_update, DownloadUpdate, () -> download_manager::UpdateDto, |m| m.download_update());
+command!(set_update_auto, SetUpdateAuto, (enabled: bool) -> download_manager::UpdateDto, |m| m.set_update_auto(enabled));
+
+/// Install the downloaded update. Returns `restart` (the app quits; the new version takes over) or `opened` (the
+/// system's installer is open). The package is checked again by the manager and once more right before it is used.
+#[tauri::command]
+async fn install_update(window: WebviewWindow, state: State<'_, AppState>) -> Result<&'static str, ApiError> {
+    guard(&window, Command::InstallUpdate)?;
+    let plan = state.manager.prepare_update_install().await.map_err(ApiError::from)?;
+    if dry_run_shell() {
+        tracing::info!(version = %plan.version, kind = %plan.kind, "dry run: the update would be installed now");
+        return Ok("opened");
+    }
+    let p = plan.clone();
+    let outcome = tokio::task::spawn_blocking(move || system_integration::update::install(&p.kind, &p.path, p.size, &p.sha256)).await;
+    match outcome {
+        Ok(Ok(system_integration::update::Installed::Restart)) => {
+            tracing::info!(version = %plan.version, "installing the update: VeloxFetch closes");
+            window.app_handle().exit(0);
+            Ok("restart")
+        }
+        Ok(Ok(system_integration::update::Installed::Opened)) => Ok("opened"),
+        other => {
+            let why = match other {
+                Ok(Err(e)) => e.to_string(),
+                Err(e) => e.to_string(),
+                Ok(Ok(_)) => String::new(),
+            };
+            tracing::warn!(error = %why, "the update could not be installed");
+            state.manager.update_install_failed();
+            Err(ApiError { code: "update", message: "the update could not be started".into() })
+        }
+    }
+}
+
+/// The release page (a constant of the build), for a portable copy or a newer version not packaged for this system.
+#[tauri::command]
+async fn open_release_page(window: WebviewWindow, state: State<'_, AppState>) -> Result<(), ApiError> {
+    guard(&window, Command::OpenReleasePage)?;
+    let Some(url) = state.manager.update_status().release_page else {
+        return Err(ApiError { code: "update", message: "no release page".into() });
+    };
+    if dry_run_shell() {
+        tracing::info!("dry run: the release page would open");
+        return Ok(());
+    }
+    system_integration::update::open_release_page(&url)
+        .map_err(|e| ApiError { code: "update", message: format!("the page could not be opened: {e}") })
+}
+
+/// Debug builds in the end-to-end tests: nothing is installed or opened.
+fn dry_run_shell() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("VELOX_DRY_RUN_SHELL").is_some()
+}
+
+/// The public keys this build trusts for updates (empty: it cannot update itself).
+const UPDATE_KEYS: &str = include_str!("../update-keys.txt");
+const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch/releases";
+/// GitHub's "latest release" address: drafts and pre-releases are never served here.
+const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch/releases/latest/download/latest.json";
+const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch/releases/download/";
+
+/// Where updates come from. Debug builds never ask the real release server: only a local one, when the end-to-end
+/// test sets it up (`VELOX_UPDATE_FEED`, `VELOX_UPDATE_PREFIX`, `VELOX_UPDATE_KEYS`).
+fn update_config() -> Option<download_manager::UpdateConfig> {
+    let current = update_verify::Version::parse(env!("CARGO_PKG_VERSION"))?;
+    let mut cfg = download_manager::UpdateConfig {
+        keys: update_verify::TrustedKeys::parse(UPDATE_KEYS)
+            .map_err(|e| tracing::error!(error = %e, "the trusted update keys of this build are unreadable: no updates"))
+            .ok()?,
+        policy: update_verify::Policy { product: "VeloxFetch".into(), url_prefix: UPDATE_PACKAGES.into(), allow_loopback_http: false },
+        feed: UPDATE_FEED.into(),
+        release_page: RELEASE_PAGE.into(),
+        current,
+        kind: system_integration::update::installation_kind().map(String::from),
+        allow_loopback_http: false,
+        first_check: std::time::Duration::from_secs(60),
+        every: std::time::Duration::from_secs(12 * 3600),
+        dir: None,
+    };
+    if cfg!(debug_assertions) {
+        let (feed, prefix, keys) = (dev_only("VELOX_UPDATE_FEED")?, dev_only("VELOX_UPDATE_PREFIX")?, dev_only("VELOX_UPDATE_KEYS")?);
+        cfg.keys = update_verify::TrustedKeys::parse(&std::fs::read_to_string(keys).ok()?).ok()?;
+        cfg.feed = feed;
+        cfg.policy.url_prefix = prefix;
+        cfg.policy.allow_loopback_http = true;
+        cfg.allow_loopback_http = true;
+        cfg.first_check = std::time::Duration::from_secs(2);
+        // The installation kind to act as (the test build itself is never "installed"); install is a dry run there.
+        if let Some(kind) = dev_only("VELOX_UPDATE_KIND") {
+            cfg.kind = Some(kind);
+        }
+    }
+    Some(cfg)
+}
+
 /// The log of this run: `<app data>/logs/velox.log` (rotated, a few MB at most), secrets removed from every line.
 /// Installed before anything else so the start-up is logged too; crashes (panics) are written to it.
 fn start_log(data_dir: &std::path::Path) -> diagnostics::LogHandle {
@@ -729,7 +833,16 @@ pub fn run() {
             let db_path_dir = db_path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
             // One VeloxFetch per user: a second launch brings the running one forward and leaves, before it
             // opens the database or touches the browser link.
-            let listener = match bridge::claim_link(&db_path_dir) {
+            // Started by an update (the AppImage replaced itself): the old copy is still closing; wait for it.
+            let mut claim = bridge::claim_link(&db_path_dir);
+            if std::env::args().any(|a| a == system_integration::update::AFTER_UPDATE_ARG) {
+                let since = std::time::Instant::now();
+                while matches!(claim, bridge::LinkClaim::TakenByAnotherInstance) && since.elapsed() < std::time::Duration::from_secs(60) {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    claim = bridge::claim_link(&db_path_dir);
+                }
+            }
+            let listener = match claim {
                 bridge::LinkClaim::Ours(l) => Some(l),
                 bridge::LinkClaim::Unavailable => None,
                 bridge::LinkClaim::TakenByAnotherInstance => {
@@ -756,6 +869,7 @@ pub fn run() {
             }
             // The copies the installer downloaded next to the program.
             cfg.shared_tools_dir = shared_tools_dir();
+            cfg.update = update_config();
             dev_overrides(&mut cfg);
             // The key that seals cookies and credentials in the database lives in the operating
             // system's credential store. Debug builds use a throw-away in-memory key unless
@@ -932,6 +1046,12 @@ pub fn run() {
             fetch_video_tools,
             get_desktop_options,
             set_desktop_options,
+            get_update_status,
+            check_for_updates,
+            download_update,
+            install_update,
+            set_update_auto,
+            open_release_page,
         ])
         .build(context)
         .expect("error while building the VeloxFetch application");
@@ -986,5 +1106,20 @@ mod location_tests {
         // a relative answer (empty HOME and the like) is not trusted
         assert_eq!(first_known("t", [Some(PathBuf::from("rel")), None, Some(abs.join("c"))], last.clone()), abs.join("c"));
         assert_eq!(first_known("t", [None, None, None], last.clone()), last);
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::{RELEASE_PAGE, UPDATE_FEED, UPDATE_KEYS, UPDATE_PACKAGES};
+
+    #[test]
+    fn the_shipped_update_settings_are_valid() {
+        // A typo in the keys file would turn updates off for everyone: it must parse.
+        update_verify::TrustedKeys::parse(UPDATE_KEYS).unwrap();
+        for u in [RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES] {
+            assert!(u.starts_with("https://github.com/IlyesBs/VeloxFetch/releases"), "{u}");
+        }
+        assert!(update_verify::Version::parse(env!("CARGO_PKG_VERSION")).is_some(), "the app's version must be x.y.z");
     }
 }

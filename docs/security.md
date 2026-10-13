@@ -700,3 +700,24 @@ Full rules: `docs/new-link-recovery.md` §6.
 
 * UI only: how cards animate (`ui/entrance.ts`, `ThreadMatrix.tsx`). No command, permission, data or network change;
   no style is injected (the CSP still forbids it: the animation speed goes through the Web Animations API).
+
+## Updates (Phase 19, October 2026)
+
+* **Who can ship an update:** only the holder of the offline Ed25519 key and its passphrase. The key is made and
+  used by `scripts/update-key.mjs` at a terminal (no pipe, variable or argument), stored encrypted (scrypt +
+  AES-256-GCM, owner-only file, refused inside the project), never in CI. The public key is compiled in
+  (`update-keys.txt`); several lines allow a planned rotation.
+* **What is believed:** the manifest's signature is verified strictly (`verify_strict`, a context prefix) before the
+  manifest is parsed; then product, schema, strict version, and each package (known system and kind, safe name,
+  address exactly in the release folder, size, SHA-256). **No downgrade** and **no replay** (never older than a
+  manifest already accepted, remembered across restarts).
+* **What is kept and run:** the package goes to the app's own data folder, never past its signed size, keeps its name
+  only after size + hash match, is checked again when the user presses Install, and once more by the installer step:
+  on Windows under a read-only-sharing handle held until the setup started; the AppImage is replaced by exactly the
+  bytes that were hashed (atomic rename); `.deb` / `.rpm` / `.dmg` open in the system's own installer. Nothing is
+  installed without the user's click; a failure leaves the installed version untouched.
+* **What is sent:** two small public files, then the package on request; no cookies, credentials, extra headers or
+  identifiers (`VeloxFetch/<version>` only). Automatic checks can be turned off (`docs/PRIVACY.md`).
+* **The UI's part:** six main-window commands, none taking an address, a path or a version; error texts come from
+  fixed codes, never from the network.
+* Threat 14 in `docs/threat-model.md`; design, rotation and recovery in `docs/auto-update.md`.

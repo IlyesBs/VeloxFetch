@@ -9,7 +9,7 @@
 //  * `groups` (which downloads are active / queued / ...) is rebuilt only when a download is added,
 //    removed or changes status, never on progress ticks.
 
-import type { Download, DownloadStatus, ManagerEvent, MediaJob, Metrics, PendingDownload, Profiles, Progress, Queues, QueueState } from "./types";
+import type { Download, DownloadStatus, ManagerEvent, MediaJob, Metrics, PendingDownload, Profiles, Progress, Queues, QueueState, UpdateStatus } from "./types";
 
 export type GroupName = "active" | "queued" | "paused" | "failed" | "completed" | "cancelled";
 export type Groups = Record<GroupName, number[]>;
@@ -37,6 +37,8 @@ export interface State {
   queues: Queues | null;
   /** Download Profiles (the active one, the list, what is in force). Its own event. */
   profiles: Profiles | null;
+  /** Updates of VeloxFetch itself. Its own event. */
+  update: UpdateStatus | null;
   /** Browser downloads waiting for the user (oldest first). */
   pending: PendingDownload[];
   /** Stream (HLS / DASH) downloads, oldest first. A separate list: they are not rows of the download list. */
@@ -121,6 +123,7 @@ export function initialState(): State {
     queue: null,
     queues: null,
     profiles: null,
+    update: null,
     pending: [],
     media: [],
     toasts: [],
@@ -190,6 +193,8 @@ export function reduce(state: State, ev: ManagerEvent): State {
       return { ...state, queues: ev.queues };
     case "profiles":
       return { ...state, profiles: ev.profiles };
+    case "update":
+      return { ...state, update: ev.update };
     case "pending": {
       const i = state.pending.findIndex((p) => p.token === ev.pending.token);
       const pending = i < 0 ? [...state.pending, ev.pending] : state.pending.map((p, j) => (j === i ? ev.pending : p));

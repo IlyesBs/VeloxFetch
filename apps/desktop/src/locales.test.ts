@@ -35,6 +35,8 @@ describe("locale files", () => {
       });
       it("uses no markup other than <b>", () => {
         expect(keys.filter((k) => /<(?!\/?b>)[a-z/]/i.test(String(d[k])))).toEqual([]);
+        // Markdown bold would show as asterisks.
+        expect(keys.filter((k) => /\*\*/.test(String(d[k])))).toEqual([]);
       });
       it("never names a helper program", () => {
         expect(keys.filter((k) => /yt-dlp|youtube-dl|\bdeno\b|ffmpeg|ffprobe/i.test(String(d[k])))).toEqual([]);

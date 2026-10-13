@@ -62,8 +62,9 @@ deny = [
     { crate = "tauri-plugin-fs", reason = "webview must not have file system access" },
     { crate = "tauri-plugin-http", reason = "all network access goes through the Rust core" },
     { crate = "tauri-plugin-opener", reason = "webview must not open arbitrary files or links" },
-    # There is no updater yet. A signed, verified one is a design of its own (see docs/threat-model.md).
-    { crate = "tauri-plugin-updater", reason = "no updater until signature verification is designed and reviewed" },
+    # Updates are our own reviewed design (crates/update-verify, docs/auto-update.md): Ed25519-signed manifest, key
+    # compiled in, no downgrade, verified before anything is written or run. Tauri's plugin stays out.
+    { crate = "tauri-plugin-updater", reason = "updates use our own signed, reviewed design (docs/auto-update.md)" },
 ]
 
 [sources]

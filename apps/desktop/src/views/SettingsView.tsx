@@ -15,6 +15,7 @@ import { ScheduleSettings } from "../components/ScheduleSettings";
 import { SmartThrottleSettings } from "../components/SmartThrottleSettings";
 import { SpeedSettings } from "../components/SpeedSettings";
 import { StorageSettings } from "../components/StorageSettings";
+import { UpdateSettings } from "../components/UpdateSettings";
 import { VideoToolsSettings } from "../components/VideoToolsSettings";
 
 const THEMES: { pref: ThemePref; label: Key; icon: IconName }[] = [
@@ -33,6 +34,7 @@ const SECTIONS: { id: string; label: Key; icon: IconName }[] = [
   { id: "set-browser", label: "sec.browser", icon: "browser" },
   { id: "set-keys", label: "sec.keys", icon: "keyboard" },
   { id: "set-diagnostics", label: "sec.diagnostics", icon: "activity" },
+  { id: "set-updates", label: "sec.updates", icon: "download" },
   { id: "set-about", label: "sec.about", icon: "info" },
 ];
 
@@ -199,6 +201,10 @@ export function SettingsView() {
 
         <Group id="set-diagnostics">
           <DiagnosticsSettings />
+        </Group>
+
+        <Group id="set-updates">
+          <UpdateSettings />
         </Group>
 
         <Group id="set-about">

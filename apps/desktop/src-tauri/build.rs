@@ -84,6 +84,12 @@ const COMMANDS: &[&str] = &[
     "window_control",
     "get_desktop_options",
     "set_desktop_options",
+    "get_update_status",
+    "check_for_updates",
+    "download_update",
+    "install_update",
+    "set_update_auto",
+    "open_release_page",
 ];
 
 /// The UI's locale files, embedded so the few texts Rust shows itself (tray menu, notifications) use the same words

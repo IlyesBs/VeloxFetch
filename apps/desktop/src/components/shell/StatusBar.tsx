@@ -4,11 +4,14 @@ import { useT } from "../../i18n";
 import { throttleOn, throttleStatus, useThrottle } from "../../throttle";
 import { Icon } from "../../ui/icons";
 import { ProfileSwitch } from "../ProfilesSettings";
+import { updateLine } from "../UpdateSettings";
 
-/** The footer across the window: engine state, counts, the total, live speed, Smart throttle and free space. */
-export function StatusBar() {
+/** The footer across the window: engine state, counts, the total, live speed, Smart throttle, free space, updates. */
+export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
   const t = useT();
   const ready = useStore((s) => s.ready);
+  const update = useStore((s) => s.update);
+  const newer = update?.supported && (update.phase === "available" || update.phase === "ready" || update.phase === "elsewhere" || update.phase === "downloading");
   const m = useStore((s) => s.metrics);
   const throttle = useThrottle();
 
@@ -67,6 +70,20 @@ export function StatusBar() {
           <Icon name="hdd" size={13} />
           {t("foot.free", { size: formatBytes(m.diskFree) })}
         </span>
+      )}
+      {update?.supported && (newer || update.phase === "upToDate") && (
+        <button
+          type="button"
+          className={`flex items-center gap-1 ${newer ? "font-medium text-accent" : "text-fg/70"}`}
+          data-testid="status-update"
+          title={updateLine(t, update)}
+          onClick={onUpdates}
+        >
+          <Icon name={newer ? "download" : "checkCircle"} size={13} />
+          <span className={newer ? "" : "hidden lg:inline"}>
+            {newer ? t(update.phase === "ready" ? "foot.updateReady" : "foot.updateAvailable", { v: update.version ?? "" }) : t("foot.upToDate")}
+          </span>
+        </button>
       )}
       <span
         className="flex items-center gap-1.5 text-fg/85"

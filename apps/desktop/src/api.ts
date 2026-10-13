@@ -14,6 +14,7 @@ import type {
   Profiles,
   PreviewInfo,
   SmartThrottle,
+  UpdateStatus,
   VideoTools,
   ApiError,
   BrowserIntegration,
@@ -154,6 +155,14 @@ export const api = {
   getSmartThrottle: () => call<SmartThrottle>("get_smart_throttle"),
   getVideoTools: () => call<VideoTools>("get_video_tools"),
   fetchVideoTools: () => call<VideoTools>("fetch_video_tools"),
+  /** Updates: only Rust talks to the release server and checks the signature; the UI asks and shows. */
+  getUpdateStatus: () => call<UpdateStatus>("get_update_status"),
+  checkForUpdates: () => call<UpdateStatus>("check_for_updates"),
+  downloadUpdate: () => call<UpdateStatus>("download_update"),
+  /** "restart": the app closes and the new version takes over; "opened": the system's installer is open. */
+  installUpdate: () => call<"restart" | "opened">("install_update"),
+  setUpdateAuto: (enabled: boolean) => call<UpdateStatus>("set_update_auto", { enabled }),
+  openReleasePage: () => call<void>("open_release_page"),
   setSmartThrottle: (request: SetSmartThrottle) => call<SmartThrottle>("set_smart_throttle", { request }),
   setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
   getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),

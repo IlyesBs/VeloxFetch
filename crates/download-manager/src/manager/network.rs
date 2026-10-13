@@ -71,7 +71,7 @@ impl Network {
 }
 
 impl DownloadManager {
-    fn network(&self) -> std::sync::MutexGuard<'_, Network> {
+    pub(super) fn network(&self) -> std::sync::MutexGuard<'_, Network> {
         self.inner.network.lock().unwrap_or_else(|p| p.into_inner())
     }
 

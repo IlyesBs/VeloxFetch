@@ -1,0 +1,2 @@
+# THROWAWAY TEST KEY 18fbba603b50967d (its private half was deleted). Never trust it in the app.
+velox-update-key-v1 a7b189b7d4c99f13c2e225bf535a61655c7be2cc0effaafecb17fffd72afabb2

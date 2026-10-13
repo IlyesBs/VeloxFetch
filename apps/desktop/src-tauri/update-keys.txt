@@ -1,0 +1,3 @@
+# The public keys VeloxFetch trusts for updates (Phase 19, docs/auto-update.md). Compiled into the app.
+# One line per key: `velox-update-key-v1 <64 hex>`. Add a key only with `node scripts/update-key.mjs generate`.
+# Empty: this build cannot update itself (it says so in Settings > Updates).

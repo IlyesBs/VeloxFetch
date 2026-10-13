@@ -449,3 +449,17 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 3. A server that is slow to answer and breaks the connection (a file prepared on request, over a flaky line): the
    download goes on from where it was ("Retrying", then the size keeps growing); it never falls back to 0 B, and the
    finished file is exact (compare with the browser's copy).
+
+## AG. Updates (once per OS and installation kind: Windows setup, AppImage, .deb, .rpm, macOS .dmg, a portable zip)
+Needs two signed releases (x.y.z installed, a newer one published with `latest.json` + `latest.json.sig`).
+1. Settings > Updates shows the installed version; **Check now** says "Version … is available (size)"; the status bar
+   says "Update … available" and opens Settings > Updates when clicked.
+2. **Download the update**: the progress moves, then "downloaded and verified"; the file is in `<app data>/updates`.
+3. **Install and restart** (Windows setup, AppImage): the administrator prompt (Windows), the app closes, the new
+   version starts, Settings > Updates says "up to date", downloads and settings are kept. **Open the installer**
+   (`.deb`, `.rpm`, `.dmg`): the system's installer opens with the new version. Portable: **Open the release page**.
+4. Replace `latest.json.sig` on a test release by one made with another key: "signature is not valid", nothing offered.
+5. Change one byte of the downloaded file in `<app data>/updates` before pressing Install: refused, "download it again".
+6. Turn off **Check for updates automatically**, restart, wait two minutes: no request to github.com (a network
+   monitor); **Check now** still works.
+7. Offline: "Could not reach the update server"; the app keeps working.

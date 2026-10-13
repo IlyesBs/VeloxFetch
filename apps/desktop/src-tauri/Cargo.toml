@@ -24,6 +24,8 @@ system-integration = { path = "../../../crates/system-integration" }
 path-safety = { path = "../../../crates/path-safety" }
 secrets = { path = "../../../crates/secrets" }
 diagnostics = { path = "../../../crates/diagnostics" }
+# The update keys of this build and the version check (Phase 19).
+update-verify = { path = "../../../crates/update-verify" }
 # The native folder dialog (not a Tauri plugin: the web view gets no dialog API, only our own commands).
 rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 serde.workspace = true

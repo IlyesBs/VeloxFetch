@@ -220,7 +220,13 @@ export default function App() {
           </main>
         </div>
       </div>
-      <StatusBar />
+      <StatusBar
+        onUpdates={() => {
+          setRoute({ name: "settings" });
+          // after the settings page has rendered
+          setTimeout(() => document.getElementById("set-updates")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+        }}
+      />
       {batch && <BatchDialog initialLinks={batch.links} onClose={() => setBatch(null)} />}
       {stream && <MediaDialog initialUrl={stream.url} onClose={() => setStream(null)} />}
       <PendingDialog />

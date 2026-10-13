@@ -233,10 +233,47 @@ test("CI runs every security step, from a locked dependency set, on all three op
   }
 });
 
-test("there is no auto-updater until one is designed", () => {
+test("updates are only our own signed design (Phase 19, docs/auto-update.md)", () => {
   const cargo = read("apps", "desktop", "src-tauri", "Cargo.toml");
-  assert.doesNotMatch(cargo, /updater/i);
+  // Not Tauri's updater plugin (banned in deny.toml): our own, reviewed one.
+  assert.doesNotMatch(cargo, /tauri-plugin-updater/);
   assert.doesNotMatch(read("apps", "desktop", "src-tauri", "tauri.conf.json"), /updater|pubkey|endpoints/i);
+  // The trusted keys: only well-formed public keys, never anything else.
+  for (const line of read("apps", "desktop", "src-tauri", "update-keys.txt").split(/\r?\n/).map((l) => l.trim())) {
+    if (!line || line.startsWith("#")) continue;
+    assert.match(line, /^velox-update-key-v1 [0-9a-f]{64}$/, `not a public key line: ${line}`);
+  }
+  // A signature is checked strictly, over a context-prefixed manifest, before the manifest is read.
+  const verify = read("crates", "update-verify", "src", "lib.rs");
+  assert.match(verify, /verify_strict\(/);
+  assert.match(verify, /SIGNING_CONTEXT/);
+  assert.ok(verify.indexOf("verify_strict(") < verify.indexOf("serde_json::from_slice(manifest)"), "the signature is checked before the manifest is parsed");
+  // A downloaded package keeps its final name only after its size and hash matched, and is checked again before use.
+  const mgr = read("crates", "download-manager", "src", "manager", "update.rs");
+  const fetch = mgr.slice(mgr.indexOf("async fn fetch_package"));
+  assert.ok(fetch.indexOf("check_file(") < fetch.indexOf("std::fs::rename(&part, &final_path)"), "verified before it is renamed");
+  assert.match(mgr.slice(mgr.indexOf("pub async fn prepare_update_install")), /check_file\(/);
+  const inst = read("crates", "system-integration", "src", "update.rs");
+  assert.match(inst, /share_mode\(FILE_SHARE_READ\)/, "Windows: the setup cannot be swapped between the check and the start");
+  const setup = inst.slice(inst.indexOf("fn run_windows_setup("));
+  assert.ok(setup.indexOf("verify(") > 0 && setup.indexOf("verify(") < setup.indexOf("ShellExecuteExW(&mut"), "the setup is checked before it is started");
+  const install = inst.slice(inst.indexOf("pub fn install("), inst.indexOf("pub fn replace_file("));
+  assert.ok(install.indexOf("verify(") < install.indexOf("open_with_system("), "a package is checked before it is opened");
+  // Only a constant https page is ever opened in the browser.
+  assert.match(inst.slice(inst.indexOf("pub fn open_release_page(")), /starts_with\("https:\/\/"\)/);
+  // The private key never enters the repository, and the passphrase never comes from a variable or an argument.
+  const tool = read("scripts", "update-key.mjs");
+  assert.doesNotMatch(tool, /process\.env/);
+  assert.match(tool, /isTTY/);
+  for (const f of walk(ROOT)) {
+    if (/update-key\.mjs$|\.md$|policy\.test\.mjs$/.test(f)) continue;
+    const text = fs.readFileSync(f).toString("latin1");
+    assert.doesNotMatch(text, /velox-update-secret-key-v1/, `${path.relative(ROOT, f)} looks like a private update key`);
+  }
+  // Updates come from the fixed HTTPS release address in the build, never from the UI.
+  const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  assert.match(lib, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases\/latest\/download\/latest\.json"/);
+  assert.doesNotMatch(lib, /fn (download_update|install_update|check_for_updates)\([^)]*(url|path|String)/);
 });
 
 test("the release folder, when present, matches SHA256SUMS exactly", () => {
@@ -428,8 +465,9 @@ test("engines write only under folders the manager allows, checked again before 
 // Opening downloaded files: only the one audited place may start the file manager or open a file
 
 test("only system-integration shows or opens files, never a program, and only by id from the web view", () => {
-  // Starting the file manager / "open with the usual application" happens in exactly two audited modules.
-  const allowed = ["crates/system-integration/src/files.rs", "crates/system-integration/src/browser_launch.rs"];
+  // Starting the file manager / "open with the usual application" happens in exactly three audited modules (the
+  // third installs a verified update: see the updates test).
+  const allowed = ["crates/system-integration/src/files.rs", "crates/system-integration/src/browser_launch.rs", "crates/system-integration/src/update.rs"];
   const bad = [];
   for (const f of shippedRust()) {
     const rel = path.relative(ROOT, f).replaceAll("\\", "/");

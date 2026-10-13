@@ -644,3 +644,24 @@ Proof: on the engine before the fix, 4 of the 5 integration tests fail (a transf
 fetched at the end, the broken answer restarted from 0, and the range asked again). The 5th guards integrity.
 `diagnostics.rs` (two 503s counted as two retries) caught a race in the first version: an answer already there is
 now read before giving way. Benchmark: `docs/slow-servers.md`.
+
+## Updates (Phase 19, October 2026)
+
+| Test | Checks |
+|---|---|
+| `crates/update-verify` (10 unit) | signature accepted / any byte changed / no context / another key, even with the trusted id / malformed or upper-case signature / no keys / weak key / two keys (rotation); package rules (http, other host, other file, query, `..`, extension, system, duplicates, sizes, upper-case hash); plain http only for local tests; strict versions; no downgrade; replay refused; exact size and hash; size limits |
+| `crates/update-verify/tests/node_interop.rs` (3) | a manifest signed by `scripts/update-key.mjs` (Node's Ed25519) passes the Rust check; changed or CRLF bytes do not; the throwaway test key is not trusted by the app |
+| `tests/integration/tests/update.rs` (7) | a local release server: found, downloaded, verified, handed over, changed on disk refused; a tampered package never kept; a longer one cut at the signed size; foreign and missing signatures; no downgrade and no replay (across restarts); an interrupted download continues with a range and is verified; no cookie / credential sent; the automatic setting kept; a copy without keys sends nothing |
+| `crates/system-integration` `update` (4 unit) | a file replaced only by exactly the checked bytes (0755, nothing left on failure); packages checked before opening; only a plain https page; a test binary is not an installation |
+| `crates/download-manager` `update` (2 unit) | install wording per kind; the update folder keeps only the current package |
+| `apps/desktop/src/update.test.ts` (3) | the status line for every phase and refusal (no network text); the store keeps the newest state. `locales.test.ts` now also refuses Markdown bold (`**`) in every locale (it showed as asterisks) |
+| `apps/desktop/src-tauri` `update_tests` | the shipped keys file parses; the fixed addresses; the app's version is `x.y.z` |
+| `tests/security/policy.test.mjs` "updates are only our own signed design" | no Tauri updater; key lines only; signature before parsing; verified before rename and install; Windows share lock; check before opening; https page only; no `process.env` in the key tool; no private key in the repository; fixed feed; no command takes an address or path |
+| `tests/e2e/desktop-updates.mjs` (18 checks) | the real app, a local server, a throwaway key: a foreign signature refused in words; a signed version in Settings and the status bar; downloaded, verified, byte for byte; install handed over (dry run); the status bar opens Settings > Updates; the setting kept; requests carry no cookie or credential, only `VeloxFetch/<version>` |
+
+The key tool was driven in a pseudo-terminal (`generate`, `manifest`, `sign`, `verify`; wrong, short and piped
+passphrases refused); its output signed the interop fixture.
+
+`desktop-usability.mjs` counts 10 Settings sections since Updates came (it counted 9); `desktop-diagnostics.mjs` reads
+every on-screen status for "error" / "cannot", so the Updates panel says "Updates are not offered in this copy"
+when a build has no update key. All 20 desktop suites pass on Linux.

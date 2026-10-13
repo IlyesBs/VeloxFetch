@@ -162,7 +162,7 @@ try {
   // ============================================================ network settings
   await nav("settings");
   await waitFor(() => has("[data-testid=settings-nav]"), "settings nav");
-  check("Settings has a side menu with every section", (await count("[data-testid=settings-nav] button")) === 9); // incl. Diagnostics (Phase 14)
+  check("Settings has a side menu with every section", (await count("[data-testid=settings-nav] button")) === 10); // incl. Diagnostics (Phase 14) and Updates (Phase 19)
   await clickText("[data-testid=settings-nav] button", "Network");
   await waitFor(async () => (await ev("document.querySelector('[data-testid=settings-nav] [aria-current=true]')?.innerText.trim()")) === "Network", "Network highlighted", 5000).catch(() => null);
   check("the side menu highlights the section on screen", (await ev("document.querySelector('[data-testid=settings-nav] [aria-current=true]')?.innerText.trim()")) === "Network");

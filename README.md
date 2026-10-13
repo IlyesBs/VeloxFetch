@@ -21,6 +21,7 @@ crates/system-integration  power actions behind a trait; native messaging host r
 crates/browser-bridge  browser <-> app protocol, validation, authentication, local link
 crates/download-manager  application controller used by the UI
 crates/diagnostics  local log (redacted, rotated) and the text reports; no telemetry
+crates/update-verify  checks an update before anything is written or run (Ed25519 manifest, version, hash)
 tests/integration   fault-injecting local server + end-to-end layer tests
 tests/e2e           drives the real desktop app through WebView2
 ```
@@ -160,6 +161,12 @@ Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 1
 On a slow server it is at least as fast as a browser. Going down in connections never cuts a transfer, and a broken
 one-connection transfer continues where it stopped (only when the server proves it is the same file). See
 [`docs/slow-servers.md`](docs/slow-servers.md).
+
+**Updates**: Settings > Updates (and the status bar) tells you when a newer version exists, downloads it when you ask
+and installs it (the Windows setup, an AppImage that replaces itself, the system's installer for `.deb` / `.rpm` /
+`.dmg`). Only an update signed with the publisher's offline key is accepted; it is never older than what you have,
+and its exact size and checksum are checked before it is kept and again before it is installed. Releases are signed
+with `node scripts/update-key.mjs`. See [`docs/auto-update.md`](docs/auto-update.md).
 
 Diagnostics stay on the computer: the app writes a small rotating log to `<app data>/logs/velox.log`
 (Settings > Diagnostics > Open log folder) with passwords, cookies, tokens and link query values removed.

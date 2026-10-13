@@ -9,6 +9,8 @@ publish = false
 serde.workspace = true
 thiserror.workspace = true
 serde_json = "1"
+# Updates (update.rs): the package is checked once more right before it is installed.
+update-verify = { path = "../update-verify" }
 
 # Linux: notifications and the sleep inhibitor straight over D-Bus (every desktop: GNOME, KDE, Xfce, Cinnamon...),
 # with the command-line tools as a fallback. Run on a small runtime of its own, whatever thread calls.
@@ -16,9 +18,12 @@ serde_json = "1"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 tokio.workspace = true
 
+[dev-dependencies]
+sha2 = "0.11"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Power", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_System_Registry", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 # Notifications (Windows toasts, WinRT). The same version as the desktop app.
 windows = { version = "0.61", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation"] }
 
