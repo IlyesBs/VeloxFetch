@@ -65,6 +65,8 @@
     "allow-choose-download-folder",
     "allow-get-network",
     "allow-set-network",
+    "allow-get-multi-network",
+    "allow-set-multi-network",
     "allow-set-download-credentials",
     "allow-show-in-folder",
     "allow-open-file",

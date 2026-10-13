@@ -59,6 +59,8 @@ const COMMANDS: &[&str] = &[
     "choose_download_folder",
     "get_network",
     "set_network",
+    "get_multi_network",
+    "set_multi_network",
     "set_download_credentials",
     "show_in_folder",
     "open_file",

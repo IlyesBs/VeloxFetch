@@ -35,7 +35,7 @@ vi.mock("./hooks", () => ({
 
 vi.mock("./chrome", () => ({ syncFrameTheme: () => {} }));
 
-const { throttleStore, gaugeShare, throttleStatus } = await import("./throttle");
+const { throttleStore, gaugeShare, throttleStatus, throttleOn } = await import("./throttle");
 const { paletteKey } = await import("./theme");
 
 const base: SmartThrottle = {
@@ -56,6 +56,7 @@ const base: SmartThrottle = {
   gameLimitBps: 524288,
   gameHold: false,
   profileAdaptive: null,
+  heldByNetworks: false,
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -204,5 +205,13 @@ describe("Smart throttle state in the window", () => {
     server.sets[0]?.resolve();
     await tick();
     expect(server.state.gamePolicy).toBe("pause");
+  });
+});
+
+describe("several networks at once", () => {
+  it("holds Smart throttle off, whatever the user's switch or the profile say", () => {
+    expect(throttleOn({ ...base, enabled: true })).toBe(true);
+    expect(throttleOn({ ...base, enabled: true, heldByNetworks: true })).toBe(false);
+    expect(throttleOn({ ...base, profileAdaptive: true, heldByNetworks: true })).toBe(false);
   });
 });

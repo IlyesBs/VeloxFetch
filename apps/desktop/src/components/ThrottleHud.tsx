@@ -46,6 +46,8 @@ export function ThrottleHud({
   const on = throttleOn(s);
   // The active profile turned it on: the switch is the profile's while it is active (change the profile instead).
   const byProfile = s?.profileAdaptive === true && !s.enabled;
+  // Several networks at once is on: Smart throttle stays off (every network at full speed) until it is turned off.
+  const held = !!s?.heldByNetworks;
   const limiting = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   // Live: the cap against the speed downloads usually get (the share they keep right now).
@@ -135,8 +137,8 @@ export function ThrottleHud({
         className={`hud-core absolute grid place-items-center rounded-full text-accent ${side ? "inset-[30px]" : "inset-[26px] border border-line bg-raised"} ${limiting ? "hud-live" : ""}`}
         aria-pressed={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
-        title={byProfile ? t("prof.smartByProfile") : t("hud.gauge", { p: pct })}
-        disabled={!s || byProfile}
+        title={held ? t("multi.smartHeld") : byProfile ? t("prof.smartByProfile") : t("hud.gauge", { p: pct })}
+        disabled={!s || byProfile || held}
         data-testid="hud-toggle"
         onClick={toggle}
       >
@@ -183,7 +185,7 @@ export function ThrottleHud({
               k: keepWhileActive(m.share),
               p: m.share,
             })}
-            disabled={!s}
+            disabled={!s || held}
             data-testid={`hud-mode-${m.share}`}
             onClick={() => pick(m.share, name)}
           >
@@ -213,8 +215,8 @@ export function ThrottleHud({
         aria-checked={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
         className="switch"
-        title={byProfile ? t("prof.smartByProfile") : undefined}
-        disabled={!s || byProfile}
+        title={held ? t("multi.smartHeld") : byProfile ? t("prof.smartByProfile") : undefined}
+        disabled={!s || byProfile || held}
         data-testid="hud-switch"
         onClick={toggle}
       />

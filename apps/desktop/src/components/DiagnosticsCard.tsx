@@ -8,6 +8,7 @@ import { useT } from "../i18n";
 import { Icon } from "../ui/icons";
 import { withoutToolNames } from "./DiagnosticsSettings";
 import { localEvent } from "../timeline";
+import { networkLabel } from "../networks";
 
 const RUNNING: DownloadStatus[] = ["queued", "downloading", "verifying"];
 
@@ -102,6 +103,12 @@ export function DiagnosticsCard({ id, status, revision }: { id: number; status: 
             <Fact label={t("dc.time")} value={diag.activeSecs > 0 ? formatDuration(diag.activeSecs) : "—"} testId="diag-time" />
             <Fact label={t("dc.received")} value={formatBytes(diag.transferred)} testId="diag-received" />
           </div>
+          {diag.networks.length > 0 && (
+            <p className="mt-2 text-xs text-dim" data-testid="diag-networks">
+              <span className="font-medium text-fg">{t("dc.networks")}</span>{" "}
+              {diag.networks.map((n) => `${networkLabel(n, diag.networks, t)} ${formatBytes(n.bytes)}`).join(" · ")}
+            </p>
+          )}
           {diag.events.length > 0 && (
             <ol className="selectable mt-3 max-h-56 space-y-1 overflow-y-auto rounded-xl border border-line bg-raised p-2.5 text-xs" data-testid="diag-events" aria-label={t("dc.timeline")}>
               {diag.events.map((e, i) => (

@@ -103,6 +103,9 @@ pub(super) struct SmartState {
     enabled: bool,
     /// The active Download Profile's automatic mode (`None`: the profile leaves Smart throttle as the user set it).
     profile: Option<bool>,
+    /// Several networks at once is on: Smart throttle stays off (every network at full speed), whatever the user's
+    /// switch or the profile say; both come back when it is turned off.
+    held_by_networks: bool,
     apps: Vec<String>,
     share: u8,
     /// The best total speed seen while not throttled (slowly forgotten while downloading).
@@ -200,7 +203,7 @@ impl SmartState {
 
     /// Smart throttle is on: the user's switch, or a profile that asks for its automatic mode.
     pub(super) fn on(&self) -> bool {
-        self.enabled || self.profile == Some(true)
+        !self.held_by_networks && (self.enabled || self.profile == Some(true))
     }
 
     /// The automatic mode is on: the profile's choice where it makes one, the user's otherwise.
@@ -621,6 +624,21 @@ impl DownloadManager {
         }
     }
 
+    /// Several networks at once turned on (`true`) or off: Smart throttle is held off meanwhile, its caps lifted at
+    /// once; turned off, the user's own setting (and the profile's) is in force again.
+    pub(super) fn hold_smart_for_networks(&self, held: bool) {
+        let changed = {
+            let mut s = self.inner.smart.lock().unwrap();
+            let changed = s.held_by_networks != held;
+            s.held_by_networks = held;
+            changed
+        };
+        if changed {
+            tracing::info!(held, "smart throttle held off for several networks at once");
+            self.smart_profile_changed();
+        }
+    }
+
     pub fn smart_throttle_enabled(&self) -> bool {
         self.inner.smart.lock().unwrap().on()
     }
@@ -645,10 +663,14 @@ impl DownloadManager {
             game_limit_bps: s.game_limit,
             game_hold: s.hold,
             profile_adaptive: s.profile,
+            held_by_networks: s.held_by_networks,
         }
     }
 
     pub async fn set_smart_throttle(&self, req: SetSmartThrottle) -> Result<SmartThrottleDto, ManagerError> {
+        if req.enabled == Some(true) && self.inner.smart.lock().unwrap().held_by_networks {
+            return Err(ManagerError::invalid("Smart throttle stays off while several networks at once is on"));
+        }
         let apps = req.apps.as_deref().map(clean_apps).transpose()?;
         if let Some(p) = req.share_percent {
             if !(5..=90).contains(&p) {

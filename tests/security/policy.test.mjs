@@ -43,10 +43,19 @@ const lockedCrates = () => [...lock().matchAll(/^name = "([^"]+)"$/gm)].map((m) 
 test("no shipped code opens a TCP or UDP listening socket, except the Linux / macOS preview address built to 12.2", () => {
   const bad = [];
   const PREVIEW = path.join("apps", "desktop", "src-tauri", "src", "preview_server.rs");
+  const LANES = path.join("crates", "http-client", "src", "lanes.rs");
   for (const f of shippedRust()) {
     const text = withoutTestModules(fs.readFileSync(f, "utf8"));
-    if (/\b(TcpListener|UdpSocket)\b/.test(text) && path.relative(ROOT, f) !== PREVIEW) bad.push(path.relative(ROOT, f));
+    const rel = path.relative(ROOT, f);
+    if (/\b(TcpListener|UdpSocket)\b|Type::(DGRAM|STREAM|RAW)/.test(text) && rel !== PREVIEW && rel !== LANES) bad.push(rel);
   }
+  // Several networks at once asks the system which route it would use to a server (so a VPN is never gone around):
+  // one datagram socket, never bound by hand, never sent on, read or listening, closed at once. Nothing else.
+  const lanes = withoutTestModules(read("crates", "http-client", "src", "lanes.rs"));
+  assert.equal((lanes.match(/Type::DGRAM/g) ?? []).length, 1, "one route question");
+  assert.ok(!/TcpListener|UdpSocket|Type::(STREAM|RAW)|\.bind\(|\.listen\(|\.send|\.recv|\.accept\(/.test(lanes), "never bound, sent on, read or listening");
+  const ask = lanes.slice(lanes.indexOf("pub fn system_source_for"), lanes.indexOf("pub fn spreadable"));
+  assert.match(ask, /s\.connect\(&to\.into\(\)\)\.ok\(\)\?;\s*s\.local_addr\(\)/, "connect (no packet), read the chosen address, done");
   assert.deepEqual(bad, [], "a local HTTP/TCP API needs the 12.2 design (127.0.0.1 + token + Origin + schemas + rate limits) first");
   // The one exception (WebKitGTK's player cannot read a custom protocol; WKWebView's cannot stream a growing file
   // through one): 12.2 in full, Linux and macOS only (Windows keeps the custom protocol), read-only.

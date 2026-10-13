@@ -29,7 +29,7 @@ export const keepWhileActive = (share: number) =>
   Math.round(Math.min(0.9, Math.max(0.25, share / 100 + 0.25)) * 100);
 
 /** Smart throttle is on: the user's switch, or the active Download Profile's automatic mode. */
-export const throttleOn = (s: SmartThrottle | null): boolean => !!s && (s.enabled || s.profileAdaptive === true);
+export const throttleOn = (s: SmartThrottle | null): boolean => !!s && !s.heldByNetworks && (s.enabled || s.profileAdaptive === true);
 
 /** The one-line explanation of what Smart throttle is doing now. */
 export function throttleStatus(

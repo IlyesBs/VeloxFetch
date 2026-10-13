@@ -8,6 +8,7 @@ import { BrowserSettings } from "../components/BrowserSettings";
 import { ClipboardSettings } from "../components/ClipboardSettings";
 import { DesktopSettings } from "../components/DesktopSettings";
 import { DiagnosticsSettings } from "../components/DiagnosticsSettings";
+import { MultiNetworkSettings } from "../components/MultiNetworkSettings";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { PowerSettings } from "../components/PowerSettings";
 import { ProfilesSettings } from "../components/ProfilesSettings";
@@ -157,6 +158,7 @@ export function SettingsView() {
 
         <Group id="set-network">
           <NetworkSettings />
+          <MultiNetworkSettings />
         </Group>
 
         <Group id="set-schedule">

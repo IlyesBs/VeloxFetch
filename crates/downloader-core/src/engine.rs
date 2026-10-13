@@ -159,6 +159,18 @@ const SAMPLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 const MAX_RUN_EVENTS: usize = 40;
 
+/// Over several networks, a request lasts about this long (see [`spread_request_size`]).
+const SPREAD_REQUEST_SECS: f64 = 4.0;
+const SPREAD_REQUEST_FIRST: u64 = 1024 * 1024;
+const SPREAD_REQUEST_MIN: u64 = 512 * 1024;
+const SPREAD_REQUEST_MAX: u64 = 16 * 1024 * 1024;
+
+/// The size of a part's next request over several networks: `SPREAD_REQUEST_SECS` at `rate` (bytes/s), between 512 KiB
+/// and 16 MiB.
+fn spread_request_size(rate: f64) -> u64 {
+    ((rate * SPREAD_REQUEST_SECS) as u64).clamp(SPREAD_REQUEST_MIN, SPREAD_REQUEST_MAX)
+}
+
 struct ProgressInner {
     id: AtomicI64,    // 0 = not stored
     key: AtomicU64,   // scheduler queue key, 0 = none
@@ -184,6 +196,10 @@ struct ProgressInner {
     resets: AtomicU64,
     /// Hashes of the segments being downloaded, continued at each checkpoint (`verify::hash_progressive`).
     running: Mutex<crate::verify::RunningHashes>,
+    /// Bytes received through each network, when requests are spread over several (`HttpClient::set_routes`).
+    networks: Mutex<Vec<(String, u64)>>,
+    /// Retries after one of several networks lost a transfer (counted in the segments' retries too).
+    network_switches: AtomicU32,
 }
 
 /// Cheap, cloneable, lock-light view of a running download.
@@ -209,6 +225,8 @@ impl Default for ProgressHandle {
             events: Mutex::new(std::collections::VecDeque::new()),
             resets: AtomicU64::new(0),
             running: Mutex::new(Default::default()),
+            networks: Mutex::new(Vec::new()),
+            network_switches: AtomicU32::new(0),
         }))
     }
 }
@@ -262,6 +280,19 @@ impl ProgressHandle {
     /// Most connections that were open at the same time during this run.
     pub fn peak_connections(&self) -> usize {
         self.0.peak_connections.load(Ordering::Relaxed)
+    }
+
+    /// Bytes received through each network during this run, when requests were spread over several (else empty).
+    pub fn networks(&self) -> Vec<(String, u64)> {
+        self.0.networks.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    fn add_network_bytes(&self, network: &str, n: u64) {
+        let mut nets = self.0.networks.lock().unwrap_or_else(|p| p.into_inner());
+        match nets.iter_mut().find(|(name, _)| name == network) {
+            Some((_, b)) => *b = b.saturating_add(n),
+            None => nets.push((network.to_string(), n)),
+        }
     }
 
     /// When bytes started to be transferred in this run (`None`: not yet).
@@ -326,6 +357,19 @@ impl ProgressHandle {
 
     fn total_retries(&self) -> u32 {
         self.0.segments.lock().unwrap().iter().map(|s| s.retry_count).sum()
+    }
+
+    /// Retries that tell about the server or the connection count: not the ones after a transfer through one of
+    /// several networks was lost (that network rests, the part moves to another one; the server is fine).
+    fn server_retries(&self) -> u32 {
+        self.total_retries().saturating_sub(self.0.network_switches.load(Ordering::Relaxed))
+    }
+
+    /// A retry because one of several networks lost its transfer (see [`server_retries`](Self::server_retries)).
+    fn note_retry_kind(&self, e: &DownloadError) {
+        if matches!(e, DownloadError::Http(HttpError::NetworkLost)) {
+            self.0.network_switches.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Time-to-first-byte of a request (server response time).
@@ -652,7 +696,24 @@ impl Downloader {
     /// Use `client` for every request from now on (new network settings). Downloads already
     /// transferring finish with the client they started with; the next start / resume uses this one.
     pub fn set_client(&self, client: HttpClient) {
+        // The networks requests are spread over stay the same (built again with the new settings).
+        client.set_routes(&self.client().route_specs());
         *self.client.write().unwrap_or_else(|p| p.into_inner()) = client;
+    }
+
+    /// Spread ranged requests over these networks (see `HttpClient::set_routes`); the names of the unusable ones.
+    pub fn set_routes(&self, specs: &[http_client::RouteSpec]) -> Vec<String> {
+        self.client().set_routes(specs)
+    }
+
+    /// The networks given to [`set_routes`](Self::set_routes).
+    pub fn route_specs(&self) -> Vec<http_client::RouteSpec> {
+        self.client().route_specs()
+    }
+
+    /// The networks requests are spread over, and what each is doing.
+    pub fn routes(&self) -> Vec<http_client::LaneStatus> {
+        self.client().routes()
     }
 
     fn client(&self) -> HttpClient {
@@ -1407,10 +1468,19 @@ impl Downloader {
         let adaptive = self.cfg.adaptive.enabled && ceiling > 1;
         // Start small (gentle with servers that cap connections per client) and let the controller climb in big
         // steps (4 -> 16 -> 64) while it pays off; without adaptivity, use the size-based default straight away.
-        let start = if adaptive { recommended.min(4) } else { recommended }.clamp(1, ceiling);
+        // Spread over several networks: every network at its full speed from the start, 8 connections each (what a
+        // network needs to be filled), never fewer than 4 each (only the server's own "too many" goes below; the
+        // user's connection limit stays the ceiling).
+        let networks = self.client().spread_networks(url);
+        let spread = networks > 1;
+        let (per_start, per_floor) = (8, 4);
+        let floor = if spread { (per_floor * networks).min(ceiling) } else { 1 };
+        let start =
+            if adaptive { recommended.min(4) } else { recommended }.max(if spread { per_start * networks } else { 1 }).clamp(1, ceiling);
         let gate = AdaptiveGate::new(start);
         // Shared by the periodic sampler and by workers that see a 429/503 (which react immediately).
-        let controller = adaptive.then(|| Arc::new(Mutex::new(AdaptiveController::new(self.cfg.adaptive.clone(), start, ceiling))));
+        let controller =
+            adaptive.then(|| Arc::new(Mutex::new(AdaptiveController::new(self.cfg.adaptive.clone(), start, ceiling).with_floor(floor))));
         let _sampler = controller.clone().map(|ctl| {
             // The connection ceiling follows the user's settings while the download runs (see `set_max_connections`).
             let (max, min_segment) = (self.max_connections.clone(), self.cfg.min_segment_size);
@@ -1429,6 +1499,9 @@ impl Downloader {
         for (turn, seg) in (if preview { planner::preview_order(pending) } else { pending }).into_iter().enumerate() {
             let id = seg.id;
             let first_try = std::sync::atomic::AtomicBool::new(true);
+            // Spread over several networks: the size of this part's next request (about `SPREAD_REQUEST_SECS` of
+            // transfer at the speed its last request had).
+            let spread_size = AtomicU64::new(SPREAD_REQUEST_FIRST);
             let claims = claims.clone();
             let joins = joins.clone();
             let (client, url, part, group, progress, validator, policy, gate, throttle, controller, extras) = (
@@ -1454,6 +1527,7 @@ impl Downloader {
                         |n, e, d| {
                             tracing::warn!(segment = id, attempt = n, error = %e, ?d, "segment failed, retrying");
                             progress.bump_retry(id);
+                            progress.note_retry_kind(e);
                             progress.set_status(id, SegmentStatus::Retrying);
                             progress.note_retry(Some(id), n, e, d);
                             if retry::is_throttle(e) {
@@ -1474,6 +1548,7 @@ impl Downloader {
                             let (client, url, part, group, progress, validator, throttle, gate, extras, claims, joins) =
                                 (&client, &url, &part, &group, &progress, &validator, &throttle, &gate, &extras, &claims, &joins);
                             let mut in_turn = first_try.swap(false, std::sync::atomic::Ordering::Relaxed);
+                            let spread_size = &spread_size;
                             async move {
                                 // A connection slot is held only while a request is actually in flight, never
                                 // while backing off between retries: otherwise throttled segments would keep
@@ -1519,12 +1594,17 @@ impl Downloader {
                                     // Under a speed limit: a short request on a new connection instead (see
                                     // `AdaptiveGate::set_request_cap`); the rest of the part comes in the next one.
                                     let capped = gate.request_cap();
-                                    let mut end = capped.map_or(cur.end, |c| cur.end.min(from + c - 1));
+                                    // Over several networks: requests of a few seconds, so connections are handed out
+                                    // again often (a network that comes back, or a faster one, gets its share within
+                                    // seconds instead of after a whole part) and a slow network never holds much.
+                                    let spread_cap = (spread && capped.is_none()).then(|| spread_size.load(Ordering::Relaxed));
+                                    let mut end = capped.or(spread_cap).map_or(cur.end, |c| cur.end.min(from + c - 1));
                                     // Otherwise the parts right after this one that nobody has started come in the same
                                     // request (fewer requests: nothing for a server that limits them to refuse, no pause
                                     // between parts). Runs get shorter as the work left shrinks, so every connection
-                                    // stays busy.
-                                    if capped.is_none() {
+                                    // stays busy. Not over several networks: there a slow network holding a run would make
+                                    // the end of the file wait for it while the fast ones sit idle; one part per request.
+                                    if capped.is_none() && !spread {
                                         for next in claims.run_after(id, progress, gate.limit()) {
                                             run.push(Claim::new(claims, next.id));
                                             end = next.end;
@@ -1582,6 +1662,7 @@ impl Downloader {
                                     progress.record_latency(sent.elapsed());
                                     progress.note_status(206); // `get_range_with` accepts nothing else
                                     progress.note_peak(gate.peak_active());
+                                    let network = stream.network().map(str::to_owned);
                                     let mut stream = std::pin::pin!(stream.into_stream());
                                     let mut excess = None;
                                     if back > 0 {
@@ -1623,6 +1704,9 @@ impl Downloader {
                                         let written = |n| {
                                             progress.add(seg, n);
                                             request_bytes.fetch_add(n, Ordering::Relaxed);
+                                            if let Some(net) = &network {
+                                                progress.add_network_bytes(net, n);
+                                            }
                                         };
                                         let got =
                                             disk::pump_keep(source, part, params, group, written, &mut excess, &give_way, &enough).await;
@@ -1655,12 +1739,19 @@ impl Downloader {
                                                 // Counted like any failed connection (diagnostics, the adaptive controller).
                                                 tracing::warn!(segment = seg, error = %e, "connection lost; the part continues on its own");
                                                 progress.bump_retry(seg);
+                                                progress.note_retry_kind(&e);
                                                 progress.note_retry(Some(seg), s.retry_count + 1, &e, Duration::ZERO);
                                                 progress.set_status(seg, SegmentStatus::Pending);
                                                 break;
                                             }
-                                            // A short request (under a speed limit) got its share: the next one goes on.
+                                            // A short request (under a speed limit, or over several networks) got its share:
+                                            // the next one goes on.
                                             None if progress.segment(seg).is_some_and(|s| !s.is_complete()) => {
+                                                if spread_cap.is_some() {
+                                                    let secs = sent.elapsed().as_secs_f64().max(0.05);
+                                                    let rate = request_bytes.load(Ordering::Relaxed) as f64 / secs;
+                                                    spread_size.store(spread_request_size(rate), Ordering::Relaxed);
+                                                }
                                                 progress.set_status(seg, SegmentStatus::Pending);
                                                 kept = Some(_permit);
                                                 continue 'again;
@@ -1985,6 +2076,7 @@ impl Downloader {
         progress.note_status(206);
         progress.record_latency(sent.elapsed());
         progress.set_status(0, SegmentStatus::Downloading);
+        let network = stream.network().map(str::to_owned);
         let mut stream = std::pin::pin!(if patient { client.patient_range_stream(stream).boxed() } else { stream.into_stream().boxed() });
         let excess = check_overlap(&mut stream, part, have - back, back, 0).await?;
         let want = total - have;
@@ -1996,7 +2088,13 @@ impl Downloader {
             channel_capacity: self.cfg.channel_capacity,
             throttle: Some(throttle.clone()),
         };
-        let got = disk::pump(source, part, params, cancel, |n| progress.add(0, n)).await?;
+        let got = disk::pump(source, part, params, cancel, |n| {
+            progress.add(0, n);
+            if let Some(net) = &network {
+                progress.add_network_bytes(net, n);
+            }
+        })
+        .await?;
         if got < want {
             return Err(DownloadError::ShortBody { index: 0, got, expected: want });
         }
@@ -2122,14 +2220,14 @@ fn spawn_sampler(
         async move {
             let mut tick = tokio::time::interval(interval);
             tick.tick().await;
-            let (mut last_at, mut last_bytes, mut last_errors) = (Instant::now(), progress.downloaded_now(), progress.total_retries());
+            let (mut last_at, mut last_bytes, mut last_errors) = (Instant::now(), progress.downloaded_now(), progress.server_retries());
             let mut last_waits = throttle.waits();
             // What one connection gets while no limit holds the download (bytes/s; 0 = not known yet).
             let mut per_connection = 0.0;
             loop {
                 tick.tick().await;
                 let now = Instant::now();
-                let (bytes, errors) = (progress.downloaded_now(), progress.total_retries());
+                let (bytes, errors) = (progress.downloaded_now(), progress.server_retries());
                 let secs = now.duration_since(last_at).as_secs_f64().max(1e-3);
                 let sample = Sample {
                     throughput: bytes.saturating_sub(last_bytes) as f64 / secs,
@@ -2357,5 +2455,29 @@ mod event_tests {
         assert_eq!(ev.len(), MAX_RUN_EVENTS);
         assert!(matches!(ev[0].kind, RunEventKind::Reverified { .. }) && matches!(ev[1].kind, RunEventKind::Resuming { .. }));
         assert!(matches!(&ev[MAX_RUN_EVENTS - 1].kind, RunEventKind::Retrying { attempt: 199, .. }), "the newest retries are kept");
+    }
+
+    #[test]
+    fn requests_over_several_networks_last_a_few_seconds() {
+        assert_eq!(spread_request_size(100_000.0), SPREAD_REQUEST_MIN, "a slow connection: the smallest");
+        assert_eq!(spread_request_size(1_000_000.0), 4_000_000);
+        assert_eq!(spread_request_size(1e9), SPREAD_REQUEST_MAX, "a very fast one: the largest");
+        assert_eq!(spread_request_size(0.0), SPREAD_REQUEST_MIN);
+    }
+
+    #[test]
+    fn a_network_that_lost_a_transfer_is_not_counted_against_the_server() {
+        let p = ProgressHandle::new();
+        p.init(Some(100), vec![Segment::new(0, 0, 49), Segment::new(1, 50, 99)]);
+        for e in [
+            DownloadError::Http(HttpError::NetworkLost),
+            DownloadError::Http(HttpError::NetworkLost),
+            DownloadError::Http(HttpError::Stalled),
+        ] {
+            p.bump_retry(0);
+            p.note_retry_kind(&e);
+        }
+        assert_eq!(p.total_retries(), 3, "every retry is shown in the diagnostics");
+        assert_eq!(p.server_retries(), 1, "only the server's own count for the connection count");
     }
 }

@@ -216,6 +216,7 @@ impl DownloadManager {
                 mgr.evaluate_queues().await;
                 let (online, seen_offline) = mgr.judged_online();
                 mgr.recovery_turn(online, seen_offline).await;
+                mgr.refresh_networks(false).await;
                 mgr.update_keep_awake();
                 mgr.check_power().await;
             }

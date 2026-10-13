@@ -25,6 +25,10 @@ use reqwest::{Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+mod lanes;
+pub use lanes::{spreadable, system_source_for, LaneState, LaneStatus, RouteSpec};
+use lanes::{FamilyResolver, Lane, LaneUse, Lanes};
+
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
     #[error("invalid URL: {0}")]
@@ -48,6 +52,10 @@ pub enum HttpError {
     /// The file had started coming, then nothing arrived for too long.
     #[error("the server stopped sending")]
     Stalled,
+    /// A transfer through one of several networks broke or stopped (that network rests; the part continues on
+    /// another one). Not a sign of an overloaded server.
+    #[error("a connection through one of several networks was lost")]
+    NetworkLost,
     /// A ranged answer describes another version of the file than the one being downloaded (another strong `ETag`,
     /// another total size in `Content-Range`): its bytes must never join the ones already saved.
     #[error("the file changed on the server during the download: {0}")]
@@ -62,7 +70,7 @@ impl HttpError {
             // Anything that went wrong on the wire is transient (timeouts, resets, truncated bodies —
             // the latter surfaces as a `Decode`-kind error). Local/config failures are not.
             HttpError::Transport(e) => !(e.is_builder() || e.is_redirect() || tls_will_fail_again(e)),
-            HttpError::Stalled => true,
+            HttpError::Stalled | HttpError::NetworkLost => true,
             _ => false,
         }
     }
@@ -132,6 +140,12 @@ pub struct ClientConfig {
     pub tcp_keepalive: Duration,
     /// In-process DNS cache lifetime; zero disables the cache (system resolver every time).
     pub dns_cache_ttl: Duration,
+    /// Tests only (the app never sets it): spread every link over the networks given to
+    /// [`HttpClient::set_routes`], not only https links to public addresses (test servers are local, plain http).
+    pub spread_any_link: bool,
+    /// A transfer through one of several networks that receives nothing for this long is given up: that network
+    /// rests and the part continues on another one.
+    pub lane_stall: Duration,
 }
 
 impl Default for ClientConfig {
@@ -154,6 +168,8 @@ impl Default for ClientConfig {
             pool_idle_timeout: Duration::from_secs(90),
             tcp_keepalive: Duration::from_secs(30),
             dns_cache_ttl: Duration::from_secs(60),
+            spread_any_link: false,
+            lane_stall: lanes::LANE_STALL,
         }
     }
 }
@@ -258,6 +274,16 @@ pub struct HttpClient {
     request_timeout: Duration,
     /// Body idle limit on the patient client, once the file started coming.
     idle_body: Duration,
+    /// What the clients were built from (lanes are built from it too).
+    cfg: Arc<ClientConfig>,
+    headers: HeaderMap,
+    jar: Option<Arc<reqwest::cookie::Jar>>,
+    /// The networks ranged requests are spread over (see [`lanes`]); shared by every copy of this client.
+    lanes: Lanes,
+    /// The names cache of the lanes (one for all of them).
+    lane_dns: CachingResolver,
+    /// Requests go through a proxy (given, or the system's from the environment): never spread.
+    through_proxy: bool,
 }
 
 pub fn parse_url(s: &str) -> Result<Url> {
@@ -338,49 +364,88 @@ impl HttpClient {
             }
             headers.insert(name, val);
         }
-        let max_redirects = cfg.max_redirects;
-        let build = |read_timeout: Duration| -> Result<reqwest::Client> {
-            let mut b = reqwest::Client::builder()
-                .user_agent(cfg.user_agent.clone())
-                .default_headers(headers.clone())
-                .connect_timeout(cfg.connect_timeout)
-                .read_timeout(read_timeout)
-                .cookie_store(cfg.cookies)
-                .pool_max_idle_per_host(cfg.pool_max_idle_per_host)
-                .pool_idle_timeout(cfg.pool_idle_timeout)
-                .tcp_keepalive(cfg.tcp_keepalive)
-                .tcp_nodelay(true)
-                .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-                    match redirect_decision(attempt.previous(), attempt.url(), max_redirects) {
-                        RedirectDecision::Follow => attempt.follow(),
-                        RedirectDecision::Stop => attempt.stop(),
-                        RedirectDecision::Refuse(why) => attempt.error(why),
-                    }
-                }));
-            if cfg.http1_only {
-                b = b.http1_only();
-            }
-            if !cfg.dns_cache_ttl.is_zero() {
-                b = b.dns_resolver(Arc::new(CachingResolver::system(cfg.dns_cache_ttl)));
-            }
-            if let Some(p) = &cfg.proxy {
-                let mut proxy = reqwest::Proxy::all(p).map_err(|e| HttpError::InvalidProxy(e.to_string()))?;
-                if let Some(a) = &cfg.proxy_auth {
-                    proxy = proxy.basic_auth(&a.username, a.password.as_deref().unwrap_or(""));
-                }
-                b = b.proxy(proxy);
-            } else if cfg.no_proxy {
-                b = b.no_proxy();
-            }
-            Ok(b.build()?)
-        };
+        // One cookie jar for every route: a cookie the server set on one request goes with the next, whatever the
+        // network or the client that sends it.
+        let jar = cfg.cookies.then(|| Arc::new(reqwest::cookie::Jar::default()));
         Ok(Self {
-            inner: build(cfg.read_timeout)?,
-            patient: build(cfg.slow_answer_wait.max(cfg.read_timeout))?,
+            inner: build_client(cfg, &headers, jar.as_ref(), cfg.read_timeout, None)?,
+            patient: build_client(cfg, &headers, jar.as_ref(), cfg.slow_answer_wait.max(cfg.read_timeout), None)?,
             auth: cfg.basic_auth.clone(),
             request_timeout: cfg.request_timeout,
             idle_body: cfg.read_timeout.max(Duration::from_secs(120)),
+            through_proxy: cfg.proxy.is_some() || (!cfg.no_proxy && system_proxy_in_environment()),
+            lane_dns: CachingResolver::system(cfg.dns_cache_ttl),
+            cfg: Arc::new(cfg.clone()),
+            headers,
+            jar,
+            lanes: Lanes::default(),
         })
+    }
+
+    /// Spread ranged requests over these networks from now on (every copy of this client, downloads already running
+    /// included). Fewer than two: the normal route only. A network already in use keeps its connections and what was
+    /// learned about it. Returns the names of networks that cannot be used on this system (nothing to bind to).
+    pub fn set_routes(&self, specs: &[RouteSpec]) -> Vec<String> {
+        let old = self.lanes.list();
+        let mut lanes = Vec::new();
+        let mut unusable = Vec::new();
+        for spec in specs {
+            // The same network bound the same way keeps its connections and what was learned about it (its other
+            // addresses, such as IPv6 temporary ones, may change).
+            if let Some(same) = old.iter().find(|l| l.binds_like(spec)) {
+                same.set_addresses(spec.addresses.clone());
+                lanes.push(same.clone());
+                continue;
+            }
+            let Some(bound) = lanes::binding(spec) else {
+                tracing::info!(network = %spec.name, "this network has nothing to bind connections to on this system");
+                unusable.push(spec.name.clone());
+                continue;
+            };
+            match build_client(
+                &self.cfg,
+                &self.headers,
+                self.jar.as_ref(),
+                self.cfg.read_timeout,
+                Some((spec, bound, self.lane_dns.clone())),
+            ) {
+                Ok(client) => lanes.push(Arc::new(Lane::new(spec.clone(), client))),
+                Err(e) => {
+                    tracing::info!(network = %spec.name, error = %e, "this network cannot be used for downloads");
+                    unusable.push(spec.name.clone());
+                }
+            }
+        }
+        // A network no longer listed is gone: its transfers end now (their parts continue on the others).
+        for l in old.iter().filter(|l| !lanes.iter().any(|n| Arc::ptr_eq(n, l))) {
+            l.mark_gone();
+        }
+        self.lanes.set(lanes);
+        unusable
+    }
+
+    /// The networks given to [`set_routes`](Self::set_routes) (to give them to a new client).
+    pub fn route_specs(&self) -> Vec<RouteSpec> {
+        self.lanes.list().iter().map(|l| l.spec.clone()).collect()
+    }
+
+    /// The networks requests are spread over, and what each is doing.
+    pub fn routes(&self) -> Vec<LaneStatus> {
+        self.lanes.list().iter().map(|l| l.status()).collect()
+    }
+
+    /// How many networks this link's ranged requests are spread over (1: the usual route only).
+    pub fn spread_networks(&self, url: &Url) -> usize {
+        if self.spreads(url) {
+            self.lanes.list().len()
+        } else {
+            1
+        }
+    }
+
+    /// Would ranged requests for this link be spread over several networks now?
+    pub fn spreads(&self, url: &Url) -> bool {
+        self.lanes.list().len() >= 2 && (self.cfg.spread_any_link || spreadable(url, self.through_proxy))
     }
 
     fn req(&self, method: Method, url: &Url, extras: &RequestExtras) -> reqwest::RequestBuilder {
@@ -571,6 +636,39 @@ impl HttpClient {
         if_range: Option<&str>,
         extras: &RequestExtras,
     ) -> Result<RangeStream> {
+        // Spread over the networks (the patient client, for a server preparing the file, keeps one route).
+        let host = url.host_str().unwrap_or_default();
+        let spread = std::ptr::eq(client, &self.inner) && self.spreads(url) && self.lanes.system_route_is_ours(host, &self.lane_dns).await;
+        let lane = if spread { self.lanes.pick(host) } else { None };
+        if let Some(lane) = lane {
+            let using = LaneUse::new(lane.clone());
+            match self.range_once(&lane.client, url, start, end, if_range, extras).await {
+                Ok(mut s) => {
+                    lane.worked();
+                    s.lane = Some((using, self.cfg.lane_stall, self.lanes.clone()));
+                    return Ok(s);
+                }
+                // The network did not carry it (no connection, a broken one, another certificate on the way...): it
+                // rests, and this request goes through the normal route now.
+                Err(e @ HttpError::Transport(_)) => lane.failed(&e),
+                // The server will not answer this network (a link signed for another address...): the normal route.
+                Err(HttpError::Status { status: status @ (401 | 403 | 404 | 410 | 451), .. }) => lane.refused_by(host, status),
+                Err(e) => return Err(e),
+            }
+        }
+        self.range_once(client, url, start, end, if_range, extras).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn range_once(
+        &self,
+        client: &reqwest::Client,
+        url: &Url,
+        start: u64,
+        end: u64,
+        if_range: Option<&str>,
+        extras: &RequestExtras,
+    ) -> Result<RangeStream> {
         let mut r = self.req_on(client, Method::GET, url, extras).header(header::RANGE, format!("bytes={start}-{end}"));
         if let Some(hv) = if_range.and_then(|v| HeaderValue::from_str(v).ok()) {
             r = r.header(header::IF_RANGE, hv);
@@ -594,8 +692,72 @@ impl HttpClient {
             Some((s, e, total)) if s == start && e >= s && e <= end => total,
             other => return Err(HttpError::RangeNotHonored(format!("Content-Range {other:?} does not match requested {start}-{end}"))),
         };
-        Ok(RangeStream { resp, total })
+        Ok(RangeStream { resp, total, lane: None })
     }
+}
+
+/// A client with these settings; with `bind`, one whose connections leave through that network only.
+fn build_client(
+    cfg: &ClientConfig,
+    headers: &HeaderMap,
+    jar: Option<&Arc<reqwest::cookie::Jar>>,
+    read_timeout: Duration,
+    bind: Option<(&RouteSpec, lanes::Binding, CachingResolver)>,
+) -> Result<reqwest::Client> {
+    let max_redirects = cfg.max_redirects;
+    let mut b = reqwest::Client::builder()
+        .user_agent(cfg.user_agent.clone())
+        .default_headers(headers.clone())
+        .connect_timeout(cfg.connect_timeout)
+        .read_timeout(read_timeout)
+        .pool_max_idle_per_host(cfg.pool_max_idle_per_host)
+        .pool_idle_timeout(cfg.pool_idle_timeout)
+        .tcp_keepalive(cfg.tcp_keepalive)
+        .tcp_nodelay(true)
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            match redirect_decision(attempt.previous(), attempt.url(), max_redirects) {
+                RedirectDecision::Follow => attempt.follow(),
+                RedirectDecision::Stop => attempt.stop(),
+                RedirectDecision::Refuse(why) => attempt.error(why),
+            }
+        }));
+    if let Some(jar) = jar {
+        b = b.cookie_provider(jar.clone());
+    }
+    if cfg.http1_only {
+        b = b.http1_only();
+    }
+    match bind {
+        Some((spec, lanes::Binding { local, v4, v6 }, dns)) => {
+            // A network that does not answer is found out quickly: its request goes through another one.
+            b = b.connect_timeout(cfg.connect_timeout.min(Duration::from_secs(8))).dns_resolver(Arc::new(FamilyResolver {
+                inner: dns,
+                v4,
+                v6,
+            }));
+            if let Some(ip) = local {
+                b = b.local_address(ip);
+            }
+            b = lanes::bind_interface(b, spec);
+        }
+        None if !cfg.dns_cache_ttl.is_zero() => b = b.dns_resolver(Arc::new(CachingResolver::system(cfg.dns_cache_ttl))),
+        None => {}
+    }
+    if let Some(p) = &cfg.proxy {
+        let mut proxy = reqwest::Proxy::all(p).map_err(|e| HttpError::InvalidProxy(e.to_string()))?;
+        if let Some(a) = &cfg.proxy_auth {
+            proxy = proxy.basic_auth(&a.username, a.password.as_deref().unwrap_or(""));
+        }
+        b = b.proxy(proxy);
+    } else if cfg.no_proxy {
+        b = b.no_proxy();
+    }
+    Ok(b.build()?)
+}
+
+/// A proxy for https links in the environment (`HTTPS_PROXY`, `ALL_PROXY`, in either case), which the system mode uses.
+pub fn system_proxy_in_environment() -> bool {
+    ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"].iter().any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
 }
 
 type LookupFuture = Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send>>;
@@ -656,6 +818,8 @@ impl reqwest::dns::Resolve for CachingResolver {
 pub struct RangeStream {
     resp: reqwest::Response,
     total: Option<u64>,
+    /// The network it came through, when requests are spread (see [`HttpClient::set_routes`]).
+    lane: Option<(LaneUse, Duration, Lanes)>,
 }
 
 impl RangeStream {
@@ -664,9 +828,69 @@ impl RangeStream {
         self.total
     }
 
+    /// The name of the network it came through, when requests are spread over several.
+    pub fn network(&self) -> Option<&str> {
+        self.lane.as_ref().map(|(l, _, _)| l.0.spec.name.as_str())
+    }
+
     pub fn into_stream(self) -> impl Stream<Item = Result<Bytes>> + Send {
         use futures_util::StreamExt;
-        self.resp.bytes_stream().map(|r| r.map_err(HttpError::from))
+        let Some((lane, stall, lanes)) = self.lane else {
+            return self.resp.bytes_stream().map(|r| r.map_err(HttpError::from)).boxed();
+        };
+        // Through one of several networks:
+        // * a network that stops sending (a Wi-Fi that froze, a phone that lost its signal) is given up after
+        //   `ClientConfig::lane_stall` instead of the usual idle limit; it rests and the part continues on another one;
+        // * a transfer that crawls (under an eighth of the best network's speed per connection, over `lanes::CRAWL_WINDOW`
+        //   of waiting for bytes) is ended without resting its network: its part continues at once on a faster one, so
+        //   the end of a file never waits for it.
+        // Only the time spent waiting for bytes counts: a speed limit that keeps the reader waiting is not slowness.
+        struct Lap {
+            bytes: u64,
+            waited: Duration,
+        }
+        futures_util::stream::unfold(Some((self.resp.bytes_stream(), lane, Lap { bytes: 0, waited: Duration::ZERO })), move |state| {
+            let lanes = lanes.clone();
+            async move {
+                let (mut body, lane, mut lap) = state?;
+                let asked = Instant::now();
+                let next = tokio::select! {
+                    biased;
+                    r = tokio::time::timeout(stall, body.next()) => r,
+                    _ = lane.0.until_gone() => {
+                        tracing::debug!(network = %lane.0.spec.name, "the network went away: its part continues on another one");
+                        return Some((Err(HttpError::NetworkLost), None));
+                    }
+                };
+                match next {
+                    Ok(Some(Ok(b))) => {
+                        lane.received(b.len());
+                        lap.bytes += b.len() as u64;
+                        lap.waited += asked.elapsed();
+                        if lap.waited >= lanes::CRAWL_WINDOW {
+                            let speed = lap.bytes as f64 / lap.waited.as_secs_f64();
+                            if lanes::crawls(speed, lanes.fastest_rate()) {
+                                tracing::debug!(network = %lane.0.spec.name, speed, "a transfer crawls: its part moves to a faster network");
+                                return Some((Err(HttpError::NetworkLost), None));
+                            }
+                            lap = Lap { bytes: 0, waited: Duration::ZERO };
+                        }
+                        Some((Ok(b), Some((body, lane, lap))))
+                    }
+                    // The transfer broke on this network: it rests (the part continues on another one).
+                    Ok(Some(Err(e))) => {
+                        lane.0.failed(&e);
+                        Some((Err(HttpError::NetworkLost), None))
+                    }
+                    Ok(None) => None,
+                    Err(_) => {
+                        lane.0.failed(&"nothing received for a while");
+                        Some((Err(HttpError::NetworkLost), None))
+                    }
+                }
+            }
+        })
+        .boxed()
     }
 }
 
@@ -902,6 +1126,113 @@ mod tests {
             }
         });
         Url::parse(&format!("http://{addr}/f.bin")).unwrap()
+    }
+
+    /// Several networks at once: a request goes out through a network, with the cookie the server set on the normal
+    /// route, and is checked like any other.
+    #[cfg(any(target_os = "linux", windows))] // macOS has only 127.0.0.1 on its loopback
+    #[tokio::test]
+    async fn requests_spread_over_networks_share_the_cookies_and_the_checks() {
+        use std::net::{IpAddr, Ipv4Addr};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let seen: Arc<Mutex<Vec<(IpAddr, String)>>> = Default::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, peer)) = listener.accept().await else { return };
+                let log = log.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let head = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+                    log.lock().unwrap().push((peer.ip(), head.clone()));
+                    let answer = if head.starts_with("head") {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nSet-Cookie: sid=s3cr3t; Path=/\r\nConnection: close\r\n\r\n".to_string()
+                    } else if head.contains("range: bytes=1-2") {
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 1-2/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nbc"
+                            .to_string()
+                    } else {
+                        // A range the client did not ask for: refused by the checks, whatever the route.
+                        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nab"
+                            .to_string()
+                    };
+                    let _ = sock.write_all(answer.as_bytes()).await;
+                });
+            }
+        });
+        let url = Url::parse(&format!("http://{addr}/f.bin")).unwrap();
+        let client = HttpClient::new(&ClientConfig { spread_any_link: true, dns_cache_ttl: Duration::ZERO, ..Default::default() }).unwrap();
+        let net = |n: &str, last: u8| RouteSpec {
+            name: n.into(),
+            interface: cfg!(target_os = "linux").then(|| "lo".to_string()),
+            v4: Some(Ipv4Addr::new(127, 0, 0, last)),
+            v6: None,
+            addresses: vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, last)), IpAddr::V4(Ipv4Addr::LOCALHOST)],
+        };
+        assert!(client.set_routes(&[net("a", 2), net("b", 3)]).is_empty());
+        assert!(client.spreads(&url));
+        let _ = client.req(Method::HEAD, &url, &RequestExtras::default()).send().await.unwrap();
+        let r = client.get_range(&url, 1, 2, None).await.unwrap();
+        let through = r.network().map(str::to_owned);
+        assert!(matches!(through.as_deref(), Some("a" | "b")), "{through:?}");
+        let body: Vec<u8> =
+            futures_util::StreamExt::collect::<Vec<_>>(r.into_stream()).await.into_iter().flat_map(|c| c.unwrap()).collect();
+        assert_eq!(body, b"bc");
+        let last = seen.lock().unwrap().last().cloned().unwrap();
+        assert_ne!(last.0, IpAddr::V4(Ipv4Addr::LOCALHOST), "it went out through a network");
+        assert!(last.1.contains("cookie: sid=s3cr3t"), "the cookie set on the normal route went with it: {}", last.1);
+        assert!(matches!(client.get_range(&url, 2, 3, None).await, Err(HttpError::RangeNotHonored(_))), "checked like any other");
+        assert!(client.routes().iter().any(|l| l.state == LaneState::Working && l.bytes == 2));
+        // Read again with another (IPv6 temporary) address: the same networks, what was learned is kept.
+        let mut again = vec![net("a", 2), net("b", 3)];
+        again[0].addresses.push(IpAddr::V6(std::net::Ipv6Addr::new(0x2a01, 0, 0, 0, 0, 0, 0, 9)));
+        assert!(client.set_routes(&again).is_empty());
+        assert!(client.routes().iter().any(|l| l.state == LaneState::Working && l.bytes == 2), "kept: {:?}", client.routes());
+        assert_eq!(client.spread_networks(&url), 2);
+    }
+
+    /// A network that stops sending in the middle of a transfer is given up quickly and rests.
+    #[cfg(any(target_os = "linux", windows))]
+    #[tokio::test]
+    async fn a_network_that_stops_sending_is_given_up_and_rests() {
+        use std::net::{IpAddr, Ipv4Addr};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let _ = sock.read(&mut buf).await;
+                    // Half the answer, then silence (the connection stays open).
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\nContent-Length: 10\r\n\r\nabcde")
+                        .await;
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                });
+            }
+        });
+        let url = Url::parse(&format!("http://{addr}/f.bin")).unwrap();
+        let cfg = ClientConfig { spread_any_link: true, lane_stall: Duration::from_millis(300), ..Default::default() };
+        let client = HttpClient::new(&cfg).unwrap();
+        let net = |n: &str, last: u8| RouteSpec {
+            name: n.into(),
+            interface: cfg!(target_os = "linux").then(|| "lo".to_string()),
+            v4: Some(Ipv4Addr::new(127, 0, 0, last)),
+            v6: None,
+            addresses: vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, last)), IpAddr::V4(Ipv4Addr::LOCALHOST)],
+        };
+        client.set_routes(&[net("a", 2), net("b", 3)]);
+        let r = client.get_range(&url, 0, 9, None).await.unwrap();
+        let through = r.network().unwrap().to_string();
+        let t = Instant::now();
+        let got: Vec<_> = futures_util::StreamExt::collect::<Vec<_>>(r.into_stream()).await;
+        assert!(t.elapsed() < Duration::from_secs(5), "given up quickly");
+        assert!(matches!(got.last(), Some(Err(HttpError::NetworkLost))), "{got:?}");
+        assert!(client.routes().iter().any(|l| l.name == through && l.state == LaneState::Resting), "{:?}", client.routes());
     }
 
     #[tokio::test]

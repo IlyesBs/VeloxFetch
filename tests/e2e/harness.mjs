@@ -32,7 +32,8 @@ export async function startFileServer(sizeBytes) {
   const FILE = crypto.randomBytes(sizeBytes);
   // `rateBps`: the whole server's speed, shared by every connection (like a real line), when set.
   // `busy`: `/busy/..` answers 502 (a server in passing trouble) while it is set.
-  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, busy: false, FILE, sha: sha256(FILE), base: "", headers: [] };
+  // `peers`: body bytes sent to each client address (which network a request came through).
+  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, busy: false, FILE, sha: sha256(FILE), base: "", headers: [], peers: {} };
   const server = http.createServer(async (req, res) => {
     state.requests++;
     state.headers.push(req.headers); // lets a test check what the client sent
@@ -57,7 +58,10 @@ export async function startFileServer(sizeBytes) {
     if (req.method === "HEAD") return void res.end();
     for (let pos = start; pos <= end; pos += 65536) {
       if (res.destroyed) return;
-      res.write(FILE.subarray(pos, Math.min(pos + 65536, end + 1)));
+      const chunk = FILE.subarray(pos, Math.min(pos + 65536, end + 1));
+      res.write(chunk);
+      const peer = req.socket.remoteAddress ?? "?";
+      state.peers[peer] = (state.peers[peer] ?? 0) + chunk.length;
       if (state.delayMs) await sleep(state.delayMs);
       if (state.rateBps) {
         const now = Date.now();
