@@ -58,7 +58,9 @@ Error texts never pass on anything from the network: each is chosen by a short c
 ## The signing key
 
 * Made by the owner, once: `node scripts/update-key.mjs generate`. It asks for a passphrase twice, at the terminal,
-  without echo (at least 16 characters). It refuses a pipe, a file, a variable or an argument.
+  without echo (at least 16 characters). It refuses a pipe, a file, a variable or an argument. Echo is turned off
+  *before* the question is shown (October 2026: it was turned off just after, so a passphrase typed the instant the
+  question appeared could show on the screen; found by the publishing kit's terminal test).
 * The private key is written **encrypted** (scrypt N=2^17, r=8, p=1 + AES-256-GCM, the key id as associated data) to
   `~/.config/veloxfetch-release/update-signing-key.json`, readable by the owner only (0600). The tool refuses to
   write it inside the project, or over an existing key.
@@ -81,7 +83,10 @@ Error texts never pass on anything from the network: each is chosen by a short c
 5. Plug in the key drive: `node scripts/update-key.mjs sign --key <drive>/update-signing-key.json` (asks the
    passphrase; writes `latest.json.sig`; verifies it with `update-keys.txt`).
 6. `node scripts/update-key.mjs verify` (re-hashes every package next to the manifest).
-7. Upload the packages, `latest.json` and `latest.json.sig` to the **draft** release `vx.y.z`, check it
+   Steps 3 – 6 and the release text are done by one command: `bash scripts/publish-release.sh` (`docs/publishing.md`).
+7. Upload the packages, `latest.json` and `latest.json.sig` to the **draft** release `vx.y.z` of the **public**
+   download repository `IlyesBs/VeloxFetch-releases` (the source repository is private; the app's feed names the
+   public one), check it
    (`docs/manual-test.md` AG), then publish it. GitHub serves `releases/latest/download/latest.json` only for the
    newest **published, non-pre-release** release, so a draft is never offered.
 

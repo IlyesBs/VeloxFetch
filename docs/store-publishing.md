@@ -1,5 +1,7 @@
 # Publishing the browser extension (what "installed with the app, like IDM" needs)
 
+(The app itself, and the texts for every store and download site: `docs/publishing.md`, `docs/publish/listings.md`.)
+
 Chrome, Edge, Brave and Firefox only accept an extension that is **not** from their store when the user loads it by hand
 (developer mode). Programs like IDM avoid that because their extension is **in the store**: the installer only tells the browser
 "this extension id is wanted" (an *external extension* entry), and the browser shows "A new extension was added: Enable?" on its

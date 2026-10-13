@@ -28,7 +28,8 @@ The extension only sends links to the VeloxFetch desktop application running on 
   page (`latest.json` and its signature), 60 seconds after it starts and then every 12 hours, and the new version's package
   only when you press **Download the update**. The request names only the product and its version (`VeloxFetch/1.0.0`):
   no cookie, no account, no identifier, nothing about your downloads. GitHub sees your IP address, as for any visit.
-* **Where it goes:** GitHub (`github.com` and its download servers), through your proxy if you set one.
+* **Where it goes:** GitHub (`github.com/IlyesBs/VeloxFetch-releases` and GitHub's download servers), through your
+  proxy if you set one.
 * **What is stored:** the time of the last check, the newest release date seen (so an old release cannot be passed off as
   new), your choice for automatic checks, and the downloaded package in the app's data folder (`updates`), until the next one.
 * **Turn it off:** Settings > Updates > Check for updates automatically. Nothing is then sent unless you press Check now.

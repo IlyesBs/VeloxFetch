@@ -266,14 +266,43 @@ test("updates are only our own signed design (Phase 19, docs/auto-update.md)", (
   assert.doesNotMatch(tool, /process\.env/);
   assert.match(tool, /isTTY/);
   for (const f of walk(ROOT)) {
-    if (/update-key\.mjs$|\.md$|policy\.test\.mjs$/.test(f)) continue;
+    // The tools that read key files name their format; a key file is anything else that holds it.
+    if (/update-key\.mjs$|publish-kit(\.test)?\.mjs$|\.md$|policy\.test\.mjs$/.test(f)) continue;
     const text = fs.readFileSync(f).toString("latin1");
     assert.doesNotMatch(text, /velox-update-secret-key-v1/, `${path.relative(ROOT, f)} looks like a private update key`);
   }
   // Updates come from the fixed HTTPS release address in the build, never from the UI.
   const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
-  assert.match(lib, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases\/latest\/download\/latest\.json"/);
+  // The public download repository (the source one is private): the app, the manifest tool and the publish script
+  // all name the same one, or the manifest would list packages the app refuses.
+  const PUBLIC = "IlyesBs/VeloxFetch-releases";
+  assert.match(lib, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
+  assert.match(lib, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
+  assert.match(lib, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
+  assert.match(tool, new RegExp(`const REPO = "${PUBLIC}"`));
+  assert.match(read("scripts", "publish-release.sh"), new RegExp(`^PUBLIC_REPO="${PUBLIC}"$`, "m"));
   assert.doesNotMatch(lib, /fn (download_update|install_update|check_for_updates)\([^)]*(url|path|String)/);
+});
+
+test("the publishing kit signs only from a terminal, publishes only drafts, and ships only checked files (docs/publishing.md)", () => {
+  const sh = read("scripts", "publish-release.sh");
+  const kit = read("scripts", "publish-kit.mjs");
+  assert.match(sh, /^set -euo pipefail$/m);
+  assert.match(sh, /\[ -t 0 \] \|\| die/, "the passphrase is typed at a terminal, never piped");
+  // The only signing is update-key.mjs's, which asks the passphrase itself; nothing hands it one.
+  assert.doesNotMatch(sh, /--passphrase|--pass\b|<<<|\| *node scripts\/update-key|PASSPHRASE=/);
+  // GitHub: a draft or nothing; never published, edited or deleted by the script.
+  for (const m of sh.matchAll(/gh release (\w+)/g)) assert.equal(m[1], "create");
+  assert.match(sh, /gh release create [^\n]*--draft/);
+  assert.doesNotMatch(sh, /gh release (edit|delete|upload)|--draft=false|git push|git tag/);
+  // The full security gate runs unless the owner skips the build entirely.
+  assert.doesNotMatch(sh, /build-release\.sh[^\n]*--(skip-gate|quick-gate)/);
+  // The kit reads no secret from the environment and refuses unknown or unchecked files.
+  assert.doesNotMatch(kit, /process\.env/);
+  assert.match(kit, /not a file a release ships/);
+  assert.match(kit, /does not match .*damaged, or changed after the build/);
+  assert.match(kit, /must never be inside the repository/);
+  assert.match(read(".gitattributes"), /^\*\.sh text eol=lf$/m);
 });
 
 test("the release folder, when present, matches SHA256SUMS exactly", () => {

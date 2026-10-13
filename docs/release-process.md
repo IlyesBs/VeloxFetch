@@ -134,6 +134,14 @@ exists (otherwise that system's files are unsigned, and the build says so). Loca
 1. Compare the installer's SHA-256 with `SHA256SUMS.txt` (`certutil -hashfile <file> SHA256` on Windows, `shasum -a 256 <file>` elsewhere), and get `SHA256SUMS.txt` from a channel you trust (the release page over HTTPS), not from the same place as a mirror.
 2. When signatures exist: verify the detached signature over `SHA256SUMS.txt`, and check that the installer's Windows signature says "VeloxFetch" (right-click > Properties > Digital Signatures).
 
+## Publishing to users
+
+`bash scripts/publish-release.sh` builds the production release with the full gate, checks the app carries the update
+key, stages every system's packages (each checked against its own `SHA256SUMS.txt`), signs and verifies the update
+manifest, and writes the release text, the public README with its screenshots, and the texts for download sites.
+Releases go to the **public** repository `IlyesBs/VeloxFetch-releases`; this one stays private. Details:
+`docs/publishing.md`.
+
 ## Updates (Phase 19)
 
 The app updates itself only from a manifest signed with the owner's **offline** Ed25519 key (`docs/auto-update.md`).

@@ -702,3 +702,17 @@ when a build has no update key. All 20 desktop suites pass on Linux.
 | `download-manager` `video_failures_get_a_stable_code_for_the_ui` | DRM, live, playlist, sign-in, no video, site, remux, disk full, other file errors |
 | `tests/security/policy.test.mjs` "one version everywhere" | Cargo, Tauri, UI, extension, lockfiles and manifests say the same `x.y.z` |
 | `tests/e2e/desktop-diagnostics.mjs` | reads the version from `Cargo.toml` (it expected `0.1.0`) |
+
+## Publishing kit (October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/release/publish-kit.test.mjs` (6, in the full security gate) | shipped names and versions; staging every system with one checksum list, filled notes and README, pictures copied; refusals (damaged, missing, unknown, old version, conflicting, extensions only, a folder that is not a kit, never emptied); preflight (no key, untrusted key, missing or wrong key file, key inside the project, versions that disagree); the built app (no key, debug build); **the whole `publish-release.sh`** in a throwaway copy of the project with a throwaway key typed at a pseudo-terminal (`tests/release/pty-run.py`): refused without a key and with uncommitted changes, then Linux + a merged Windows folder staged, signed, verified with the app's key, every file in `SHA256SUMS.txt`, no passphrase or key anywhere |
+| `tests/security/policy.test.mjs` (+1, and the update test) | the app, `update-key.mjs` and `publish-release.sh` name the same public repository; the script needs a terminal, never passes a passphrase, only drafts, never pushes or tags, always the full gate; the kit reads no environment variable; `*.sh` keep LF |
+| `tests/e2e/publish-screenshots.mjs` | the 11 public pictures from the real app (1280×800), the version shown is the one that ships, no picture shows `127.0.0.1`. Taking them found three bugs, fixed on their own branches: grey closed drop-downs on Linux, the queue's raw percentages and the empty name of a waiting duplicate, a stray sideways scrollbar in Arabic |
+
+Mutation check: dropping `--draft`, the terminal check, or the full gate from the script each fails the policy test.
+
+Found by the whole-script test under load (3 failures in 5 runs while `cargo test` compiled): `update-key.mjs` showed
+its passphrase question before turning echo off, so a passphrase typed at that instant was echoed. Echo now goes off
+first; 8 runs of 8 under the same load pass.

@@ -392,10 +392,12 @@ fn dry_run_shell() -> bool {
 
 /// The public keys this build trusts for updates (empty: it cannot update itself).
 const UPDATE_KEYS: &str = include_str!("../update-keys.txt");
-const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch/releases";
+/// The public download repository (the source repository is private): the release page, the update feed and the
+/// packages all come from it. `scripts/update-key.mjs` and `scripts/publish-release.sh` name the same one.
+const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases";
 /// GitHub's "latest release" address: drafts and pre-releases are never served here.
-const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch/releases/latest/download/latest.json";
-const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch/releases/download/";
+const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/latest/download/latest.json";
+const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/download/";
 
 /// Where updates come from. Debug builds never ask the real release server: only a local one, when the end-to-end
 /// test sets it up (`VELOX_UPDATE_FEED`, `VELOX_UPDATE_PREFIX`, `VELOX_UPDATE_KEYS`).
@@ -1118,7 +1120,7 @@ mod update_tests {
         // A typo in the keys file would turn updates off for everyone: it must parse.
         update_verify::TrustedKeys::parse(UPDATE_KEYS).unwrap();
         for u in [RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES] {
-            assert!(u.starts_with("https://github.com/IlyesBs/VeloxFetch/releases"), "{u}");
+            assert!(u.starts_with("https://github.com/IlyesBs/VeloxFetch-releases/releases"), "{u}");
         }
         assert!(update_verify::Version::parse(env!("CARGO_PKG_VERSION")).is_some(), "the app's version must be x.y.z");
     }

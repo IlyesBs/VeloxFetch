@@ -741,3 +741,21 @@ Full rules: `docs/new-link-recovery.md` §6.
 * The UI now translates Rust's refusals and timeline lines by matching known English texts; an unknown text is shown
   as it came (never interpreted), and nothing of it reaches a command line, a path or the network.
 * Review summary, tampering, and the owner's signing steps: `docs/release-candidate.md`.
+
+## Publishing the release (October 2026)
+
+* **Where users get it:** the public repository `IlyesBs/VeloxFetch-releases` only (the source repository is
+  private). The app's feed, release page and every package address in the signed manifest name it; a policy test
+  keeps the app, `update-key.mjs` and `publish-release.sh` equal, so a manifest can never list an address the app
+  refuses, or one elsewhere.
+* **Nothing unchecked is published** (`scripts/publish-kit.mjs`): each system's packages are checked against their
+  own `SHA256SUMS.txt` before they are copied (a file damaged or changed on its way from the Windows or macOS
+  computer is refused); only known file names of this version; two different files under one name refused; the
+  built app must carry the update key and be a release build; the full security gate runs with every build.
+* **The key:** typed at a terminal only (the script refuses to run without one; nothing passes a passphrase, and the
+  kit reads no environment variable); the key file must be outside the repository and be one the app trusts. The
+  release folder never holds the passphrase or the private key (tested).
+* **GitHub:** the script at most creates a **draft** (`--github-draft`); it never publishes, edits, deletes, pushes or
+  tags. The owner checks the draft and publishes it.
+* **The pictures** come from the real app through a local proxy and example names: no address of the computer, no
+  real site, no personal file.

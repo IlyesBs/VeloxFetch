@@ -44,7 +44,10 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 
 **Version:** 1.0.0 (first production release, October 2026).
 
-**Source:** git, on GitHub (`IlyesBs/VeloxFetch`):
+**Releases for users:** the public repository `IlyesBs/VeloxFetch-releases` (installers, checksums, the signed update
+manifest, a README with screenshots). The app updates from there. Details: `docs/publishing.md`.
+
+**Source:** git, on GitHub (`IlyesBs/VeloxFetch`, private):
 - `main` holds what is finished;
 - each feature or enhancement gets its own branch and commit (for example `feat_smart_download_queue`,
   `feat_download_intelligence`) and is merged through a pull request.
@@ -653,6 +656,10 @@ node tests/e2e/desktop-<suite>.mjs
 
 # full release for the current OS (installer, portable zip, extension zips, SHA256SUMS, security gate):
 bash scripts/build-release.sh
+
+# production release to publish (owner, in a terminal): build + full gate + key check + every system's packages
+# staged and checked + signed update manifest + release text + public README and screenshots + site texts:
+bash scripts/publish-release.sh --key <update key file> [--merge <another system's release folder>]...
 ```
 
 **Release outputs:**
@@ -710,6 +717,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 19 | Auto update | ✅ | Ed25519-signed manifest (offline, passphrase-encrypted key; public key compiled in), HTTPS, no downgrade, no replay, size + SHA-256 verified before keeping and before install; Windows setup / AppImage self-replace / system installer / release page; Settings > Updates and the status bar |
 | 20 | Performance benchmarking | ✅ | `velox-bench` (100 MB – 50 GB × 1 – 64 connections: MB/s, CPU, RAM, DB cost, time after the last byte, every file checked) + start-up, FPS and IPC latency in `desktop-perf.mjs`. 1.1 – 1.8 GB/s engine ceiling; 1.4 – 3 % of a core at gigabit. Fixed: the whole file was hashed again after the last byte (4 GiB at 400 MB/s: 2.0 s → 38 ms) |
 | 21 | Release candidate | ✅ | 1.0.0: one version everywhere, security gate passed (0 vulnerabilities, no unused dependencies, no debug hooks in release), every text in the user's language (French / Arabic checked on every page, dialog, timeline and refusal), all tests. Owner steps left: update key, builds, signing, Windows / macOS checks (`docs/release-candidate.md`) |
+| + | Publishing kit | ✅ | `scripts/publish-release.sh`: production release in one command, every package checked, signed update manifest, public repository `IlyesBs/VeloxFetch-releases`, README / release text / site texts / screenshots ready (`docs/publishing.md`) |
 | 22 | Beta | ⏳ | Internal alpha, then private beta, public beta, RC and stable; opt-in, documented crash and performance reports |
 
 > Phase 19 was started by the owner on 2026-10-13 ("start the phase 19 to 21").
@@ -805,7 +813,8 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Privacy (what is read, nothing is sent) | `docs/PRIVACY.md` |
 | Automatic tests, how to run them, known results | `docs/testing.md` |
 | Checks done by hand on each OS | `docs/manual-test.md` |
-| Building and publishing a release | `docs/release-process.md`, `docs/store-publishing.md` |
+| Building and publishing a release | `docs/release-process.md`, `docs/publishing.md`, `docs/store-publishing.md` |
+| Public page, release text, texts for download sites, screenshots | `docs/publish/` |
 | Smart throttle and live preview | `docs/smart-throttle-and-preview.md` |
 | Interface smoothness, start-up, themed drop-down lists | `docs/ui-performance.md` |
 | Smart Download Queue | `docs/smart-download-queue.md` |
@@ -835,6 +844,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `release_publish_kit` | Release | `scripts/publish-release.sh`: the production release in one command (preflight: one version, a trusted update key outside the project, nothing uncommitted; the full gate; the app carries the key and is a release build; every system's packages staged, each checked against its own checksums; signed and verified update manifest; GPG optional; a draft on GitHub optional). Releases move to the public repository `IlyesBs/VeloxFetch-releases` (feed, release page, manifest addresses; the source stays private). `docs/publish/`: the public README, the release text, texts for download sites in English / French / Arabic, 11 screenshots of 1.0.0 taken by `publish-screenshots.mjs` through a local proxy. Tests: `tests/release/publish-kit.test.mjs` (the whole script with a throwaway key typed at a pseudo-terminal), policy tests. | `docs/publishing.md` |
 | 2026-10-13 | `fix_rtl_main_scrollbar` | Fix | In Arabic on Linux a sideways scrollbar showed across the bottom of the downloads (WebKitGTK puts the bar on the left but lays the content out one bar wider): the main area never scrolls sideways now, nothing is hidden. `desktop-redesign.mjs` checks every scroll area in Arabic (fails without the fix). | `docs/ui-performance.md` |
 | 2026-10-13 | `fix_queue_percent_duplicate_name` | Fix | The Queue page's rows showed the raw percentage ("11.992703192112195%"): one decimal now, like everywhere (`formatPercent`). A download not started yet was named by an empty name in duplicate answers and the Check link warning ("In your list:  · same link"): it is named by its link's last path part (never the link itself). Tests: `format.test.ts`, `desktop-smart-queue.mjs` (fails on the old code), `duplicates.rs` (+2). | `docs/smart-download-queue.md`, `docs/smart-duplicate-detection.md` |
 | 2026-10-13 | `fix_select_field_theme` | Fix | Closed drop-down fields were grey system buttons on Linux (WebKitGTK ignores a `<select>`'s background with the system look on): every `<select>` is now drawn by the app (`appearance: none`, a gradient arrow, the `.input` surface), light, dark and right-to-left. `desktop-ui.mjs` checks it (fails without the fix). Screenshots refreshed. | `docs/ui-performance.md` |
