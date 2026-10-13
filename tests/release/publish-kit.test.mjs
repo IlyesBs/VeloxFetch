@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { appVersion, checkBinary, classify, preflight, readSums, stage } from "../../scripts/publish-kit.mjs";
+import { appVersion, checkBinary, classify, preflight, readSums, render, stage, writePage } from "../../scripts/publish-kit.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const V = appVersion();
@@ -228,4 +228,27 @@ test("the whole publish script, in a throwaway copy of the project, with a throw
   }
   assert.ok(!r.stdout.includes(PASS), "the passphrase is never echoed");
   assert.match(fs.readFileSync(path.join(kit, "BUILD-INFO.txt"), "utf8"), new RegExp(`VeloxFetch ${V.replaceAll(".", "\\.")}`));
+});
+
+test("a system that is not built yet is never promised: macOS lines only with macOS packages", () => {
+  const t = "for {{PLATFORMS}} / {{PLATFORMS_FR}} / {{PLATFORMS_AR}} / {{PLATFORMS_LIST}}\nmac line <!-- mac -->\nno-mac line <!-- no-mac -->\nv{{VERSION}}";
+  assert.equal(render(t, { version: "1.2.3", systems: ["Windows", "Linux"] }), "for Windows and Linux / Windows et Linux / ويندوز ولينكس / Windows, Linux\nno-mac line\nv1.2.3");
+  assert.equal(render(t, { version: "1.2.3", systems: ["Windows", "macOS", "Linux"] }), "for Windows, macOS and Linux / Windows, macOS et Linux / ويندوز وماك ولينكس / Windows, macOS, Linux\nmac line\nv1.2.3");
+  // The real texts: without macOS packages, none of them names macOS or leaves a marker or a placeholder.
+  for (const name of ["README-public.md", "release-notes.md", "listings.md"]) {
+    const text = fs.readFileSync(path.join(ROOT, "docs", "publish", name), "utf8");
+    const without = render(text, { version: V, systems: ["Windows", "Linux"] });
+    assert.doesNotMatch(without, /macOS|\.dmg|<!-- (no-)?mac -->|\{\{/, name);
+    const all = render(text, { version: V, systems: ["Windows", "macOS", "Linux"] });
+    assert.doesNotMatch(all, /<!-- (no-)?mac -->|\{\{(?!DOWNLOADS)/, name);
+    if (name !== "release-notes.md") assert.match(all, /macOS/, `${name} names macOS once it is built`);
+  }
+  // A Windows + Linux release: its page says nothing of macOS; the page alone can be made between releases.
+  const out = path.join(tmp("out"), "kit");
+  stage({ version: V, out, from: [releaseDir(linux()), releaseDir({ [`VeloxFetch_${V}_x64-setup.exe`]: randomBytes(64) })] });
+  assert.doesNotMatch(fs.readFileSync(path.join(out, "repo", "README.md"), "utf8"), /macOS/);
+  const page = tmp("page");
+  writePage(page, { version: V, systems: ["Windows", "Linux"] });
+  assert.match(fs.readFileSync(path.join(page, "README.md"), "utf8"), new RegExp(`for \\*\\*Windows and Linux\\*\\*`));
+  assert.ok(fs.readdirSync(path.join(page, "screenshots")).length >= 10);
 });

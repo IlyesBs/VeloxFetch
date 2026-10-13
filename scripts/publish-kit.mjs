@@ -11,6 +11,9 @@
 //       Copies every package of every system's release folder into <out>/files (each checked against its own
 //       SHA256SUMS.txt first), writes one SHA256SUMS.txt over all of them, the release notes, and <out>/repo: the
 //       README and screenshots for the public download repository. Refuses unknown, mismatched or mixed-version files.
+//   node scripts/publish-kit.mjs page [--version <x.y.z>] [--systems Windows,Linux] [--out <folder>]
+//       Only the public repository's README and pictures, for the systems listed (a system not built yet is not
+//       promised: its lines are left out). For updating the page between releases.
 //
 // Nothing here signs, uploads or reads a secret: the passphrase is only ever typed into scripts/update-key.mjs.
 
@@ -176,6 +179,51 @@ export function classify(name, version) {
   return null;
 }
 
+const template = (n) => fs.readFileSync(path.join(PUBLISH_DOCS, n), "utf8");
+
+/** Names of the systems a release has, said in each language the texts use. */
+function platforms(systems) {
+  const say = (names, and) => (names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} ${and} ${names.at(-1)}`);
+  const ar = { Windows: "ويندوز", macOS: "ماك", Linux: "لينكس" };
+  return {
+    en: say(systems, "and"),
+    fr: say(systems, "et"),
+    ar: systems.map((s) => ar[s]).join(" و"),
+    list: systems.join(", "),
+  };
+}
+
+/** A text template filled for this release: a line marked `<!-- mac -->` is kept only when the release has macOS
+ * packages (`<!-- no-mac -->` only when it has none), so nothing promises a system that is not built yet. */
+export function render(text, { version, systems, downloads = "" }) {
+  const mac = systems.includes("macOS");
+  const p = platforms(systems);
+  return text
+    .split("\n")
+    .filter((line) => (line.includes("<!-- mac -->") ? mac : line.includes("<!-- no-mac -->") ? !mac : true))
+    .map((line) => line.replace(/\s*<!-- (no-)?mac -->/, ""))
+    .join("\n")
+    .replaceAll("{{VERSION}}", version)
+    .replaceAll("{{DOWNLOADS}}", downloads)
+    .replaceAll("{{SYSTEMS}}", systems.join(", "))
+    .replaceAll("{{PLATFORMS}}", p.en)
+    .replaceAll("{{PLATFORMS_FR}}", p.fr)
+    .replaceAll("{{PLATFORMS_AR}}", p.ar)
+    .replaceAll("{{PLATFORMS_LIST}}", p.list);
+}
+
+/** The public repository's front page and the pictures it shows, into `dir` (README.md, screenshots/). */
+export function writePage(dir, { version, systems }) {
+  const readme = template("README-public.md");
+  fs.mkdirSync(path.join(dir, "screenshots"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "README.md"), render(readme, { version, systems }));
+  const shots = path.join(PUBLISH_DOCS, "screenshots");
+  for (const n of new Set([...readme.matchAll(/\(screenshots\/([a-z0-9-]+\.png)\)/g)].map((m) => m[1]))) {
+    if (!fs.existsSync(path.join(shots, n))) fail(`README-public.md shows screenshots/${n}, which is not in docs/publish/screenshots`);
+    fs.copyFileSync(path.join(shots, n), path.join(dir, "screenshots", n));
+  }
+}
+
 const mib = (n) => `${(n / 1048576).toFixed(1)} MB`;
 
 export function stage({ version, out, from }) {
@@ -239,24 +287,10 @@ export function stage({ version, out, from }) {
     }
   }
   const missing = ["Windows", "macOS", "Linux"].filter((s) => !installers.some((p) => p.system === s));
-  const fill = (text) =>
-    text
-      .replaceAll("{{VERSION}}", version)
-      .replaceAll("{{DOWNLOADS}}", table.join("\n"))
-      .replaceAll("{{SYSTEMS}}", ["Windows", "macOS", "Linux"].filter((s) => !missing.includes(s)).join(", "));
-  const template = (n) => fs.readFileSync(path.join(PUBLISH_DOCS, n), "utf8");
+  const systems = ["Windows", "macOS", "Linux"].filter((s) => !missing.includes(s));
+  const fill = (text) => render(text, { version, systems, downloads: table.join("\n") });
   fs.writeFileSync(path.join(out, "RELEASE_NOTES.md"), fill(template("release-notes.md")));
-
-  // The public repository's front page and its pictures, ready to copy in.
-  const repo = path.join(out, "repo");
-  fs.mkdirSync(path.join(repo, "screenshots"), { recursive: true });
-  fs.writeFileSync(path.join(repo, "README.md"), fill(template("README-public.md")));
-  const shots = path.join(PUBLISH_DOCS, "screenshots");
-  const wanted = [...template("README-public.md").matchAll(/\(screenshots\/([a-z0-9-]+\.png)\)/g)].map((m) => m[1]);
-  for (const n of wanted) {
-    if (!fs.existsSync(path.join(shots, n))) fail(`README-public.md shows screenshots/${n}, which is not in docs/publish/screenshots`);
-    fs.copyFileSync(path.join(shots, n), path.join(repo, "screenshots", n));
-  }
+  writePage(path.join(out, "repo"), { version, systems });
   fs.writeFileSync(path.join(out, "LISTINGS.md"), fill(template("listings.md")));
   return { files: names, missing, notes, picked };
 }
@@ -282,8 +316,15 @@ async function main() {
     console.log("  RELEASE_NOTES.md, LISTINGS.md, repo/README.md, repo/screenshots/");
     for (const n of r.notes) console.log(`  note: ${n}`);
     if (r.missing.length) console.log(`  not in this release yet: ${r.missing.join(", ")} (build there, then --merge its release folder)`);
+  } else if (cmd === "page") {
+    const version = one(a, "version") ?? appVersion();
+    const systems = (one(a, "systems") ?? "Windows,macOS,Linux").split(",").map((x) => x.trim());
+    for (const x of systems) if (!["Windows", "macOS", "Linux"].includes(x)) fail(`--systems: ${x} is not Windows, macOS or Linux`);
+    const out = path.resolve(one(a, "out") ?? path.join(ROOT, "release", "publish", "page"));
+    writePage(out, { version, systems });
+    console.log(`${out}: README.md (${systems.join(", ")}), screenshots/`);
   } else {
-    console.error("usage: node scripts/publish-kit.mjs preflight|check-binary|stage (see the top of this file)");
+    console.error("usage: node scripts/publish-kit.mjs preflight|check-binary|stage|page (see the top of this file)");
     process.exit(2);
   }
 }

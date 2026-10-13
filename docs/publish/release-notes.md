@@ -28,11 +28,10 @@ lists the fingerprint of every file; the `sbom` files list what the programs are
 ### Install
 * **Windows:** run the setup. If Windows says *"Windows protected your PC"*: **More info** > **Run anyway** (the app has
   no paid certificate yet). The portable zip runs without installing.
-* **macOS:** open the `.dmg` and drag VeloxFetch to Applications. If macOS refuses to open it: **System Settings >
-  Privacy & Security > Open Anyway**.
+* **macOS:** open the `.dmg` and drag VeloxFetch to Applications. If macOS refuses to open it: **System Settings > Privacy & Security > Open Anyway**. <!-- mac -->
 * **Linux:** `sudo apt install ./VeloxFetch_{{VERSION}}_amd64.deb`, `sudo dnf install ./VeloxFetch-{{VERSION}}-1.x86_64.rpm`,
   or `chmod +x` the AppImage and run it.
 
 ### Check your download
 Compare your file's SHA-256 with its line in `SHA256SUMS.txt`:
-`Get-FileHash <file> -Algorithm SHA256` (Windows PowerShell) or `shasum -a 256 <file>` (macOS, Linux).
+`Get-FileHash <file> -Algorithm SHA256` (Windows PowerShell) or `sha256sum <file>` (Linux).
