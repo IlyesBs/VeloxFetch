@@ -184,13 +184,20 @@ impl DownloadManager {
         let mut out: Vec<Known> = list
             .into_iter()
             .map(|r| {
-                // A never-started record holds its folder, not yet a file.
-                let destination = (!r.is_unstarted()).then_some(r.destination);
+                // A never-started record holds its folder, not yet a file, and no file name: it is named by what its
+                // link suggests (the last part of the path, made safe; never the whole link, which may carry a
+                // secret), never by an empty name.
+                let destination = (!r.is_unstarted()).then(|| r.destination.clone());
+                let filename = if r.filename.is_empty() {
+                    Url::parse(&r.url).map(|u| link_name(&u)).unwrap_or_else(|_| "download".to_string())
+                } else {
+                    r.filename.clone()
+                };
                 Known {
                     id: r.id,
                     history_id: None,
                     url: r.url,
-                    filename: r.filename,
+                    filename,
                     status: Some(r.status),
                     etag: r.etag,
                     last_modified: r.last_modified,

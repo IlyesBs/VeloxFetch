@@ -8,6 +8,9 @@ desktop shell (React + TypeScript + Tailwind).
 **Interface:** every field, drop-downs included, is drawn in the theme's colours on Windows, Linux and macOS
 ([`docs/ui-performance.md`](docs/ui-performance.md)).
 
+**Lists:** percentages have one decimal everywhere, and a download that has not started yet is named by its link
+([`docs/smart-download-queue.md`](docs/smart-download-queue.md), [`docs/smart-duplicate-detection.md`](docs/smart-duplicate-detection.md)).
+
 **New here? Read [`VELOXFETCH-OVERVIEW.md`](VELOXFETCH-OVERVIEW.md) first**: the whole app (features, design,
 security, roadmap) on one page. Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/security.md`](docs/security.md).
 

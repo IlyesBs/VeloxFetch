@@ -471,6 +471,11 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AJ. Numbers and names in lists (once per OS)
+1. Queue page, a download running: its line says "host · 12.3%" (one decimal), never a long number.
+2. Pause the queue, add a link, then Add download > the same link > Check link: "In your list: <file name> · same
+   link", with the name the card shows (never an empty name).
+
 ## AI. Languages (once per OS)
 1. Settings > Appearance > Language: Français, then العربية. Every page, Settings section and dialog reads in that
    language (Arabic from right to left).

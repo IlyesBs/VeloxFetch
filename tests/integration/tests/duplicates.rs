@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use download_manager::intelligence::{AnalyzeLink, CheckDuplicate, Confidence, DuplicateDto, DuplicateReason, FileState};
-use download_manager::{DownloadDto, DownloadManager, ManagerConfig, NewDownload};
+use download_manager::{DownloadDto, DownloadManager, ManagerConfig, NewDownload, PauseQueue};
 use downloader_core::DownloadStatus;
 use sha2::{Digest, Sha256};
 use velox_integration_tests::{random_data, serve};
@@ -232,4 +232,34 @@ async fn malformed_links_are_refused_without_touching_anything() {
         assert!(m.check_duplicate(CheckDuplicate { url: bad.into(), checksum: None }).await.is_err(), "{bad}");
     }
     assert!(m.list_downloads(Default::default()).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_download_that_has_not_started_yet_is_named_by_its_link() {
+    // A waiting download has no file name yet (it is chosen when it starts): the match is still told by a name, the one
+    // the card shows, never an empty one ("In your list:  · same link").
+    let srv = serve(random_data(64 * KB, 3)).await;
+    let m = manager("unstarted").await;
+    m.pause_queue(PauseQueue { pause_running: false }).await.unwrap();
+    let waiting = add(&m, srv.url("/iso/debian-13.1.0-amd64-netinst.iso")).await;
+    assert_eq!(m.get_download(waiting.id).await.unwrap().status, DownloadStatus::Queued);
+    let d = dup(&m, srv.url("/iso/debian-13.1.0-amd64-netinst.iso")).await.expect("the waiting download is found");
+    assert_eq!((d.id, d.filename.as_str()), (Some(waiting.id), "debian-13.1.0-amd64-netinst.iso"));
+    let a = m.analyze_link(AnalyzeLink { url: Some(srv.url("/iso/debian-13.1.0-amd64-netinst.iso")) }).await.unwrap().unwrap();
+    assert_eq!(a.duplicate.unwrap().filename, "debian-13.1.0-amd64-netinst.iso");
+    let warned = a.findings.iter().find(|f| format!("{:?}", f.code) == "Duplicate").expect("the duplicate warning");
+    assert_eq!(warned.detail.as_deref(), Some("debian-13.1.0-amd64-netinst.iso"), "the warning names it too");
+}
+
+#[tokio::test]
+async fn a_waiting_download_without_a_name_in_its_path_never_shows_its_link() {
+    // Nothing in the path to name it by: a neutral word, never the link and its query (it may hold a token).
+    let srv = serve(random_data(16 * KB, 4)).await;
+    let m = manager("unstarted-noname").await;
+    m.pause_queue(PauseQueue { pause_running: false }).await.unwrap();
+    let url = srv.url("/?token=E2E_SECRET_TOKEN");
+    add(&m, url.clone()).await;
+    let d = dup(&m, url).await.expect("found");
+    assert_eq!(d.filename, "download");
+    assert!(!format!("{d:?}").contains("E2E_SECRET_TOKEN"));
 }

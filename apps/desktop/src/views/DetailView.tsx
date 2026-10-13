@@ -12,7 +12,7 @@ import { PreviewCard } from "../components/PreviewCard";
 import { FileIcon, kindLabel } from "../components/FileIcon";
 import { SignInDialog } from "../components/SignInDialog";
 import { SegmentMap, SegmentRows } from "../components/SegmentMonitor";
-import { formatBytes, formatEta, formatSpeed, fraction, parseRate, percent } from "../format";
+import { formatBytes, formatEta, formatPercent, formatSpeed, fraction, parseRate } from "../format";
 import { useDetail, useDownload } from "../hooks";
 import { PRIORITIES, type Diagnosis, type Priority } from "../types";
 import { Icon } from "../ui/icons";
@@ -170,7 +170,7 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
       <Card title={t("det.overview")}>
         <div className="mb-3 flex items-end justify-between">
           <span className="num text-3xl font-semibold leading-none tracking-tight" data-testid="detail-percent">
-            {d.totalSize ? `${percent(d.downloaded, d.totalSize).toFixed(1)}%` : "—"}
+            {d.totalSize ? formatPercent(d.downloaded, d.totalSize) : "—"}
           </span>
           <span className="num text-xs text-dim">
             {formatBytes(d.downloaded)}

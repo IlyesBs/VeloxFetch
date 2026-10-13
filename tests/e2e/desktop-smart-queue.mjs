@@ -128,6 +128,9 @@ try {
   check("Start queue runs it whatever the schedule", true);
   await untilRowState(a.id, "downloading");
   check("the row shows Downloading", true);
+  // Its share is shown like everywhere else, with one decimal (it was the raw number: "11.992703192112195%").
+  const share = await waitFor(async () => /(\d+(\.\d+)?)%/.exec((await text(`[data-testid=queue-${a.id}] [data-testid=sq-why]`)) ?? "")?.[0], "the row's percentage", 10000);
+  check("the row's percentage has one decimal", /^\d{1,3}\.\d%$/.test(share), share);
   check("a started queue says it runs until done", /Started by hand/.test((await text("[data-testid=sq-gate]")) ?? ""));
   await click("[data-testid=sq-pause]");
   await untilStatus(a.id, "paused");

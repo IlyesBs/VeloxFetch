@@ -49,6 +49,11 @@ export function percent(done: number, total: number | null | undefined): number 
   return Math.min(100, Math.max(0, (done / total) * 100));
 }
 
+/** A share as the app shows it: one decimal ("12.0%"), never the raw number ("11.992703192112195%"). */
+export function formatPercent(done: number, total: number | null | undefined): string {
+  return `${percent(done, total).toFixed(1)}%`;
+}
+
 /** 0..1 fraction, clamped. */
 export function fraction(done: number, total: number | null | undefined): number {
   return percent(done, total) / 100;

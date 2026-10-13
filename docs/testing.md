@@ -565,6 +565,13 @@ pays.
 Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece size), `profiles::tests`,
 `profiles.test.ts`. Rust 724 passed.
 
+## Queue percentage and the name of a waiting duplicate (October 2026)
+
+Found while taking the 1.0.0 screenshots. `formatPercent` (`format.test.ts`): one decimal everywhere; the queue's
+rows showed the raw number. `desktop-smart-queue.mjs`: a running row's percentage has one decimal (fails on the old
+code with `1.1461764574050903%`). `duplicates.rs`: a never-started download is named by its link in the answer and
+in the Check link warning (failed with `""` before), and never by a link holding a token.
+
 ## Drop-down lists in the theme's colours (October 2026)
 
 See `docs/ui-performance.md`. Tests:
