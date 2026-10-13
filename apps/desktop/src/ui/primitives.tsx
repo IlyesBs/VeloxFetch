@@ -225,6 +225,7 @@ export function Menu({ label, items, vertical = false }: { label: string; items:
 // ------------------------------------------------------------------ toasts
 
 export function Toasts() {
+  const tr = useT();
   const toasts = useStore((s) => s.toasts);
   useEffect(() => {
     if (toasts.length === 0) return;
@@ -241,7 +242,7 @@ export function Toasts() {
         >
           <Icon name={t.kind === "error" ? "alert" : "check"} className={t.kind === "error" ? "text-bad" : "text-ok"} />
           <p className="flex-1 break-words text-[13px]">{t.text}</p>
-          <button className="text-dim hover:text-fg" aria-label="Dismiss" onClick={() => store.dismissToast(t.id)}>
+          <button className="text-dim hover:text-fg" aria-label={tr("toast.dismiss")} data-testid="toast-dismiss" onClick={() => store.dismissToast(t.id)}>
             <Icon name="x" size={14} />
           </button>
         </div>

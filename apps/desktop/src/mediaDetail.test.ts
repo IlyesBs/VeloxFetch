@@ -7,7 +7,7 @@ import type { MediaJob } from "./types";
 
 const job = (over: Partial<MediaJob> = {}): MediaJob => ({
   id: 1, title: "clip", host: "example.com", status: "downloading", bytes: 0, segmentsDone: 0, segmentsTotal: 0, percent: null,
-  folder: "/home/u/Downloads/Video", files: [], notes: [], error: null, site: true, speedBps: 0, etaSecs: null, resumable: false, playable: false,
+  folder: "/home/u/Downloads/Video", files: [], notes: [], error: null, errorCode: null, site: true, speedBps: 0, etaSecs: null, resumable: false, playable: false,
   ...over,
 });
 

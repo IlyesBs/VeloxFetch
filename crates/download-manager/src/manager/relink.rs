@@ -164,7 +164,8 @@ impl DownloadManager {
         Ok(())
     }
 
-    /// An outcome that changes nothing: noted in the download's diagnostics (never the link), then returned.
+    /// An outcome that changes nothing: noted in the download's diagnostics (never the link), then returned. The reasons
+    /// are said in the user's language by `apps/desktop/src/timeline.ts`: keep the two in step.
     async fn relink_report(&self, id: i64, mut o: NewLinkOutcome) -> Result<NewLinkOutcome, ManagerError> {
         let why = match o.reason {
             Reason::SameSource => "it is the link the download already uses",

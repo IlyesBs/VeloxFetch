@@ -83,7 +83,8 @@ fn seconds(d: Duration) -> String {
     }
 }
 
-/// The timeline's words for something the engine reported.
+/// The timeline's words for something the engine reported. The UI says these lines in the user's language by their
+/// shape: a change here goes with `apps/desktop/src/timeline.ts` (and its test's list of lines).
 fn describe(kind: &RunEventKind) -> (&'static str, String) {
     match kind {
         RunEventKind::ServerAnswered { status, size, ranges } => (

@@ -28,6 +28,28 @@ const BY_CODE: Record<string, Key> = {
   proxy_invalid: "e.proxy",
 };
 
+const MEDIA: Record<string, Key> = {
+  media_drm: "e.mediaDrm",
+  media_live: "e.mediaLive",
+  media_playlist: "e.mediaPlaylist",
+  media_sign_in: "e.mediaSignIn",
+  media_no_video: "e.mediaNoVideo",
+  media_unsupported: "e.mediaUnsupported",
+  media_site: "e.mediaSite",
+  media_invalid: "e.mediaInvalid",
+  media_limit: "e.mediaLimit",
+  media_remux: "e.mediaRemux",
+  media_network: "e.connection",
+  media_file: "e.mediaFile",
+};
+
+/** A video job's error in the current language (by its code); the engine's own text in English or for an unknown code. */
+export function localMediaError(code: string | null | undefined, english: string | null | undefined): string {
+  if (getLang() === "en" || !code) return english ?? "";
+  const key = MEDIA[code];
+  return key ? t(key) : localError(code, english);
+}
+
 /** The sentence for a download's error in the current language. */
 export function localError(code: string | null | undefined, english: string | null | undefined): string {
   const text = english ?? "";

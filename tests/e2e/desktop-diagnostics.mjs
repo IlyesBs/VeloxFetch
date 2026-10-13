@@ -11,6 +11,8 @@ import { check, createHarness, exe, finish, fs, path, sleep, startFileServer, wa
 
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
 const SHOTS = path.resolve("docs/screenshots");
+// The app's version, from the workspace (the log's first line names it).
+const VERSION = fs.readFileSync("Cargo.toml", "utf8").match(/^version = "([^"]+)"/m)[1];
 const srv = await startFileServer(600 * 1024);
 const h = createHarness({ port: 9361, appPath: APP });
 const { page, invoke } = h;
@@ -141,7 +143,7 @@ try {
   check("the report has no home folder", !report.toLowerCase().includes(home));
   const logFile = path.join(h.dataDir, "logs", "velox.log");
   const onDisk = fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8") : "";
-  check("the log file is in the app's data folder", onDisk.includes("VeloxFetch 0.1.0 started on") && onDisk.includes("download ended"), logFile);
+  check("the log file is in the app's data folder", onDisk.includes(`VeloxFetch ${VERSION} started on`) && onDisk.includes("download ended"), logFile);
   check("the log file contains no secret", leaks(onDisk).length === 0, leaks(onDisk).join(","));
   check("the log file hides the home folder", !onDisk.toLowerCase().includes(home));
   check("the log file keeps links useful but without their values", /private\.bin\?token=\[redacted\]/.test(onDisk) || /other\.bin\?token=\[redacted\]/.test(onDisk) || !/\?token=/.test(onDisk));

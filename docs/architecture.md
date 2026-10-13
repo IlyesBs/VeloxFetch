@@ -449,8 +449,12 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
 * **Languages** (`src/i18n.ts`): English, French, Arabic. `<html lang dir>`; layouts use logical sides
   (`ms/me/ps/pe/start/end`) so Arabic mirrors the whole window; Arabic uses the bundled Cairo font
   (`@fontsource-variable/cairo`, loaded only for Arabic glyphs, never letter-spaced); values inside Arabic
-  sentences are bidi isolates. The shell, dashboard, cards and lists are translated; deeper Settings panels
-  and dialogs are still English.
+  sentences are bidi isolates. Everything the user reads is translated (checked in French and Arabic on every page,
+  Settings section, dialog and a failed download's details by `tests/e2e/desktop-i18n.mjs`). Texts that Rust
+  writes in English are said in the user's language in the UI: download errors by code (`errors.ts`), video job
+  errors by `errorCode` (`localMediaError`), the diagnostics timeline by the shape of its lines (`timeline.ts`), and
+  the messages a command can be refused with by their exact text (`messages.ts`, checked against the Rust sources).
+  Logs, support reports and technical details stay in English.
 
 Views: Downloads (bento metrics + cards), Queue, History, Settings, Download detail
 (overview, network, controls, segment monitor, metadata). Screenshots: `docs/screenshots/`
@@ -646,3 +650,11 @@ lib.rs install_update   -> system_integration::update::install(kind, path, size,
 * `downloader-core/src/verify.rs` `RunningHashes` / `hash_progressive`: segment hashes continued at each checkpoint and
   kept for the run, held by the `ProgressHandle` (`resets` counter, emptied by `init` and `reset_segment`).
 * `tests/e2e/desktop-perf.mjs`: start-up, frame rate, IPC latency. Numbers: `docs/benchmarks.md`.
+
+## Release candidate (Phase 21)
+
+* Version: one `x.y.z` in `Cargo.toml` (workspace), `tauri.conf.json`, `apps/desktop/package.json`, the extension's
+  `package.json` and manifests, and both lockfiles (policy test).
+* Languages: `errors.ts` (`localError`, `localMediaError`), `timeline.ts` (`localEvent`), `messages.ts` (`MESSAGES`,
+  used by `api.ts` `normalizeError` / `localMessage`); `MediaJobDto.error_code` (`manager/media.rs` `media_error_code`).
+* Gate and owner steps: `docs/release-candidate.md`.

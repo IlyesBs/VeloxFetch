@@ -1,11 +1,11 @@
-# VeloxFetch 0.1.0 (Phase 13: testing, download folders) - manual test on another PC
+# VeloxFetch 1.0.0 - manual test on another PC
 
 Windows 10/11 x64. Not code-signed, so SmartScreen will warn ("More info" > "Run anyway").
 Verify the files with `SHA256SUMS.txt` (`certutil -hashfile <file> SHA256`).
 
 | File | What |
 |---|---|
-| `VeloxFetch_0.1.0_x64-setup.exe` | Installer (per user, no admin). Installs the app **and** its browser helper `velox-native-host.exe`. |
+| `VeloxFetch_1.0.0_x64-setup.exe` | Installer (for all users of the PC: Windows asks for administrator rights). Installs the app **and** its browser helper `velox-native-host.exe`. |
 | `VeloxFetch-portable.zip` | The same without installing (programs + `extension` folder). Extract the whole folder, run `velox-desktop.exe`. Keep everything together. |
 | `VeloxFetch-extension-chromium.zip` | Only needed if you do not use the Install button: extension for Chrome, Edge, Brave (extract it first). |
 | `VeloxFetch-extension-firefox.zip` | Extension for Firefox (temporary add-on). |
@@ -29,7 +29,7 @@ Data: `%APPDATA%\app.velox.fetch\`. Downloads: `Downloads\VeloxFetch\`.
    folder shown. The extension's ID must read `gbcanjaaelioalfdggkhbbnbinmfgdbc` - a different ID is refused on purpose.
    **Firefox:** *Load Temporary Add-on*, pick `manifest.json` in the folder (Firefox forgets it when it closes).
    Later, *Show steps* on a connected line shows these steps again; *Disconnect* removes the connection.
-4. Click the extension's toolbar icon: it should say **Connected to VeloxFetch 0.1.0**.
+4. Click the extension's toolbar icon: it should say **Connected to VeloxFetch 1.0.0**.
    If it says the browser is not connected, press Disconnect then Install extension again in VeloxFetch.
 5. Right-click a download link (a `.zip`, `.iso`, `.pdf`, ...) > **Download with VeloxFetch**. A notification says it was added, and it
    appears in VeloxFetch and completes. Also try right-clicking an image and a video.
@@ -469,3 +469,10 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
    that caps each connection; the card shows "Completed" within a moment of reaching 100 % (no long "Verifying").
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
+
+## AI. Languages (once per OS)
+1. Settings > Appearance > Language: Français, then العربية. Every page, Settings section and dialog reads in that
+   language (Arabic from right to left).
+2. A failed download (a broken link): its card, its details (error, Doctor, timeline) and the Queue page say it in
+   that language; the technical detail (HTTP status, error code) may stay as it is.
+3. A refused action (for example a proxy address without a port): the message is in that language.

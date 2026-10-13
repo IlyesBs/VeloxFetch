@@ -72,6 +72,40 @@ pub(super) fn client(cfg: &http_client::ClientConfig) -> Result<HttpClient, Mana
     HttpClient::new(cfg).map_err(|e| ManagerError::Internal(format!("cannot create the stream client: {e}")))
 }
 
+/// A short stable name for a video job's failure, for the UI's texts (the message itself stays as the detail).
+pub(crate) fn media_error_code(e: &media_engine::MediaError) -> String {
+    use media_engine::MediaError as E;
+    let lower = e.to_string().to_ascii_lowercase();
+    let page = |fallback: &str| -> String {
+        if lower.contains("drm") || lower.contains("protected") || lower.contains("encrypted") {
+            "media_drm"
+        } else if lower.contains("live") {
+            "media_live"
+        } else if lower.contains("playlist or a channel") {
+            "media_playlist"
+        } else if lower.contains("sign in") {
+            "media_sign_in"
+        } else if lower.contains("no downloadable video") || lower.contains("no video was found") {
+            "media_no_video"
+        } else {
+            fallback
+        }
+        .to_string()
+    };
+    match e {
+        E::Unsupported(_) => page("media_unsupported"),
+        E::Site(_) => page("media_site"),
+        E::Invalid(_) => "media_invalid".into(),
+        E::Limit(_) => "media_limit".into(),
+        E::Remux(_) => "media_remux".into(),
+        E::Cancelled => "cancelled".into(),
+        E::Http(_) | E::Io(_) => match crate::explain::error_code(&e.to_string()) {
+            c if c == "other" => if matches!(e, E::Io(_)) { "media_file" } else { "media_network" }.to_string(),
+            c => c,
+        },
+    }
+}
+
 /// `.m3u8` / `.mpd` links are streams, not files.
 pub fn is_stream_link(url: &url::Url) -> bool {
     url.path_segments()
@@ -329,6 +363,7 @@ impl DownloadManager {
                 files: Vec::new(),
                 notes: Vec::new(),
                 error: None,
+                error_code: None,
                 site,
                 speed_bps: 0,
                 eta_secs: None,
@@ -509,6 +544,7 @@ impl DownloadManager {
                     }
                     d.notes = o.notes.clone();
                     d.error = None;
+                    d.error_code = None;
                     d.resumable = false;
                     d.playable = o.files.first().is_some_and(|f| super::preview::media_type(&f.to_string_lossy()).is_some());
                     d.file_size = Some(o.files.iter().filter_map(|f| std::fs::metadata(f).ok()).map(|m| m.len()).sum());
@@ -529,6 +565,7 @@ impl DownloadManager {
                     d.status = MediaStatus::Failed;
                     d.notes.clear();
                     d.error = Some(e.to_string());
+                    d.error_code = Some(media_error_code(e));
                     // Only what can work again offers Retry (DRM, live streams, a refused link would not).
                     d.resumable = worth_retrying(e);
                 }
@@ -840,6 +877,7 @@ impl DownloadManager {
             j.pausing = false;
             j.dto.status = MediaStatus::Preparing;
             j.dto.error = None;
+            j.dto.error_code = None;
             j.dto.notes.clear();
             j.dto.resumable = false;
             track_time(&mut j.dto, now_ms());
@@ -1063,6 +1101,32 @@ mod restart_tests {
     use super::limit_needs_restart;
 
     #[test]
+    fn video_failures_get_a_stable_code_for_the_ui() {
+        use media_engine::MediaError as E;
+        assert_eq!(
+            super::media_error_code(&E::Unsupported("this stream is protected (DRM). Protected streams are not supported".into())),
+            "media_drm"
+        );
+        assert_eq!(
+            super::media_error_code(&E::Unsupported("this is a live stream (it has no end), which is not supported".into())),
+            "media_live"
+        );
+        assert_eq!(
+            super::media_error_code(&E::Site("this link is a playlist or a channel; open one video and try again".into())),
+            "media_playlist"
+        );
+        assert_eq!(
+            super::media_error_code(&E::Site("the site wants you to sign in to see this video: members only".into())),
+            "media_sign_in"
+        );
+        assert_eq!(super::media_error_code(&E::Site("no downloadable video was found on this page".into())), "media_no_video");
+        assert_eq!(super::media_error_code(&E::Site("something else entirely".into())), "media_site");
+        assert_eq!(super::media_error_code(&E::Remux("x".into())), "media_remux");
+        assert_eq!(super::media_error_code(&E::Io(std::io::Error::other("No space left on device (os error 28)"))), "disk_full");
+        assert_eq!(super::media_error_code(&E::Io(std::io::Error::other("strange"))), "media_file");
+    }
+
+    #[test]
     fn only_a_real_change_of_limit_restarts_a_video_job() {
         let mb = 1024 * 1024;
         assert!(!limit_needs_restart(None, None));
@@ -1093,6 +1157,7 @@ mod clock_tests {
             files: Vec::new(),
             notes: Vec::new(),
             error: None,
+            error_code: None,
             site: true,
             speed_bps: 0,
             eta_secs: None,
