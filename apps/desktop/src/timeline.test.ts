@@ -27,6 +27,7 @@ const LINES = [
   "Continuing from 1.5 MB",
   "Cannot continue the saved part (remote resource changed or cannot be validated (ETag / Last-Modified)): starting over",
   "Cannot continue the saved part (.part file missing): starting over",
+  "Cannot continue the saved part (the saved bytes differ from the file on the server): starting over",
   "Cannot continue the saved part (size changed: Some(1) -> Some(2)): starting over",
   "New transfer in 16 parts over several connections",
   "New transfer over one connection",

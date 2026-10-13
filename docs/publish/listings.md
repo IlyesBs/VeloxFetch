@@ -12,13 +12,14 @@ Copy what each site asks for. Every claim here is true of version {{VERSION}} an
 | Developer / publisher | Ilyes Ben Salah |
 | Price / licence | Free (freeware). No ads, no account, no in-app purchases |
 | Category | Internet > Download managers (also: Utilities, Productivity) |
-| Systems | Windows 10/11 (64-bit), macOS 12+ (Apple silicon and Intel), Linux (Ubuntu 22.04+, Debian 12+, Fedora 37+, any distribution through the AppImage) |
+| Systems | Windows 10/11 (64-bit), macOS 12+ (Apple silicon and Intel), Linux (Ubuntu 22.04+, Debian 12+, Fedora 37+, any distribution through the AppImage) | <!-- mac -->
+| Systems | Windows 10/11 (64-bit), Linux (Ubuntu 22.04+, Debian 12+, Fedora 37+, any distribution through the AppImage) | <!-- no-mac -->
 | Languages | English, French, Arabic |
 | Download page | https://github.com/IlyesBs/VeloxFetch-releases/releases/latest |
 | Home page | https://github.com/IlyesBs/VeloxFetch-releases |
 | Support | https://github.com/IlyesBs/VeloxFetch-releases/issues |
 | Privacy | No tracking, no telemetry; connects only to the sites you download from and to the release page for updates |
-| Keywords / tags | download manager, download accelerator, resume downloads, multi-connection downloader, video downloader, HLS downloader, download scheduler, bandwidth limiter, browser integration, IDM alternative, free download manager, Windows, macOS, Linux |
+| Keywords / tags | download manager, download accelerator, resume downloads, multi-connection downloader, video downloader, HLS downloader, download scheduler, bandwidth limiter, browser integration, IDM alternative, free download manager, {{PLATFORMS_LIST}} |
 
 ## 2. Taglines
 
@@ -29,7 +30,7 @@ Copy what each site asks for. Every claim here is true of version {{VERSION}} an
 
 ## 3. Short description (about 250 characters)
 
-VeloxFetch is a free download manager for Windows, macOS and Linux. It downloads each file over up to 64
+VeloxFetch is a free download manager for {{PLATFORMS}}. It downloads each file over up to 64
 connections, resumes after a crash, a power cut or an expired link, explains every failure in plain words, and slows
 down while you play or call.
 
@@ -119,7 +120,7 @@ First public release. Everything above, plus: one version everywhere; every mess
 
 **English (Reddit, X, Facebook, forums)**
 
-> I made VeloxFetch, a free download manager for Windows, macOS and Linux. It downloads over up to 64 connections,
+> I made VeloxFetch, a free download manager for {{PLATFORMS}}. It downloads over up to 64 connections,
 > resumes after crashes, power cuts and expired links, and when a download fails it tells you why in plain words and
 > how to fix it. It also slows itself down while you game or call, so your ping stays low. No ads, no account, no
 > tracking. English, French and Arabic. Feedback welcome!
@@ -127,7 +128,7 @@ First public release. Everything above, plus: one version everywhere; every mess
 
 **Français**
 
-> J'ai créé VeloxFetch, un gestionnaire de téléchargements gratuit pour Windows, macOS et Linux. Jusqu'à 64
+> J'ai créé VeloxFetch, un gestionnaire de téléchargements gratuit pour {{PLATFORMS_FR}}. Jusqu'à 64
 > connexions par fichier, reprise après un plantage, une coupure de courant ou un lien expiré, et quand un
 > téléchargement échoue, il explique pourquoi en mots simples et comment le réparer. Il ralentit tout seul pendant
 > vos jeux et vos appels. Sans publicité, sans compte, sans pistage. Vos retours sont les bienvenus !
@@ -135,7 +136,7 @@ First public release. Everything above, plus: one version everywhere; every mess
 
 **العربية**
 
-> طوّرت VeloxFetch، مدير تنزيلات مجاني لويندوز وماك ولينكس. يحمّل الملف عبر ما يصل إلى 64 اتصالًا، ويستأنف بعد تعطل
+> طوّرت VeloxFetch، مدير تنزيلات مجاني لـ{{PLATFORMS_AR}}. يحمّل الملف عبر ما يصل إلى 64 اتصالًا، ويستأنف بعد تعطل
 > الجهاز أو انقطاع الكهرباء أو انتهاء صلاحية الرابط، وعندما يفشل تنزيل يشرح لك السبب بكلمات بسيطة وكيف تصلحه. يخفّف
 > السرعة تلقائيًا أثناء اللعب والمكالمات. بدون إعلانات، بدون حساب، بدون تتبع. الواجهة بالعربية والفرنسية والإنجليزية.
 > https://github.com/IlyesBs/VeloxFetch-releases

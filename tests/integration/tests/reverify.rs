@@ -237,17 +237,119 @@ async fn another_total_size_in_a_ranged_answer_stops_the_download() {
     assert!(failed.downloaded > 0, "the saved part is kept until a safe decision");
 }
 
+/// Resumes `id` with the server's data unchanged and checks it continued: the saved bytes were compared, not
+/// downloaded again.
+async fn continues_without_starting_over(e: &Env, srv: &Server, id: i64, name: &str, data: &[u8]) {
+    let saved = SqliteStore::open(&e.db).unwrap().load(id).unwrap().unwrap().downloaded;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::ZERO;
+    let before = srv.state.bytes_served.load(Ordering::SeqCst);
+    let m = manager(e).await;
+    if m.get_download(id).await.unwrap().status == DownloadStatus::Failed {
+        m.retry_download(id).await.unwrap();
+    } else {
+        m.resume_download(id).await.unwrap();
+    }
+    wait_status(&m, id, DownloadStatus::Completed).await;
+    assert!(std::fs::read(e.root.join(name)).unwrap() == data);
+    let served = srv.state.bytes_served.load(Ordering::SeqCst) - before;
+    let remaining = data.len() as u64 - saved;
+    // Up to 256 KiB of samples, 1 KiB per joining request, and answers cut at the pause: far below starting over (6 MiB).
+    assert!(served <= remaining + MB as u64, "downloaded again: {served} > {remaining} still missing");
+    let diag = diagnostics(&m, id).await;
+    assert!(!diag.contains("starting over"), "{diag}");
+    assert!(diag.contains("Continuing from"), "{diag}");
+}
+
 #[tokio::test]
-async fn without_any_validator_a_resume_starts_over_instead_of_trusting() {
+async fn without_any_validator_a_resume_continues_once_the_saved_bytes_match() {
     let data = random_data(6 * MB, 98);
     let srv = serve(data.clone()).await;
     let e = env("novalidator");
     let id = paused_part_way(&e, &srv, "/noetag/nv.bin").await;
+    continues_without_starting_over(&e, &srv, id, "nv.bin", &data).await;
+}
+
+#[tokio::test]
+async fn a_weak_etag_resume_continues_once_the_saved_bytes_match() {
+    // nginx with compression, Apache, many CDNs: only a weak ETag (and a date). Such downloads used to start over.
+    let data = random_data(6 * MB, 120);
+    let srv = serve(data.clone()).await;
+    *srv.state.etag.lock().unwrap() = "W/\"v1\"".into();
+    let e = env("weak");
+    let id = paused_part_way(&e, &srv, "/dated/weak.bin").await;
+    continues_without_starting_over(&e, &srv, id, "weak.bin", &data).await;
+}
+
+#[tokio::test]
+async fn a_weak_etag_alone_resume_continues_once_the_saved_bytes_match() {
+    let data = random_data(6 * MB, 121);
+    let srv = serve(data.clone()).await;
+    *srv.state.etag.lock().unwrap() = "W/\"v1\"".into();
+    let e = env("weakonly");
+    let id = paused_part_way(&e, &srv, "/weakonly.bin").await;
+    continues_without_starting_over(&e, &srv, id, "weakonly.bin", &data).await;
+}
+
+/// The file changed while paused, but the server says nothing that shows it (`path` decides what it says): the
+/// saved bytes are compared, differ, and the download starts over with entirely the new version.
+async fn changed_while_paused_starts_over(path: &str, name: &str, weak: bool, seed: u64) {
+    let (old, new) = (random_data(6 * MB, seed), random_data(6 * MB, seed + 1000));
+    let srv = serve(old.clone()).await;
+    if weak {
+        *srv.state.etag.lock().unwrap() = "W/\"v1\"".into();
+    }
+    let e = env(name);
+    let id = paused_part_way(&e, &srv, path).await;
+    srv.set_data(new.clone());
+    *srv.state.chunk_delay.lock().unwrap() = Duration::ZERO;
     let m = manager(&e).await;
     m.resume_download(id).await.unwrap();
+    let file = e.root.join(path.rsplit('/').next().unwrap());
     wait_status(&m, id, DownloadStatus::Completed).await;
-    assert!(std::fs::read(e.root.join("nv.bin")).unwrap() == *data);
-    assert!(diagnostics(&m, id).await.contains("cannot be validated"), "identity uncertain: not continued");
+    assert!(std::fs::read(&file).unwrap() == *new, "entirely the new version, never mixed");
+    let diag = diagnostics(&m, id).await;
+    assert!(diag.contains("saved bytes differ"), "{diag}");
+}
+
+#[tokio::test]
+async fn a_file_changed_while_paused_without_any_validator_starts_over() {
+    changed_while_paused_starts_over("/noetag/nvchange.bin", "nvchange", false, 122).await;
+}
+
+#[tokio::test]
+async fn a_file_changed_while_paused_with_the_same_weak_etag_and_date_starts_over() {
+    changed_while_paused_starts_over("/dated/weakchange.bin", "weakchange", true, 123).await;
+}
+
+#[tokio::test]
+async fn a_file_changed_while_paused_with_the_same_date_starts_over_and_is_never_mixed() {
+    // Only a date, which the server keeps: the saved bytes tell.
+    changed_while_paused_starts_over("/noetag/dated/paused.bin", "pausedchange", false, 103).await;
+}
+
+#[tokio::test]
+async fn a_server_that_cannot_be_asked_keeps_every_saved_byte() {
+    // The comparison fails (the server refuses for a while): never start over for that; the download stops like any
+    // failure and continues later.
+    let data = random_data(6 * MB, 124);
+    let srv = serve(data.clone()).await;
+    *srv.state.etag.lock().unwrap() = "W/\"v1\"".into();
+    let e = env("unaskable");
+    let id = paused_part_way(&e, &srv, "/dated/unaskable.bin").await;
+    let saved = SqliteStore::open(&e.db).unwrap().load(id).unwrap().unwrap().downloaded;
+    *srv.state.chunk_delay.lock().unwrap() = Duration::ZERO;
+    srv.state.fail_next.store(1000, Ordering::SeqCst);
+    let m = manager(&e).await;
+    m.resume_download(id).await.unwrap();
+    let failed = wait_status(&m, id, DownloadStatus::Failed).await;
+    assert!(failed.downloaded >= saved, "saved bytes kept: {} < {saved}", failed.downloaded);
+    let rec = SqliteStore::open(&e.db).unwrap().load(id).unwrap().unwrap();
+    assert!(part_path(&rec.destination).exists(), "the saved part is kept");
+    assert!(!diagnostics(&m, id).await.contains("starting over"));
+    m.shutdown().await;
+    drop(m);
+    srv.state.fail_next.store(0, Ordering::SeqCst);
+    continues_without_starting_over(&e, &srv, id, "unaskable.bin", &data).await;
 }
 
 #[tokio::test]
@@ -299,24 +401,6 @@ async fn a_change_without_any_version_tag_is_caught_at_the_next_join() {
 #[tokio::test]
 async fn a_change_with_an_unchanged_date_is_caught_at_the_next_join() {
     changed_without_a_version("/noetag/dated/dated.bin", "samedate", 102).await;
-}
-
-#[tokio::test]
-async fn a_file_changed_while_paused_with_the_same_date_is_caught_and_never_mixed() {
-    // Only a date proves the version, and the server keeps it: the resume check passes, the joins do not.
-    let (old, new) = (random_data(6 * MB, 103), random_data(6 * MB, 104));
-    let srv = serve(old.clone()).await;
-    let e = env("pausedchange");
-    let id = paused_part_way(&e, &srv, "/noetag/dated/paused.bin").await;
-    srv.set_data(new.clone());
-    let m = manager(&e).await;
-    m.resume_download(id).await.unwrap();
-    let failed = wait_status(&m, id, DownloadStatus::Failed).await;
-    assert_eq!(failed.error_code.as_deref(), Some("source_changed"), "{:?}", failed.error);
-    assert!(!e.root.join("paused.bin").exists(), "never finished from mixed bytes");
-    m.retry_download(id).await.unwrap();
-    wait_status(&m, id, DownloadStatus::Completed).await;
-    assert!(std::fs::read(e.root.join("paused.bin")).unwrap() == *new, "entirely the new version");
 }
 
 /// Segment hashes are built checkpoint by checkpoint while the bytes arrive (and kept for the last checkpoint, which

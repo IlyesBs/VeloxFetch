@@ -481,6 +481,12 @@ See `docs/resume-integrity.md` §8. Tests:
 * stress: 30 parallel copies of `reverify` (16 threads each) and 25 runs in a row, all green after the fixes below.
   Under load they first showed two real problems, both fixed: milestones evicted by retry lines, and diagnostics
   read in the moment between a run's end and the saving of its timeline;
+* **Resume with a weak or no `ETag` (October 2026, `fix_resume_weak_etag`):** `downloader-core/src/resume.rs` (5:
+  validators — strong proves, weak or a date hints, any contradiction is a change; sample windows inside saved bytes,
+  never overlapping); `reverify.rs` +7 (17 in all): no validator / weak `ETag` with a date / weak `ETag` alone
+  continue and download only what is missing; changed while paused (no validator, same weak `ETag` and date, only a
+  date) start over with entirely the new version; a server refusing the comparison keeps every byte and the retry
+  continues. 7 of them fail on the old engine. `timeline.test.ts`: the new reason in French and Arabic;
 * `relink.rs` and `reverify.rs` delete their folders when they finish. Leftover test folders in a RAM-backed `/tmp`
   (11 GB after many runs of the older suites) slowed the whole machine.
 
@@ -707,7 +713,8 @@ when a build has no update key. All 20 desktop suites pass on Linux.
 
 | Test | Checks |
 |---|---|
-| `tests/release/publish-kit.test.mjs` (6, in the full security gate) | shipped names and versions; staging every system with one checksum list, filled notes and README, pictures copied; refusals (damaged, missing, unknown, old version, conflicting, extensions only, a folder that is not a kit, never emptied); preflight (no key, untrusted key, missing or wrong key file, key inside the project, versions that disagree); the built app (no key, debug build); **the whole `publish-release.sh`** in a throwaway copy of the project with a throwaway key typed at a pseudo-terminal (`tests/release/pty-run.py`): refused without a key and with uncommitted changes, then Linux + a merged Windows folder staged, signed, verified with the app's key, every file in `SHA256SUMS.txt`, no passphrase or key anywhere |
+| `tests/release/publish-kit.test.mjs` (7, in the full security gate) | + a system not built yet is never promised (macOS lines and names only with macOS packages; the page command) |
+| `tests/release/publish-kit.test.mjs` (first 6) | shipped names and versions; staging every system with one checksum list, filled notes and README, pictures copied; refusals (damaged, missing, unknown, old version, conflicting, extensions only, a folder that is not a kit, never emptied); preflight (no key, untrusted key, missing or wrong key file, key inside the project, versions that disagree); the built app (no key, debug build); **the whole `publish-release.sh`** in a throwaway copy of the project with a throwaway key typed at a pseudo-terminal (`tests/release/pty-run.py`): refused without a key and with uncommitted changes, then Linux + a merged Windows folder staged, signed, verified with the app's key, every file in `SHA256SUMS.txt`, no passphrase or key anywhere |
 | `tests/security/policy.test.mjs` (+1, and the update test) | the app, `update-key.mjs` and `publish-release.sh` name the same public repository; the script needs a terminal, never passes a passphrase, only drafts, never pushes or tags, always the full gate; the kit reads no environment variable; `*.sh` keep LF |
 | `tests/e2e/publish-screenshots.mjs` | the 11 public pictures from the real app (1280×800), the version shown is the one that ships, no picture shows `127.0.0.1`. Taking them found three bugs, fixed on their own branches: grey closed drop-downs on Linux, the queue's raw percentages and the empty name of a waiting duplicate, a stray sideways scrollbar in Arabic |
 
