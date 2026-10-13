@@ -721,3 +721,12 @@ Full rules: `docs/new-link-recovery.md` §6.
 * **The UI's part:** six main-window commands, none taking an address, a path or a version; error texts come from
   fixed codes, never from the network.
 * Threat 14 in `docs/threat-model.md`; design, rotation and recovery in `docs/auto-update.md`.
+
+## Performance work (Phase 20, October 2026)
+
+* Segment hashes (resume integrity) are now built checkpoint by checkpoint and kept for the run instead of read again
+  at the end. Same rule as before: a hash is only made from bytes synced by that checkpoint, and is saved only for a
+  complete segment. A restart, progress going back, a new plan or a changed range drops the running hashes, so a
+  rewritten byte is always read. Tests: `verify` unit tests, `reverify.rs` (saved hashes equal the server's bytes).
+* `tests/bench` is a test tool: it is not part of any package, and its server listens on 127.0.0.1 only for the
+  length of a run.

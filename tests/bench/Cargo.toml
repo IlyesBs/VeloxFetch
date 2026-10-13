@@ -1,0 +1,20 @@
+[package]
+name = "velox-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Phase 20 performance benchmark of the download engine (not shipped)"
+
+[[bin]]
+name = "velox-bench"
+path = "src/main.rs"
+
+[dependencies]
+downloader-core = { path = "../../crates/downloader-core" }
+persistence = { path = "../../crates/persistence" }
+tokio.workspace = true
+sha2 = "0.11"
+serde_json = "1"
+# The benchmark's own process only: CPU time and memory.
+sysinfo = { version = "0.39", default-features = false, features = ["system", "disk"] }

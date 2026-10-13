@@ -637,3 +637,12 @@ lib.rs install_update   -> system_integration::update::install(kind, path, size,
 * UI: `components/UpdateSettings.tsx` (Settings > Updates), the status bar item, `State.update` fed by the `update`
   event. Text in `locales/*.json` (`upd.*`, `foot.update*`).
 * Release side: `scripts/update-key.mjs` (`generate`, `manifest`, `sign`, `verify`). Details: `docs/auto-update.md`.
+
+## Performance measurement (Phase 20)
+
+* `tests/bench` (`velox-bench`, a workspace member, never shipped): `run` starts `serve` (a range-capable HTTP/1.1
+  server with a computed pattern, optional per-connection cap) as a child process, then each case as a `case` child
+  process (the real `Downloader` + `SqliteStore` wrapped in a timed `DownloadStore`); `db` times `SqliteStore::save`.
+* `downloader-core/src/verify.rs` `RunningHashes` / `hash_progressive`: segment hashes continued at each checkpoint and
+  kept for the run, held by the `ProgressHandle` (`resets` counter, emptied by `init` and `reset_segment`).
+* `tests/e2e/desktop-perf.mjs`: start-up, frame rate, IPC latency. Numbers: `docs/benchmarks.md`.

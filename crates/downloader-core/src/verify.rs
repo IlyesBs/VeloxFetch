@@ -90,6 +90,104 @@ pub fn hash_new(part: &Path, segs: &mut [Segment]) -> std::io::Result<usize> {
     Ok(n)
 }
 
+/// Hashes of segments still being downloaded, carried from one checkpoint to the next (in memory, for one run).
+///
+/// Each checkpoint (after the `.part` file was synced) reads only the bytes a segment received since the previous
+/// one and adds them to that segment's running hash; a segment that completes then only reads its last bytes. The
+/// result is exactly [`hash_range`] of the whole segment, but the reading is spread over the download instead of
+/// done for the last segments, all at once, after the last byte (on a 50 GB file: gigabytes read again at the end).
+/// A segment whose range changed, whose progress went back, or any restart (`resets` moved) starts from its first
+/// byte again: the running hash is only ever a shortcut, never trusted over the bytes.
+///
+/// The hashes of finished segments are kept too: the periodic checkpoints save into their own copy of the record, so
+/// the final checkpoint used to hash every segment again (the whole file read once more after the last byte). Within a
+/// run a finished segment only becomes unfinished through a restart, which empties these.
+#[derive(Default)]
+pub struct RunningHashes {
+    /// `(id, start, end)` -> (bytes hashed from `start`, the hash so far).
+    open: std::collections::HashMap<(usize, u64, u64), (u64, Sha256)>,
+    /// `(id, start, end)` -> `sha256:<hex>` of a finished segment, made this run.
+    done: std::collections::HashMap<(usize, u64, u64), String>,
+    /// `ProgressHandle` restarts seen when these were last extended.
+    resets: u64,
+}
+
+impl RunningHashes {
+    /// Forget everything when progress was reset since the last call (a restart can rewrite bytes already hashed).
+    pub fn note_resets(&mut self, resets: u64) {
+        if resets != self.resets {
+            self.open.clear();
+            self.done.clear();
+            self.resets = resets;
+        }
+    }
+
+    /// Running hashes of unfinished segments.
+    #[cfg(test)]
+    pub fn open_count(&self) -> usize {
+        self.open.len()
+    }
+}
+
+/// Read `[from, from + len)` of `file` into `h`.
+fn extend(file: &mut std::fs::File, h: &mut Sha256, from: u64, len: u64) -> std::io::Result<()> {
+    file.seek(SeekFrom::Start(from))?;
+    let mut buf = vec![0u8; BUF.min(len.max(1) as usize)];
+    let mut left = len;
+    while left > 0 {
+        let n = (left as usize).min(buf.len());
+        file.read_exact(&mut buf[..n])?;
+        h.update(&buf[..n]);
+        left -= n as u64;
+    }
+    Ok(())
+}
+
+/// [`hash_new`], continuing the running hashes: completed segments without a hash get one (reading only what their
+/// running hash has not seen), and the running hashes of unfinished segments are brought up to their synced
+/// progress. Blocking. A segment that cannot be read keeps no hash (re-checked later as "unhashed").
+pub fn hash_progressive(part: &Path, segs: &mut [Segment], running: &mut RunningHashes) -> std::io::Result<usize> {
+    let wanted = |s: &Segment| (s.is_complete() && s.hash.is_none()) || (!s.is_complete() && s.downloaded > 0);
+    // Only segments of this plan are kept.
+    running.open.retain(|k, _| segs.iter().any(|s| (s.id, s.start, s.end) == *k && !(s.is_complete() && s.hash.is_some())));
+    running.done.retain(|k, _| segs.iter().any(|s| (s.id, s.start, s.end) == *k && s.is_complete()));
+    // Finished this run and hashed then: no need to read them again.
+    let mut n = 0;
+    for s in segs.iter_mut().filter(|s| s.is_complete() && s.hash.is_none()) {
+        if let Some(h) = running.done.get(&(s.id, s.start, s.end)) {
+            s.hash = Some(h.clone());
+            n += 1;
+        }
+    }
+    if !segs.iter().any(wanted) {
+        return Ok(n);
+    }
+    let mut f = std::fs::File::open(part)?;
+    for s in segs.iter_mut().filter(|s| wanted(s)) {
+        let key = (s.id, s.start, s.end);
+        let upto = if s.is_complete() { s.len() } else { s.downloaded.min(s.len()) };
+        let (mut done, mut h) = running.open.remove(&key).unwrap_or_default();
+        if done > upto {
+            (done, h) = (0, Sha256::new()); // progress went back: from the first byte again
+        }
+        if let Err(e) = extend(&mut f, &mut h, s.start + done, upto - done) {
+            if s.is_complete() {
+                return Err(e);
+            }
+            continue; // an unfinished segment is simply hashed from its start next time
+        }
+        if s.is_complete() {
+            let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+            s.hash = Some(format!("sha256:{hex}"));
+            running.done.insert(key, format!("sha256:{hex}"));
+            n += 1;
+        } else {
+            running.open.insert(key, (upto, h));
+        }
+    }
+    Ok(n)
+}
+
 /// Read and hash every hashed completed segment again; empty the ones that changed. Blocking.
 pub fn reverify(part: &Path, segs: &mut [Segment]) -> std::io::Result<Reverified> {
     let mut r = Reverified::default();
@@ -166,6 +264,105 @@ mod tests {
         assert_eq!((s[1].downloaded, s[1].status, s[1].hash.is_none()), (0, SegmentStatus::Pending, true));
         assert!(s[0].is_complete() && s[2].is_complete() && s[0].hash.is_some(), "the others are kept");
         assert_eq!(s[3].downloaded, 400, "an incomplete segment is untouched");
+    }
+
+    /// Segment `i` of `segs(n, each)` with `got` bytes received (complete when `got == each`).
+    fn at(mut s: Segment, got: u64) -> Segment {
+        s.downloaded = got;
+        s.status = if got == s.len() { SegmentStatus::Completed } else { SegmentStatus::Downloading };
+        s.hash = None;
+        s
+    }
+
+    #[test]
+    fn hashes_continued_checkpoint_by_checkpoint_equal_a_full_read() {
+        let data: Vec<u8> = (0..3000u32).map(|i| (i * 13 + 5) as u8).collect();
+        let p = tmp("progressive", &data);
+        let whole = segs(3, 1000);
+        let full = |i: usize| hash_range(&mut std::fs::File::open(&p).unwrap(), whole[i].start, 1000).unwrap();
+        let mut running = RunningHashes::default();
+        // Three checkpoints: segment 0 grows 300 -> 700 -> done, segment 1 goes 0 -> 999 -> done, segment 2 is done at once.
+        for (step, got) in [[300u64, 0, 1000], [700, 999, 1000], [1000, 1000, 1000]].into_iter().enumerate() {
+            let mut s: Vec<Segment> = whole.iter().zip(got).map(|(w, g)| at(w.clone(), g)).collect();
+            // A hash already saved is carried by the caller (`carry_hashes`): only new ones are made here.
+            if step > 0 {
+                s[2].hash = Some(full(2));
+            }
+            hash_progressive(&p, &mut s, &mut running).unwrap();
+            for (i, seg) in s.iter().enumerate() {
+                if seg.is_complete() {
+                    assert_eq!(seg.hash.as_deref(), Some(full(i).as_str()), "step {step} segment {i}");
+                } else {
+                    assert!(seg.hash.is_none());
+                }
+            }
+        }
+        assert_eq!(running.open_count(), 0, "nothing is kept for finished segments");
+    }
+
+    #[test]
+    fn progress_that_went_back_or_a_restart_hashes_from_the_first_byte_again() {
+        let mut data: Vec<u8> = (0..2000u32).map(|i| (i * 3) as u8).collect();
+        let p = tmp("back", &data);
+        let whole = segs(2, 1000);
+        let mut running = RunningHashes::default();
+        hash_progressive(&p, &mut [at(whole[0].clone(), 600), at(whole[1].clone(), 0)], &mut running).unwrap();
+        // The segment was restarted and its first bytes rewritten with other ones: progress back to 200.
+        data[100] ^= 0xff;
+        std::fs::write(&p, &data).unwrap();
+        hash_progressive(&p, &mut [at(whole[0].clone(), 200)], &mut running).unwrap();
+        let mut s = [at(whole[0].clone(), 1000)];
+        hash_progressive(&p, &mut s, &mut running).unwrap();
+        let want = hash_range(&mut std::fs::File::open(&p).unwrap(), 0, 1000).unwrap();
+        assert_eq!(s[0].hash.as_deref(), Some(want.as_str()), "the rewritten byte is in the hash");
+
+        // A restart counted by the progress (it may have gone back and forward again between two checkpoints).
+        hash_progressive(&p, &mut [at(whole[1].clone(), 800)], &mut running).unwrap();
+        data[1100] ^= 0xff;
+        std::fs::write(&p, &data).unwrap();
+        running.note_resets(1);
+        let mut s = [at(whole[1].clone(), 1000)];
+        hash_progressive(&p, &mut s, &mut running).unwrap();
+        let want = hash_range(&mut std::fs::File::open(&p).unwrap(), 1000, 1000).unwrap();
+        assert_eq!(s[0].hash.as_deref(), Some(want.as_str()));
+    }
+
+    #[test]
+    fn a_later_checkpoint_on_another_copy_of_the_record_reuses_the_hashes_made_this_run() {
+        let data: Vec<u8> = (0..2000u32).map(|i| (i * 17) as u8).collect();
+        let p = tmp("reuse", &data);
+        let mut running = RunningHashes::default();
+        let mut periodic = segs(2, 1000);
+        periodic.iter_mut().for_each(|s| s.hash = None);
+        assert_eq!(hash_progressive(&p, &mut periodic, &mut running).unwrap(), 2);
+        // The bytes change on disk: a read would give another hash, so the same hashes back prove nothing was read.
+        std::fs::write(&p, vec![0u8; 2000]).unwrap();
+        let mut fin = segs(2, 1000);
+        fin.iter_mut().for_each(|s| s.hash = None);
+        assert_eq!(hash_progressive(&p, &mut fin, &mut running).unwrap(), 2);
+        assert_eq!(fin.iter().map(|s| s.hash.clone()).collect::<Vec<_>>(), periodic.iter().map(|s| s.hash.clone()).collect::<Vec<_>>());
+        // After a restart nothing is reused: the bytes are read again.
+        running.note_resets(1);
+        let mut again = segs(2, 1000);
+        again.iter_mut().for_each(|s| s.hash = None);
+        hash_progressive(&p, &mut again, &mut running).unwrap();
+        let zero = hash_range(&mut std::fs::File::open(&p).unwrap(), 0, 1000).unwrap();
+        assert_eq!(again[0].hash.as_deref(), Some(zero.as_str()));
+    }
+
+    #[test]
+    fn a_segment_whose_range_changed_does_not_reuse_a_running_hash() {
+        let data: Vec<u8> = (0..2000u32).map(|i| (i * 11) as u8).collect();
+        let p = tmp("replan", &data);
+        let mut running = RunningHashes::default();
+        hash_progressive(&p, &mut [at(Segment::new(0, 0, 1999), 500)], &mut running).unwrap();
+        assert_eq!(running.open_count(), 1);
+        // Another plan: segment 0 is now [0, 999].
+        let mut s = [at(Segment::new(0, 0, 999), 1000)];
+        hash_progressive(&p, &mut s, &mut running).unwrap();
+        let want = hash_range(&mut std::fs::File::open(&p).unwrap(), 0, 1000).unwrap();
+        assert_eq!(s[0].hash.as_deref(), Some(want.as_str()));
+        assert_eq!(running.open_count(), 0);
     }
 
     #[test]
