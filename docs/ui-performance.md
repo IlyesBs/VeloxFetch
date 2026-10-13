@@ -73,6 +73,15 @@ nothing. Tests: `throttle.test.ts`.
 
 ## Drop-down lists in the theme's colours (October 2026)
 
+**Closed fields too (October 2026, `fix_select_field_theme`).** On Linux the closed field was still a grey system
+button: WebKitGTK paints a `<select>` with the GTK look whatever its background says (its computed colour was right,
+what was drawn was not). Every `<select>` now has the system look turned off (`appearance: none`, unlayered in
+`styles.css` so padding utilities cannot put the text under the arrow) and draws its own arrow with two gradients
+(the security policy allows no `data:` picture). The field shows the `.input` surface like the text fields beside
+it, in light, dark and right-to-left (the arrow moves to the left). Windows and macOS look the same as before, with
+the app's arrow instead of the system one.
+
+
 **Problem.** The list a `<select>` opens was drawn by the system, not the page:
 * Linux (WebKitGTK): a grey GTK menu;
 * macOS: the system menu;

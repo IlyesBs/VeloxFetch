@@ -411,7 +411,8 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
 ## Z. Drop-down lists (once per OS: Windows, Linux, macOS)
 1. In dark and in light theme, open several lists (status bar profile, Settings > Speed, Add download > priority,
    the details page's priority): each opens a list in the same colours as the fields, never a grey or black
-   system list.
+   system list. Closed, each field has the same colour as the text fields beside it (never a grey button) and a
+   small arrow on its end side (the left in Arabic).
 2. Pick with the mouse; then focus a list with Tab, press Enter, move with the arrows, type a letter, Enter: the
    value changes and applies. Escape closes without changing.
 3. Near the bottom of the window the list opens upwards. In Arabic it lines up on the right.

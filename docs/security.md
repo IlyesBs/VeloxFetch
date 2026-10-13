@@ -20,6 +20,7 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
 * `freezePrototype: true`, `withGlobalTauri: false`.
 * The window's backdrop is a picture the page draws itself on a canvas and shows as a `blob:` image (`aurora.ts`,
   `docs/ui-performance.md`): no new source is allowed, nothing is fetched, and the CSP is unchanged.
+* The drop-down fields' arrow is two CSS gradients (`styles.css`), not a `data:` picture: `img-src` stays as it is.
 * The frontend build emits only external files (no inline script/style), which the CSP requires.
 
 ### Tauri capabilities (one per window, `apps/desktop/src-tauri/capabilities`)

@@ -85,7 +85,8 @@ is just one client of it; the CLI and the tests are others. The UI can be replac
 
 ### Drop-down lists
 Every drop-down opens a list drawn by the app in the theme's colours (same as the fields) on Windows, Linux and
-macOS, never the grey system list. Keyboard, right-to-left and screen readers work. Details: `docs/ui-performance.md`.
+macOS, never the grey system list. Closed, a field looks like the other fields (never a grey system button on Linux).
+Keyboard, right-to-left and screen readers work. Details: `docs/ui-performance.md`.
 
 ### Video download details
 Details: `docs/video-details.md`.
@@ -834,6 +835,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `fix_select_field_theme` | Fix | Closed drop-down fields were grey system buttons on Linux (WebKitGTK ignores a `<select>`'s background with the system look on): every `<select>` is now drawn by the app (`appearance: none`, a gradient arrow, the `.input` surface), light, dark and right-to-left. `desktop-ui.mjs` checks it (fails without the fix). Screenshots refreshed. | `docs/ui-performance.md` |
 | 2026-10-13 | `phase21_release_candidate` | Phase 21 | Version 1.0.0 everywhere (policy test keeps them equal). Every text the user reads is in their language: video job errors get a code (`errorCode`, `localMediaError`), the Queue page's error and the toast close button were English, the diagnostics timeline is said by the shape of its lines (`timeline.ts`), and the ~80 messages a command can be refused with by their exact text (`messages.ts`, checked against the Rust sources); `desktop-i18n.mjs` scans French and Arabic. Security gate passed, `cargo machete` clean. Release-candidate gate and the owner's steps documented. | `docs/release-candidate.md` |
 | 2026-10-13 | `phase20_benchmarks` | Phase 20 | `tests/bench` (`velox-bench`): a local server in its own process, each case in a fresh process with the real engine and SQLite store; MB/s, CPU, peak RAM, DB time, time after the last byte; every file SHA-256-checked; `db` measures one progress save. `desktop-perf.mjs` adds IPC latency (p95 1 ms). Found and fixed: the final checkpoint hashed every segment again (the periodic ones hashed into their own copy of the record), reading the whole file after the last byte: now running hashes continue checkpoint by checkpoint and finished ones are kept for the run (`verify::RunningHashes`); 4 GiB at 400 MB/s 2.0 s → 38 ms after the last byte. `ProgressHandle::downloaded()`. | `docs/benchmarks.md` |
 | 2026-10-13 | `phase19_auto_update` | Phase 19 | Updates: Settings > Updates and the status bar. A manifest signed with the owner's offline Ed25519 key (`scripts/update-key.mjs`: passphrase-encrypted, terminal only, never in CI; public key in `update-keys.txt`, compiled in) is verified strictly before it is read (`crates/update-verify`); no downgrade, no replay; the package is kept only after its exact size and SHA-256 match, checked again before install; Windows setup run under a read-only-sharing lock, AppImage replaced atomically and restarted, `.deb` / `.rpm` / `.dmg` opened in the system's installer, portable copies get the release page. Automatic checks (on, can be turned off) never download or install by themselves. Six main-window commands, none taking an address or a path. | `docs/auto-update.md` |

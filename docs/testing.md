@@ -570,7 +570,10 @@ Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece si
 See `docs/ui-performance.md`. Tests:
 * `selectMenu.test.ts` (4);
 * the drop-down checks in `desktop-ui.mjs` (light and dark: the app's own list, its colour equal to the theme's;
-  Escape; mouse pick; keyboard pick).
+  Escape; mouse pick; keyboard pick);
+* closed fields (`fix_select_field_theme`): every `<select>` has no system look, a `select.input` has the surface of
+  the text fields and its two-gradient arrow, light and dark. Without the fix it fails (`appearance: auto`, no
+  arrow), with it it passes.
 
 Results (Linux): vitest 126. e2e: `desktop-ui` passed 3 runs in a row; `throttle`, `smart-queue`, `views`, `media`
 and `intelligence` pass. The screenshot `docs/screenshots/select-menu-dark.png` shows the list open. Two test-only

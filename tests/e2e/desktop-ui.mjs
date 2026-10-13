@@ -233,6 +233,16 @@ try {
   for (const th of ["light", "dark"]) {
     await theme(th);
     await sleep(150);
+    // Closed, every drop-down field is drawn by the app: no system look (grey on Linux), the same surface as the text
+    // fields beside it, and its own arrow.
+    const closed = (await page(`(() => {
+      const sel = [...document.querySelectorAll('select.input')].find((s) => s.offsetParent);
+      const field = [...document.querySelectorAll('input.input')].find((i) => i.offsetParent && i.type !== 'checkbox');
+      const cs = getComputedStyle(sel);
+      return { look: cs.webkitAppearance || cs.appearance, bg: cs.backgroundColor, want: getComputedStyle(field).backgroundColor,
+               arrow: (cs.backgroundImage.match(/gradient/g) ?? []).length, all: [...document.querySelectorAll('select')].every((s) => (getComputedStyle(s).webkitAppearance || getComputedStyle(s).appearance) === 'none') };
+    })()`)).ok;
+    check(`${th}: a closed drop-down field looks like the other fields (no system look, its own arrow)`, closed.look === "none" && closed.all && closed.bg === closed.want && closed.arrow === 2, JSON.stringify(closed));
     await down(sw);
     await waitFor(() => q("[data-testid=select-menu]"), "the themed list to open");
     const look = (await page(`(() => { const m = document.querySelector('[data-testid=select-menu]'); const cs = getComputedStyle(m); const solid = getComputedStyle(document.documentElement).getPropertyValue('--solid').trim(); const probe = document.createElement('div'); probe.style.color = solid; document.body.appendChild(probe); const want = getComputedStyle(probe).color; probe.remove(); return { bg: cs.backgroundColor, want, fg: cs.color, img: cs.backgroundImage, rows: m.querySelectorAll('[role=option]').length }; })()`)).ok;
