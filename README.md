@@ -155,6 +155,10 @@ with every action. See [`docs/video-details.md`](docs/video-details.md).
 entry (same link, folder and name). A finished file deleted by mistake shows as missing, and "Download again"
 becomes its main button. A file that is still there is never overwritten. See [`docs/redownload.md`](docs/redownload.md).
 
+**Never lose a download**: a download that failed because of the network or a server's passing trouble is tried
+again on its own, from its saved bytes; offline it waits for the connection, and after the computer sleeps it is tried
+at once. See [`docs/never-lose-a-download.md`](docs/never-lose-a-download.md).
+
 **Resume integrity**: finished parts of a download are hashed as they are saved and checked again before being
 trusted after a crash or an outside change. Every ranged answer must carry the download's version and total size,
 uncompressed, so two versions of a file are never combined. Servers that give no strong version tag (most of them)

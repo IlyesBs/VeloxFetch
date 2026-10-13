@@ -471,6 +471,16 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AN. Never lose a download (once per OS)
+1. Start a large download, then unplug the network (or turn Wi-Fi off) for 2 minutes: the card fails, then says "No
+   internet connection: it continues on its own when the connection is back". Plug it back in: within a few seconds
+   it continues from where it was, with no click.
+2. Start a large download and put the computer to sleep for 5 minutes. Wake it: within about a minute the download
+   continues on its own (from where it was, never 0 B).
+3. While a failed download says "Trying again on its own in …": right-click > "Stop trying (keep what is
+   downloaded)" > it is paused, the size stays; Resume finishes it.
+4. A broken link (404) fails and shows no "Trying again" line.
+
 ## AM. Resume on everyday servers (once per OS)
 1. Start a large download from a site served by nginx or Apache (many Linux mirrors: a `.iso` of a few GB), pause
    at about 30 %, quit VeloxFetch, open it again and resume: the size goes on from about 30 %, never back to 0 B.

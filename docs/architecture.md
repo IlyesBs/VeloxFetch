@@ -88,6 +88,10 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   version; a weak ETag, a date or nothing only hints, and up to four 64 KiB samples of the saved bytes are compared
   with the server's, `Downloader::compare_saved_bytes`). If it changed, the download restarts instead of splicing old
   and new bytes; if the server cannot be asked, the saved bytes are kept and the run fails like any other.
+* **Never lose a download** (`docs/never-lose-a-download.md`, `manager/recovery.rs`): `finish()` puts a failure the
+  network or the server may get over in `Recovery.waiting`; the queue loop's `recovery_turn(online, seen_offline)`
+  starts it again through `start_inner` when it is due (10 s … 10 min, 20 tries), never while offline, at once after a
+  sleep (a gap of 30 s or more on either clock). User commands clear it. In memory only.
 * **Resume integrity** (`docs/resume-integrity.md`):
   * every completed segment is hashed (SHA-256) by the checkpoint that first saves it complete, after the `fsync`,
     in the same commit, together with the `.part` file's stamp;

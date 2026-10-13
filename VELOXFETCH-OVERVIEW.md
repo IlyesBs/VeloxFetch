@@ -72,6 +72,10 @@ manifest, a README with screenshots). The app updates from there. Details: `docs
   - Resume first checks that the file on the server did not change (size, ETag). Without a strong ETag (most
     servers), a few small pieces of the saved bytes are compared with the server's. If it changed, the download
     restarts; if the server cannot be asked, nothing saved is thrown away.
+- **Never lose a download** (`docs/never-lose-a-download.md`): a download that failed because of the network or a
+  server's passing trouble is tried again on its own from its saved bytes (10 s, 30 s, 1 min … every 10 min, 20
+  tries). Offline, it waits without spending a try and starts when the network is back; after the computer sleeps,
+  at once. The card counts down; "Stop trying" pauses it; anything that needs the user is never tried on its own.
 - **Crash-safe:** the progress is saved every 500 ms, in a safe order. After a crash or a power cut, the
   download continues from the bytes that really reached the disk.
 - **Integrity:** an optional SHA-256 / SHA-512 checksum is checked at the end.
@@ -828,6 +832,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Download again | `docs/redownload.md` |
 | Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
 | Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
+| Never lose a download (tried again on its own, offline, after sleep) | `docs/never-lose-a-download.md` |
 | Slow servers (as fast as a browser) | `docs/slow-servers.md` |
 | Updates (signed, offline key, install per system) | `docs/auto-update.md` |
 | Performance numbers and how to measure them | `docs/benchmarks.md` |
@@ -848,6 +853,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `feat_never_lose_download` | Feature | Never lose a download: a failure the network or the server may get over (no connection, DNS, timeout, dropped connection, 408 / 425 / 429 / 5xx) is tried again on its own from the saved bytes (10 s … every 10 min, 20 tries, `manager/recovery.rs`). Offline: no try spent, nothing sent, starts when the network is back. After sleep (a gap of 30 s or more in the one-second loop, either clock): at once. Card countdown / "No internet connection" line, "Stop trying" (= Pause, now allowed on a waiting failed download), Retrying in the Queue page, Doctor's next-try time, timeline line, 3 languages. A stall is now `timeout`. In memory only. Tests: 4 unit, 7 integration, 4 vitest, 4 e2e checks. | `docs/never-lose-a-download.md` |
 | 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |
 | 2026-10-13 | `docs_public_readme` | Docs | The public README rewritten for users (what VeloxFetch does for them, no technical detail). macOS is never promised before it is built: `<!-- mac -->` lines and `{{PLATFORMS}}` names follow the packages a release has (`render`); `publish-kit.mjs page` makes the public page alone. Pushed to `IlyesBs/VeloxFetch-releases` for Windows and Linux. Test +1. | `docs/publishing.md` |
 | 2026-10-13 | `release_publish_kit` | Release | `scripts/publish-release.sh`: the production release in one command (preflight: one version, a trusted update key outside the project, nothing uncommitted; the full gate; the app carries the key and is a release build; every system's packages staged, each checked against its own checksums; signed and verified update manifest; GPG optional; a draft on GitHub optional). Releases move to the public repository `IlyesBs/VeloxFetch-releases` (feed, release page, manifest addresses; the source stays private). `docs/publish/`: the public README, the release text, texts for download sites in English / French / Arabic, 11 screenshots of 1.0.0 taken by `publish-screenshots.mjs` through a local proxy. Tests: `tests/release/publish-kit.test.mjs` (the whole script with a throwaway key typed at a pseudo-terminal), policy tests. | `docs/publishing.md` |

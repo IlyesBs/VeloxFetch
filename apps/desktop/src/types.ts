@@ -55,6 +55,17 @@ export interface Download {
   doctor: Diagnosis | null;
   /** Completed, but its file is no longer on disk (deleted or moved by hand): offer "Download again". */
   fileMissing?: boolean;
+  /** Failed because of the network or a server's passing trouble: tried again on its own. */
+  autoRetry?: AutoRetry | null;
+}
+
+/** When a failed download is tried again on its own (crates/download-manager/src/manager/recovery.rs). */
+export interface AutoRetry {
+  /** The next try (ms since 1970); null while waiting for the network. */
+  atMs: number | null;
+  waitingForNetwork: boolean;
+  tries: number;
+  maxTries: number;
 }
 
 /** Download Doctor (crates/download-manager/src/doctor.rs): every field comes from observed evidence. */

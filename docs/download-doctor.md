@@ -8,7 +8,8 @@ When a download fails, or while the engine retries on its own, Download Doctor s
 - what the user can do.
 
 Every answer comes from what was observed. When the evidence is not enough, the answer is "unknown". The Doctor
-only diagnoses: the engine's retry loop stays the only automatic recovery.
+only diagnoses. Automatic recovery is the engine's retry loop inside a run and, since October 2026, the manager
+trying a failed download again on its own (`docs/never-lose-a-download.md`); the Doctor then shows the next try.
 
 Branch `feat_download_doctor`, based on `feat_download_intelligence`.
 

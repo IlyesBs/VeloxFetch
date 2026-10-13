@@ -100,6 +100,7 @@ const RULES: Rule[] = [
     /^The saved part changed since it was last saved: (\d+) of (\d+) finished parts no longer match their check and are downloaded again \((.+)\)$/,
     (m) => t("tl.reverifiedBad", { bad: m[1]!, n: m[2]!, size: m[3]! }),
   ],
+  [/^Trying again on its own \(try (\d+) of (\d+)\)$/, (m) => t("tl.autoRetry", { n: m[1]!, total: m[2]! })],
   [/^New link: the download starts from it \(nothing was saved yet\)$/, () => t("tl.linkFresh")],
   [/^New link: the same file \(confirmed by the server and by the saved bytes\)\. Continuing from (\d+) bytes$/, (m) => t("tl.linkSame", { n: m[1]! })],
   [/^New link: likely the same file \(the saved bytes match; chosen by the user\)\. Continuing from (\d+) bytes$/, (m) => t("tl.linkLikely", { n: m[1]! })],

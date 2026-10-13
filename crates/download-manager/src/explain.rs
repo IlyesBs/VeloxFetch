@@ -170,7 +170,7 @@ fn classify(raw: &str) -> (String, Option<Needs>, String) {
     if lower.contains("dns") || lower.contains("resolve") || lower.contains("no such host") {
         return say("The server's address could not be found. Check the link and your internet connection.", None, "dns");
     }
-    if lower.contains("timed out") || lower.contains("timeout") {
+    if lower.contains("timed out") || lower.contains("timeout") || lower.contains("server stopped sending") {
         return say("The server stopped answering. Retry continues the download.", None, "timeout");
     }
     if lower.contains("error sending request") || lower.contains("connection") || lower.contains("connect") {
@@ -211,6 +211,7 @@ mod tests {
         assert_eq!(error_code("I/O error: Access is denied. (os error 5)"), "access_denied");
         assert_eq!(error_code("request failed: error sending request for url (https://x.test/): operation timed out"), "timeout");
         assert_eq!(error_code("request failed: error sending request for url (https://x.test/)"), "connection");
+        assert_eq!(error_code("the server stopped sending"), "timeout");
         assert_eq!(error_code("checksum mismatch: expected a, got b"), "checksum_mismatch");
         assert_eq!(
             error_code("the file changed on the server during the download: Content-Range total Some(5), expected 4"),

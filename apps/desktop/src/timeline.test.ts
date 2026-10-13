@@ -13,6 +13,7 @@ const LINES = [
   "Started again (attempt 3)",
   "Resumed (attempt 2)",
   "Retried (attempt 2)",
+  "Trying again on its own (try 3 of 20)",
   "Finished: 600.0 KB received at 1.2 MB/s",
   "Paused (progress kept)",
   "Cancelled",
