@@ -597,7 +597,8 @@ Full description: `docs/video-details.md`.
 
 `apps/desktop/src/ui/selectMenu.ts`, installed in `main.tsx`: every native `<select>` opens an app-drawn, themed
 list in place of the system one, which no CSS can colour. The value is set through the native setter, followed by
-a real `change` event, so components are unchanged. Details: `docs/ui-performance.md`.
+a real `change` event, so components are unchanged. Closed, a field is drawn by its own classes (`appearance: none`
+and a gradient arrow in `styles.css`), never as a system button. Details: `docs/ui-performance.md`.
 
 ## Linux media packaging
 

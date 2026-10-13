@@ -5,6 +5,9 @@ desktop shell (React + TypeScript + Tailwind).
 
 **Version 1.0.0.** Release gate and steps: [`docs/release-candidate.md`](docs/release-candidate.md).
 
+**Interface:** every field, drop-downs included, is drawn in the theme's colours on Windows, Linux and macOS
+([`docs/ui-performance.md`](docs/ui-performance.md)).
+
 **New here? Read [`VELOXFETCH-OVERVIEW.md`](VELOXFETCH-OVERVIEW.md) first**: the whole app (features, design,
 security, roadmap) on one page. Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/security.md`](docs/security.md).
 
