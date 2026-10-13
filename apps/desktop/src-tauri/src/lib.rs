@@ -557,8 +557,13 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::
     #[cfg(all(debug_assertions, windows))]
     if let Ok(port) = std::env::var("VELOX_E2E_DEBUG_PORT") {
         if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) {
+            // The web view's language (the interface follows it on first start): the test's, else English.
+            let lang = std::env::var("VELOX_E2E_LANG")
+                .ok()
+                .filter(|l| !l.is_empty() && l.len() <= 16 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
             builder = builder.additional_browser_args(&format!(
-                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port} --remote-allow-origins=*"
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port} --remote-allow-origins=* --lang={}",
+                lang.as_deref().unwrap_or("en-US")
             ));
         }
     }

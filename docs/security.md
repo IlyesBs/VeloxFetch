@@ -69,6 +69,10 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
 * Only http(s) redirects are followed (capped). `Accept-Encoding: identity` so byte ranges are
   meaningful. `Range` responses are validated against what was requested (status, `Content-Range`);
   `If-Range` guards against the file changing mid-download.
+* **Languages:** the first-start language comes only from the web view's `navigator.languages`, and only a code
+  matching `^[a-z]{2,3}(-[a-z0-9]{1,8})*$` that names a shipped file is used; Rust accepts only such codes for the
+  tray (`valid_language`). Translations are plain text with `<b>` as the only markup (tested). The Windows web view's
+  `--lang` argument exists only in debug builds started by the e2e harness.
 * **Never lose a download** (`docs/never-lose-a-download.md`): a failed download is tried again on its own only for
   failures the network or the server may get over (never 401 / 403 / 404, disk, folder, integrity, web page), at least
   10 s apart and at most 20 times, with its own address and headers only; nothing is sent while offline; any user

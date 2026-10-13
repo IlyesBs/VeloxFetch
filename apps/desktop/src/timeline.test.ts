@@ -49,13 +49,17 @@ describe("the diagnostics timeline in the user's language", () => {
     for (const l of LINES) expect(localEvent(l)).toBe(l);
   });
 
-  it("says every kind of line in French and Arabic, without English words left", () => {
-    for (const lang of ["fr", "ar"] as const) {
+  it("says every kind of line in every other language, without English words left", () => {
+    // Words both languages share ("Link", "Problem", "Server" in German; "link" in Brazilian Portuguese) are not English left over.
+    const shared: Record<string, string[]> = { de: ["link", "problem", "server"], "pt-br": ["link"] };
+    const words = ["the", "and", "failed", "started", "server", "parts", "trying", "again", "link", "file", "attempt", "retry", "problem"];
+    const english = (lang: string) => new RegExp(`\\b(${words.filter((w) => !shared[lang]?.includes(w)).join("|")})\\b`, "i");
+    for (const lang of ["fr", "ar", "es", "pt-br", "de", "ru", "tr"] as const) {
       setLang(lang);
       for (const l of LINES) {
         const said = localEvent(l);
         expect(said, l).not.toBe(l);
-        expect(said, `${lang}: ${l} -> ${said}`).not.toMatch(/\b(the|and|failed|started|server|parts|trying|again|link|file|attempt|retry|problem)\b/i);
+        expect(said, `${lang}: ${l} -> ${said}`).not.toMatch(english(lang));
         expect(said, l).not.toMatch(/\{\w+\}/);
       }
     }

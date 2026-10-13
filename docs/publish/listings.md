@@ -14,7 +14,7 @@ Copy what each site asks for. Every claim here is true of version {{VERSION}} an
 | Category | Internet > Download managers (also: Utilities, Productivity) |
 | Systems | Windows 10/11 (64-bit), macOS 12+ (Apple silicon and Intel), Linux (Ubuntu 22.04+, Debian 12+, Fedora 37+, any distribution through the AppImage) | <!-- mac -->
 | Systems | Windows 10/11 (64-bit), Linux (Ubuntu 22.04+, Debian 12+, Fedora 37+, any distribution through the AppImage) | <!-- no-mac -->
-| Languages | English, French, Arabic |
+| Languages | English, Spanish, Portuguese (Brazil), German, French, Russian, Turkish, Arabic |
 | Download page | https://github.com/IlyesBs/VeloxFetch-releases/releases/latest |
 | Home page | https://github.com/IlyesBs/VeloxFetch-releases |
 | Support | https://github.com/IlyesBs/VeloxFetch-releases/issues |
@@ -55,7 +55,7 @@ VeloxFetch also downloads videos from video pages and HLS / DASH streams in the 
 or the sound only as MP3, M4A or Opus), and you can watch a video while it downloads. A browser extension for
 Chrome, Edge, Brave and Firefox sends links to the app, including downloads that need you to be signed in.
 
-Interface in English, French and Arabic, dark and light themes, tray icon, notifications, keyboard shortcuts, and
+Interface in English, Spanish, Portuguese, German, French, Russian, Turkish and Arabic, dark and light themes, tray icon, notifications, keyboard shortcuts, and
 signed automatic updates that never install without your click. No account, no ads, no tracking.
 
 ## 5. Feature list (plain bullets)
@@ -76,13 +76,13 @@ signed automatic updates that never install without your click. No account, no a
 * Browser extension for Chrome, Edge, Brave and Firefox
 * Sorting into folders by type; never overwrites a file
 * History with search and Download again
-* English, French, Arabic; dark and light themes
+* English, Spanish, Portuguese, German, French, Russian, Turkish, Arabic; dark and light themes
 * Signed automatic updates; no ads, no account, no tracking
 
 ## 6. What's new in {{VERSION}}
 
 First public release. Everything above, plus: one version everywhere; every message in the user's language
-(English, French, Arabic); drop-down lists drawn in the app's colours on every system; signed automatic updates.
+(English, Spanish, Portuguese, German, French, Russian, Turkish, Arabic); drop-down lists drawn in the app's colours on every system; signed automatic updates.
 
 ## 7. Screenshot captions (in this order)
 
@@ -123,7 +123,7 @@ First public release. Everything above, plus: one version everywhere; every mess
 > I made VeloxFetch, a free download manager for {{PLATFORMS}}. It downloads over up to 64 connections,
 > resumes after crashes, power cuts and expired links, and when a download fails it tells you why in plain words and
 > how to fix it. It also slows itself down while you game or call, so your ping stays low. No ads, no account, no
-> tracking. English, French and Arabic. Feedback welcome!
+> tracking. English, Spanish, Portuguese, German, French, Russian, Turkish and Arabic. Feedback welcome!
 > https://github.com/IlyesBs/VeloxFetch-releases
 
 **Français**

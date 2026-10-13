@@ -507,7 +507,10 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
    link", with the name the card shows (never an empty name).
 
 ## AI. Languages (once per OS)
-1. Settings > Appearance > Language: Français, then العربية. Every page, Settings section and dialog reads in that
+0. On a computer set to Spanish, German, Russian, Turkish or Portuguese, a first start (no saved choice) opens in
+   that language; the tray menu is in it too. Picking English in Settings keeps English from then on.
+1. Settings > Appearance > Language (a drop-down): each language in turn, at least Français, العربية, Deutsch and
+   Русский. Every page, Settings section and dialog reads in that
    language (Arabic from right to left).
 2. A failed download (a broken link): its card, its details (error, Doctor, timeline) and the Queue page say it in
    that language; the technical detail (HTTP status, error code) may stay as it is.

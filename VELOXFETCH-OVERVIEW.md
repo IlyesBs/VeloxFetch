@@ -391,7 +391,8 @@ Details: `docs/download-intelligence.md`.
   - dark / light / system theme;
   - Windows 11 Mica, a custom title bar;
   - responsive from 640×480: the sidebar folds below 900 px.
-- **Languages:** English, French and Arabic (full right-to-left layout).
+- **Languages:** English, French, Arabic, Spanish, Portuguese (Brazil), German, Russian and Turkish (Arabic with a full right-to-left layout). The first start follows the computer's
+  language; Settings > Language changes it (`docs/languages.md`).
 - **Shortcuts:**
 
   | Keys | Action |
@@ -833,6 +834,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
 | Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
 | Never lose a download (tried again on its own, offline, after sleep) | `docs/never-lose-a-download.md` |
+| Languages (files, first start in the computer's language, tests) | `docs/languages.md` |
 | Slow servers (as fast as a browser) | `docs/slow-servers.md` |
 | Updates (signed, offline key, install per system) | `docs/auto-update.md` |
 | Performance numbers and how to measure them | `docs/benchmarks.md` |
@@ -853,6 +855,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `feat_more_languages` | Feature | Five new languages: Spanish, Portuguese (Brazil), German, Russian, Turkish (every text, the tray and notifications). The first start follows the computer's language (`pickLang`: exact code, else the same language from another country; nothing saved until the user picks). Settings > Language is a drop-down; the title-bar menu scrolls. Shorter Smart throttle titles where they were cut (French too). The e2e harness runs in English unless a test sets a language (`--lang` for the Windows web view, debug builds only). Tests: locales, detection (4), timeline in every language, `desktop-i18n.mjs` for every language (no English, nothing wider than the window, sidebar labels fit, first start on a French computer). | `docs/languages.md` |
 | 2026-10-13 | `feat_never_lose_download` | Feature | Never lose a download: a failure the network or the server may get over (no connection, DNS, timeout, dropped connection, 408 / 425 / 429 / 5xx) is tried again on its own from the saved bytes (10 s … every 10 min, 20 tries, `manager/recovery.rs`). Offline: no try spent, nothing sent, starts when the network is back. After sleep (a gap of 30 s or more in the one-second loop, either clock): at once. Card countdown / "No internet connection" line, "Stop trying" (= Pause, now allowed on a waiting failed download), Retrying in the Queue page, Doctor's next-try time, timeline line, 3 languages. A stall is now `timeout`. In memory only. Tests: 4 unit, 7 integration, 4 vitest, 4 e2e checks. | `docs/never-lose-a-download.md` |
 | 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |
 | 2026-10-13 | `docs_public_readme` | Docs | The public README rewritten for users (what VeloxFetch does for them, no technical detail). macOS is never promised before it is built: `<!-- mac -->` lines and `{{PLATFORMS}}` names follow the packages a release has (`render`); `publish-kit.mjs page` makes the public page alone. Pushed to `IlyesBs/VeloxFetch-releases` for Windows and Linux. Test +1. | `docs/publishing.md` |

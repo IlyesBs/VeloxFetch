@@ -133,23 +133,14 @@ export function SettingsView() {
             </div>
           </Panel>
           <Panel title={t("set.language")} hint={t("set.languageHint")}>
-            <div role="radiogroup" aria-label={t("set.language")} className="inline-flex rounded-xl border border-line bg-raised p-1" data-testid="settings-lang">
+            {/* Each language named in itself, so anyone finds theirs whatever the current one. */}
+            <select className="input w-full max-w-xs" aria-label={t("set.language")} value={lang} data-testid="settings-lang" onChange={(e) => setLang(e.target.value)}>
               {LANGS.map((l) => (
-                <button
-                  key={l.lang}
-                  role="radio"
-                  aria-checked={lang === l.lang}
-                  lang={l.lang}
-                  data-testid={`settings-lang-${l.lang}`}
-                  onClick={() => setLang(l.lang)}
-                  className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors duration-150 ${
-                    lang === l.lang ? "bg-solid text-fg shadow-sm" : "text-dim hover:text-fg"
-                  }`}
-                >
+                <option key={l.lang} value={l.lang} lang={l.lang}>
                   {l.label}
-                </button>
+                </option>
               ))}
-            </div>
+            </select>
           </Panel>
           <DesktopSettings />
         </Group>

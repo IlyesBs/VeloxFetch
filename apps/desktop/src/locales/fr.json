@@ -44,7 +44,7 @@
   "bento.reading": "lecture du disque…",
   "bento.used": "{size} utilisés",
   "bento.diskUsed": "Disque utilisé",
-  "hud.title": "Limitation intelligente",
+  "hud.title": "Bridage auto",
   "hud.toggleOn": "Activer la limitation intelligente",
   "hud.toggleOff": "Désactiver la limitation intelligente",
   "hud.off": "Désactivée · pleine vitesse",

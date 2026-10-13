@@ -166,6 +166,11 @@ export function createHarness({ port, appPath, env = {}, captureStderr = false }
         // A private browser link: the app is single-instance by this link, so a test app must never meet a
         // VeloxFetch the user is running (or another test's app).
         VELOX_BRIDGE_ENDPOINT: h.endpoint,
+        // The interface follows the computer's language on first start: tests run in English unless they set it.
+        LANG: "en_US.UTF-8",
+        LC_ALL: "en_US.UTF-8",
+        LANGUAGE: "en_US",
+        VELOX_E2E_LANG: "en-US",
         ...env,
       },
       stdio: captureStderr ? ["ignore", "ignore", "pipe"] : "ignore",
