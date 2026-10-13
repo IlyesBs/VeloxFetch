@@ -7,6 +7,7 @@ import type { Diagnostics, DownloadStatus } from "../types";
 import { useT } from "../i18n";
 import { Icon } from "../ui/icons";
 import { withoutToolNames } from "./DiagnosticsSettings";
+import { localEvent } from "../timeline";
 
 const RUNNING: DownloadStatus[] = ["queued", "downloading", "verifying"];
 
@@ -109,7 +110,7 @@ export function DiagnosticsCard({ id, status, revision }: { id: number; status: 
                   <time className="num shrink-0 text-dim" dateTime={new Date(e.at).toISOString()}>
                     {new Date(e.at).toLocaleTimeString(document.documentElement.lang || undefined)}
                   </time>
-                  <span className="min-w-0 break-words">{withoutToolNames(e.text)}</span>
+                  <span className="min-w-0 break-words">{withoutToolNames(localEvent(e.text))}</span>
                 </li>
               ))}
             </ol>

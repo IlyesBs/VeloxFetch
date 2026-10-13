@@ -675,3 +675,15 @@ when a build has no update key. All 20 desktop suites pass on Linux.
 | `downloader-core` `verify` (4 new) | running hashes continued over three checkpoints equal a full read; progress that went back or a restart reads from the first byte again (a rewritten byte is in the hash); another plan's range never reuses a running hash; a later checkpoint on another copy of the record reuses this run's hashes without reading, and not after a restart |
 | `tests/integration/tests/reverify.rs::hashes_built_while_downloading_are_exactly_the_hashes_of_the_bytes` | a real download paused part-way: every saved segment hash equals the SHA-256 of the server's bytes for that range |
 | `tests/e2e/desktop-perf.mjs` (2 new checks) | 200 IPC calls from the page: p95 < 20 ms idle, < 30 ms with downloads running (measured 1 ms) |
+
+## Release candidate 1.0.0 (Phase 21, October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/e2e/desktop-i18n.mjs` | French and Arabic: every page, every Settings section, the Add and Batch dialogs and a failed download's details have no English words (links, paths, file names, the product name and log lines left out) |
+| `apps/desktop/src/timeline.test.ts` (3) | every kind of timeline line the manager writes is said in French and Arabic without English left; English unchanged; unknown lines kept |
+| `apps/desktop/src/messages.test.ts` (2) | every `ManagerError::invalid("…")` in `crates/download-manager/src` is in `messages.ts`; a refusal is said in French / Arabic; English and unknown messages unchanged |
+| `apps/desktop/src/errors.test.ts` (2) | video job errors by code; the Queue page's failed download in the user's language |
+| `download-manager` `video_failures_get_a_stable_code_for_the_ui` | DRM, live, playlist, sign-in, no video, site, remux, disk full, other file errors |
+| `tests/security/policy.test.mjs` "one version everywhere" | Cargo, Tauri, UI, extension, lockfiles and manifests say the same `x.y.z` |
+| `tests/e2e/desktop-diagnostics.mjs` | reads the version from `Cargo.toml` (it expected `0.1.0`) |

@@ -26,7 +26,7 @@ extension zips, SHA256SUMS.txt) is kept 30 days as the artifact `VeloxFetch-<sys
   (all, Windows, Linux or macOS), then download the artifacts from the run and test them by hand.
 * **Tag `v*`**: the builds, then a GitHub release as a **private draft**. Unsigned installers are never made public:
   check them (`docs/manual-test.md`), sign them, then publish the draft by hand.
-  `git tag v0.1.0 && git push origin v0.1.0`
+  `git tag v1.0.0 && git push origin v1.0.0`
 
 ## Building the full release (one command, any system)
 

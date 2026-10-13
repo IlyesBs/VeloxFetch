@@ -621,6 +621,9 @@ pub struct MediaJobDto {
     pub files: Vec<String>,
     pub notes: Vec<String>,
     pub error: Option<String>,
+    /// A short stable name for `error` (`media_drm`, `media_live`, `http_404`, `disk_full`...), so the UI can say it in the
+    /// user's language; `error` stays as the technical detail.
+    pub error_code: Option<String>,
     /// A video page read through yt-dlp (no pieces to count).
     pub site: bool,
     /// Current speed, bytes/s (0 when not downloading).

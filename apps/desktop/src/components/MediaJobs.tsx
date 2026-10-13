@@ -6,6 +6,7 @@ import { formatBytes, formatEta, formatSpeed } from "../format";
 import { act, useStore } from "../hooks";
 import type { MediaJob, MediaStatus } from "../types";
 import { Icon } from "../ui/icons";
+import { localMediaError } from "../errors";
 import { t as tr, useT, type Key } from "../i18n";
 import { ProgressBar, Section } from "../ui/primitives";
 import { DeleteConfirm } from "./DeleteConfirm";
@@ -213,9 +214,9 @@ const Row = memo(function Row({ job }: { job: MediaJob }) {
         </p>
       ))}
       {job.error && (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-bad" role="alert">
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-bad" role="alert" title={job.error}>
           <Icon name="alert" size={14} className="mt-px shrink-0" />
-          {job.error}
+          {localMediaError(job.errorCode, job.error)}
         </p>
       )}
     </article>

@@ -3,6 +3,8 @@
 High-performance, secure, cross-platform download manager: a Rust download engine with a Tauri v2
 desktop shell (React + TypeScript + Tailwind).
 
+**Version 1.0.0.** Release gate and steps: [`docs/release-candidate.md`](docs/release-candidate.md).
+
 **New here? Read [`VELOXFETCH-OVERVIEW.md`](VELOXFETCH-OVERVIEW.md) first**: the whole app (features, design,
 security, roadmap) on one page. Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/security.md`](docs/security.md).
 

@@ -60,7 +60,7 @@ pub struct LogConfig {
     pub home: Option<PathBuf>,
     /// Also print every line on standard error (the command-line tool).
     pub stderr: bool,
-    /// First line of every session, e.g. `VeloxFetch 0.1.0`.
+    /// First line of every session, e.g. `VeloxFetch 1.0.0`.
     pub app: String,
 }
 

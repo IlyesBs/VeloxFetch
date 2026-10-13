@@ -42,7 +42,7 @@ VeloxFetch is a **fast, secure download manager for Windows, Linux and macOS**, 
 **Rule number one: the UI is not the application.** The product is the Rust download core. The desktop window
 is just one client of it; the CLI and the tests are others. The UI can be replaced without touching the engine.
 
-**Version:** 0.1.0 (pre-release).
+**Version:** 1.0.0 (first production release, October 2026).
 
 **Source:** git, on GitHub (`IlyesBs/VeloxFetch`):
 - `main` holds what is finished;
@@ -708,7 +708,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux and macOS (private local address, growing-file answers, start first under a speed limit, media plugins installed with the Linux packages); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing); up to 64 connections everywhere (the Fast profile and files of 10–200 MB were held at 32 or 16); drop-down lists drawn by the app in the theme's colours on every system (the system list was grey on Linux); the release script's AppImage step (patchelf and media plugins always installed, never a failed release for them) |
 | 19 | Auto update | ✅ | Ed25519-signed manifest (offline, passphrase-encrypted key; public key compiled in), HTTPS, no downgrade, no replay, size + SHA-256 verified before keeping and before install; Windows setup / AppImage self-replace / system installer / release page; Settings > Updates and the status bar |
 | 20 | Performance benchmarking | ✅ | `velox-bench` (100 MB – 50 GB × 1 – 64 connections: MB/s, CPU, RAM, DB cost, time after the last byte, every file checked) + start-up, FPS and IPC latency in `desktop-perf.mjs`. 1.1 – 1.8 GB/s engine ceiling; 1.4 – 3 % of a core at gigabit. Fixed: the whole file was hashed again after the last byte (4 GiB at 400 MB/s: 2.0 s → 38 ms) |
-| 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
+| 21 | Release candidate | ✅ | 1.0.0: one version everywhere, security gate passed (0 vulnerabilities, no unused dependencies, no debug hooks in release), every text in the user's language (French / Arabic checked on every page, dialog, timeline and refusal), all tests. Owner steps left: update key, builds, signing, Windows / macOS checks (`docs/release-candidate.md`) |
 | 22 | Beta | ⏳ | Internal alpha, then private beta, public beta, RC and stable; opt-in, documented crash and performance reports |
 
 > Phase 19 was started by the owner on 2026-10-13 ("start the phase 19 to 21").
@@ -720,7 +720,9 @@ More: `docs/testing.md`, `docs/release-process.md`.
 
 **Other open items:**
 - release signing is wired but waits for the owner's certificates (docs/release-process.md);
-- some deep Settings panels and dialogs are still English only.
+- the update signing key must be made by the owner before the first public release (docs/auto-update.md);
+- Windows and macOS: the manual checks (docs/manual-test.md) must be run on those systems, as CI cannot run until
+  the GitHub account's billing is fixed (docs/release-candidate.md).
 
 ---
 
@@ -815,6 +817,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Slow servers (as fast as a browser) | `docs/slow-servers.md` |
 | Updates (signed, offline key, install per system) | `docs/auto-update.md` |
 | Performance numbers and how to measure them | `docs/benchmarks.md` |
+| The 1.0.0 release gate and the owner's release steps | `docs/release-candidate.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
@@ -831,6 +834,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `phase21_release_candidate` | Phase 21 | Version 1.0.0 everywhere (policy test keeps them equal). Every text the user reads is in their language: video job errors get a code (`errorCode`, `localMediaError`), the Queue page's error and the toast close button were English, the diagnostics timeline is said by the shape of its lines (`timeline.ts`), and the ~80 messages a command can be refused with by their exact text (`messages.ts`, checked against the Rust sources); `desktop-i18n.mjs` scans French and Arabic. Security gate passed, `cargo machete` clean. Release-candidate gate and the owner's steps documented. | `docs/release-candidate.md` |
 | 2026-10-13 | `phase20_benchmarks` | Phase 20 | `tests/bench` (`velox-bench`): a local server in its own process, each case in a fresh process with the real engine and SQLite store; MB/s, CPU, peak RAM, DB time, time after the last byte; every file SHA-256-checked; `db` measures one progress save. `desktop-perf.mjs` adds IPC latency (p95 1 ms). Found and fixed: the final checkpoint hashed every segment again (the periodic ones hashed into their own copy of the record), reading the whole file after the last byte: now running hashes continue checkpoint by checkpoint and finished ones are kept for the run (`verify::RunningHashes`); 4 GiB at 400 MB/s 2.0 s → 38 ms after the last byte. `ProgressHandle::downloaded()`. | `docs/benchmarks.md` |
 | 2026-10-13 | `phase19_auto_update` | Phase 19 | Updates: Settings > Updates and the status bar. A manifest signed with the owner's offline Ed25519 key (`scripts/update-key.mjs`: passphrase-encrypted, terminal only, never in CI; public key in `update-keys.txt`, compiled in) is verified strictly before it is read (`crates/update-verify`); no downgrade, no replay; the package is kept only after its exact size and SHA-256 match, checked again before install; Windows setup run under a read-only-sharing lock, AppImage replaced atomically and restarted, `.deb` / `.rpm` / `.dmg` opened in the system's installer, portable copies get the release page. Automatic checks (on, can be turned off) never download or install by themselves. Six main-window commands, none taking an address or a path. | `docs/auto-update.md` |
 | 2026-10-12 | `fix_slow_server_speed` | Fix | Issue #21: a slow server downloaded slower than in a browser. (1) Lowering the connection count (a step that brought nothing, a dip, errors, 429 / 503) cut the connection that was transferring and kept the requests still waiting for an answer: now requests waiting give way and transfers finish (`set_limit_soft`); only a speed limit or the user's settings cut transfers. (2) Joins of parts started side by side were checked at the end, one request after the other: now from 1 KiB tails read with the request, the rest 4 at a time. (3) A one-connection transfer (server slow to answer) restarted from byte 0 after each broken connection: now it continues with `Range` + `If-Range` when the server proves the same file (206 at the offset, same total and version, last KiB identical), else from 0 as before. On a 10–50 KB/s server answering in 2 s: 226 s → 213.6 s next to curl's 210 s (the first check's wait is the difference). | `docs/slow-servers.md` |

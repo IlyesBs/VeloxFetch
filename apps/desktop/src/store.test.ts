@@ -191,6 +191,7 @@ describe("store", () => {
       files: [],
       notes: [],
       error: null,
+      errorCode: null,
       speedBps: 0,
       etaSecs: null,
       resumable: false,

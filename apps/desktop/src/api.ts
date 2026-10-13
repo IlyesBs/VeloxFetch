@@ -4,6 +4,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getLang, t } from "./i18n";
+import { MESSAGES } from "./messages";
 
 export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem";
 import type {
@@ -67,8 +69,18 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export function normalizeError(e: unknown): ApiError {
-  if (typeof e === "object" && e !== null && "code" in e && "message" in e) return e as ApiError;
+  if (typeof e === "object" && e !== null && "code" in e && "message" in e) {
+    const err = e as ApiError;
+    return { ...err, message: localMessage(err.message) };
+  }
   return { code: "internal", message: String(e) };
+}
+
+/** A message from Rust in the user's language when it is a known one (`messages.ts`); otherwise as it came. */
+export function localMessage(message: string): string {
+  if (getLang() === "en") return message;
+  const key = MESSAGES[message.replace(/^invalid input: /, "")];
+  return key ? t(key) : message;
 }
 
 export const api = {

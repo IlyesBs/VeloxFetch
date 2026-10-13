@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { localNote, MediaControls, MediaPlayer, mediaLabel, mediaTone } from "../components/MediaJobs";
 import { formatBytes, formatDuration, formatEta, formatSpeed } from "../format";
 import { useStore } from "../hooks";
+import { localMediaError } from "../errors";
 import { getLang, useT } from "../i18n";
 import { averageBps, elapsedMs, qualityText, savedPaths, sizeOf, typeKey } from "../mediaDetail";
 import { loadPreviewBase } from "../preview";
@@ -99,7 +100,14 @@ export function MediaDetailView({ id, onBack }: { id: number; onBack: () => void
       {job.error && (
         <section className="card flex items-start gap-3 border-bad/40 p-4" role="alert" data-testid="media-detail-error">
           <Icon name="alert" size={18} className="mt-0.5 shrink-0 text-bad" />
-          <p className="selectable min-w-0 flex-1 break-words text-[13px] font-medium">{job.error}</p>
+          <div className="min-w-0 flex-1">
+            <p className="selectable break-words text-[13px] font-medium">{localMediaError(job.errorCode, job.error)}</p>
+            {localMediaError(job.errorCode, job.error) !== job.error && (
+              <p className="selectable mt-1 break-words font-mono text-xs text-dim" data-testid="media-detail-error-detail">
+                {job.error}
+              </p>
+            )}
+          </div>
         </section>
       )}
       {job.notes.length > 0 && (

@@ -841,3 +841,19 @@ test("linux packages: media plugins never block the install, the AppImage never 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("one version everywhere (the updater compares it; the extension reports it)", () => {
+  const v = read("Cargo.toml").match(/^version = "([^"]+)"/m)[1];
+  assert.match(v, /^\d+\.\d+\.\d+$/, "x.y.z only: the updater refuses anything else");
+  const json = (...p) => JSON.parse(read(...p));
+  for (const [name, got] of [
+    ["tauri.conf.json", json("apps", "desktop", "src-tauri", "tauri.conf.json").version],
+    ["apps/desktop/package.json", json("apps", "desktop", "package.json").version],
+    ["apps/desktop/package-lock.json", json("apps", "desktop", "package-lock.json").version],
+    ["apps/browser-extension/package.json", json("apps", "browser-extension", "package.json").version],
+    ["manifest.chrome.json", json("apps", "browser-extension", "src", "manifest.chrome.json").version],
+    ["manifest.firefox.json", json("apps", "browser-extension", "src", "manifest.firefox.json").version],
+  ]) {
+    assert.equal(got, v, `${name} says ${got}, Cargo.toml says ${v}`);
+  }
+});

@@ -706,6 +706,8 @@ export interface MediaJob {
   files: string[];
   notes: string[];
   error: string | null;
+  /** A stable name for `error` (`media_drm`, `http_404`...): the UI says it in the user's language. */
+  errorCode: string | null;
   /** A video page read through yt-dlp: there are no pieces to count, only a percentage. */
   site: boolean;
   speedBps: number;

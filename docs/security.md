@@ -730,3 +730,12 @@ Full rules: `docs/new-link-recovery.md` §6.
   rewritten byte is always read. Tests: `verify` unit tests, `reverify.rs` (saved hashes equal the server's bytes).
 * `tests/bench` is a test tool: it is not part of any package, and its server listens on 127.0.0.1 only for the
   length of a run.
+
+## Release candidate 1.0.0 (Phase 21, October 2026)
+
+* Security gate (`node scripts/security-gate.mjs`): formatting, clippy, 44 policy tests, `cargo audit` (0 of 614
+  crates), `cargo deny`, `npm audit` (UI and extension: 0), lockfiles: passed. `cargo machete`: no unused dependency.
+* Release builds ignore every `VELOX_*` test switch (data folder, dry runs, the update test feed, debug port).
+* The UI now translates Rust's refusals and timeline lines by matching known English texts; an unknown text is shown
+  as it came (never interpreted), and nothing of it reaches a command line, a path or the network.
+* Review summary, tampering, and the owner's signing steps: `docs/release-candidate.md`.
