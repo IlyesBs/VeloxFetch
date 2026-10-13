@@ -13,8 +13,7 @@ use http_client::ResourceInfo;
 use serde::Serialize;
 use url::Url;
 
-/// Bytes compared per sample: enough to tell two files apart, small enough to cost nothing.
-pub const SAMPLE_LEN: u64 = 64 * 1024;
+pub use downloader_core::resume::SAMPLE_LEN;
 /// Samples compared at most (the start of the saved bytes and the end of the furthest ones).
 pub const MAX_SAMPLES: usize = 2;
 
@@ -198,20 +197,7 @@ pub struct Decision {
 /// Where to compare saved bytes: the start of the first saved bytes and the end of the furthest ones, each at
 /// most [`SAMPLE_LEN`], only inside bytes the download recorded as written (and synced). `(offset, len)`.
 pub fn sample_windows(segments: &[Segment]) -> Vec<(u64, u64)> {
-    let done: Vec<(u64, u64)> = segments.iter().filter(|s| s.downloaded > 0).map(|s| (s.start, s.downloaded.min(s.len()))).collect();
-    let mut out = Vec::new();
-    if let Some(&(start, len)) = done.iter().min_by_key(|(s, _)| *s) {
-        out.push((start, len.min(SAMPLE_LEN)));
-    }
-    if let Some(&(start, len)) = done.iter().max_by_key(|(s, l)| s + l) {
-        let w = len.min(SAMPLE_LEN);
-        let tail = (start + len - w, w);
-        if !out.iter().any(|&(o, l)| tail.0 < o + l && o < tail.0 + tail.1) {
-            out.push(tail);
-        }
-    }
-    out.truncate(MAX_SAMPLES);
-    out
+    downloader_core::resume::sample_windows(segments, MAX_SAMPLES)
 }
 
 /// Request headers for the new link. From the browser (it just sent them for that link): used as they are. Typed

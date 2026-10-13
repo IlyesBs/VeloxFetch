@@ -84,8 +84,10 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   bytes that are not on disk.
 * On startup, anything left `downloading` is validated against its `.part` file and turned into
   `paused` (resumable) or reset to restart cleanly.
-* Before resuming, the remote resource is re-validated (strong ETag, else `Last-Modified`, plus
-  size). If it changed, the download restarts instead of splicing old and new bytes.
+* Before resuming, the remote resource is re-validated (size, then `resume::validators`: a strong ETag proves the
+  version; a weak ETag, a date or nothing only hints, and up to four 64 KiB samples of the saved bytes are compared
+  with the server's, `Downloader::compare_saved_bytes`). If it changed, the download restarts instead of splicing old
+  and new bytes; if the server cannot be asked, the saved bytes are kept and the run fails like any other.
 * **Resume integrity** (`docs/resume-integrity.md`):
   * every completed segment is hashed (SHA-256) by the checkpoint that first saves it complete, after the `fsync`,
     in the same commit, together with the `.part` file's stamp;

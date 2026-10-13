@@ -69,7 +69,9 @@ manifest, a README with screenshots). The app updates from there. Details: `docs
   - verified range support: servers that do not support it get one connection.
 - **Pause / Resume / Cancel / Retry:**
   - Pause keeps everything; Cancel deletes the partial file;
-  - Resume first checks that the file on the server did not change (ETag, size). If it changed, the download restarts.
+  - Resume first checks that the file on the server did not change (size, ETag). Without a strong ETag (most
+    servers), a few small pieces of the saved bytes are compared with the server's. If it changed, the download
+    restarts; if the server cannot be asked, nothing saved is thrown away.
 - **Crash-safe:** the progress is saved every 500 ms, in a safe order. After a crash or a power cut, the
   download continues from the bytes that really reached the disk.
 - **Integrity:** an optional SHA-256 / SHA-512 checksum is checked at the end.
@@ -126,6 +128,8 @@ Details: `docs/resume-integrity.md`.
 - **Join checks for servers without a version tag:** every request that continues saved bytes starts 1 KiB early,
   and those bytes must match; requests read 1 KiB past their end when needed, and every other join is compared before the file
   may finish. A same-size change with no tag (or an unchanged date) is caught, and the retry starts clean.
+- **Weak or no version tag at resume:** up to four 64 KiB samples of the saved bytes are compared with the
+  server's. Equal: continued (the download used to start over). Different: start over. No answer: kept for later.
 - A checksum given for the file still proves every byte before it is finished.
 
 ### Use a new link (expired links, sessions, mirrors)
@@ -844,6 +848,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |
 | 2026-10-13 | `docs_public_readme` | Docs | The public README rewritten for users (what VeloxFetch does for them, no technical detail). macOS is never promised before it is built: `<!-- mac -->` lines and `{{PLATFORMS}}` names follow the packages a release has (`render`); `publish-kit.mjs page` makes the public page alone. Pushed to `IlyesBs/VeloxFetch-releases` for Windows and Linux. Test +1. | `docs/publishing.md` |
 | 2026-10-13 | `release_publish_kit` | Release | `scripts/publish-release.sh`: the production release in one command (preflight: one version, a trusted update key outside the project, nothing uncommitted; the full gate; the app carries the key and is a release build; every system's packages staged, each checked against its own checksums; signed and verified update manifest; GPG optional; a draft on GitHub optional). Releases move to the public repository `IlyesBs/VeloxFetch-releases` (feed, release page, manifest addresses; the source stays private). `docs/publish/`: the public README, the release text, texts for download sites in English / French / Arabic, 11 screenshots of 1.0.0 taken by `publish-screenshots.mjs` through a local proxy. Tests: `tests/release/publish-kit.test.mjs` (the whole script with a throwaway key typed at a pseudo-terminal), policy tests. | `docs/publishing.md` |
 | 2026-10-13 | `fix_rtl_main_scrollbar` | Fix | In Arabic on Linux a sideways scrollbar showed across the bottom of the downloads (WebKitGTK puts the bar on the left but lays the content out one bar wider): the main area never scrolls sideways now, nothing is hidden. `desktop-redesign.mjs` checks every scroll area in Arabic (fails without the fix). | `docs/ui-performance.md` |

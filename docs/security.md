@@ -74,6 +74,10 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
   * completed segments are hashed and re-verified before being trusted after a crash or an outside change of the
     `.part` file;
   * a broken segment map is never resumed or finished.
+  * without a strong ETag, saved bytes are continued only when samples of them (up to 4 × 64 KiB, only bytes
+    recorded as written, read inside the confined download folder) equal the server's; any contradiction starts
+    over. The samples go to the download's own address with its own headers (no new host gets its cookies). A
+    failed comparison never discards bytes and never continues them.
   * a one-connection transfer continued after a broken connection (issue #21) uses the new bytes only on proof
     of the same file: 206 from the exact offset, `If-Range` with the version, the same total in `Content-Range`, a
     strong ETag equal to the download's, and the last saved KiB sent again identical. Anything else starts again
