@@ -71,6 +71,15 @@ attribute is written only when it changes, and `onThemeChange` calls back only w
 on or off, the system's dark mode) changes: "on" and "limiting" share one palette, so slowing downloads repaints
 nothing. Tests: `throttle.test.ts`.
 
+## No stray sideways scrollbar in Arabic on Linux (October 2026)
+
+Right to left, the Linux web view (WebKitGTK) draws a scroll area's bar on the left but lays its content out as if
+the bar were on the right: the main area came out one bar (10 px) wider than itself (`scrollWidth` 1116 for
+`clientWidth` 1106) and showed a sideways scrollbar across the bottom of the downloads. The main area now never
+scrolls sideways (`overflow-x-hidden` in `App.tsx`); the side padding (16 – 24 px) covers the 10 px overlap, so
+nothing is hidden. Windows and macOS were not affected (their layout follows the bar). Test: `desktop-redesign.mjs`
+looks for any scroll area wider than itself in Arabic, on the dashboard and in Settings (fails without the fix).
+
 ## Drop-down lists in the theme's colours (October 2026)
 
 **Closed fields too (October 2026, `fix_select_field_theme`).** On Linux the closed field was still a grey system

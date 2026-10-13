@@ -8,6 +8,8 @@ desktop shell (React + TypeScript + Tailwind).
 **Interface:** every field, drop-downs included, is drawn in the theme's colours on Windows, Linux and macOS
 ([`docs/ui-performance.md`](docs/ui-performance.md)).
 
+**Arabic:** right-to-left with no stray sideways scrollbar on Linux ([`docs/ui-performance.md`](docs/ui-performance.md)).
+
 **Lists:** percentages have one decimal everywhere, and a download that has not started yet is named by its link
 ([`docs/smart-download-queue.md`](docs/smart-download-queue.md), [`docs/smart-duplicate-detection.md`](docs/smart-duplicate-detection.md)).
 

@@ -164,6 +164,17 @@ try {
   check("Arabic: labels are translated", (await text("[data-testid=page-title]")) === "التنزيلات");
   const origin = await ev(`getComputedStyle(document.querySelector('[data-testid^=download-] [role=progressbar] > div')).transformOrigin`);
   check("Arabic: progress fills from the right", origin.startsWith(String(parseFloat(origin))) && parseFloat(origin) > 0, origin);
+  // Right to left, the Linux web view puts a scroll area's bar on the left but lays its content out as if it were on the
+  // right: the area came out one bar wider than itself and showed a stray sideways scrollbar. No scroll area may show one.
+  const sideways = async () =>
+    ev(`[...document.querySelectorAll('*')].filter((e) => { const cs = getComputedStyle(e); return (cs.overflowX === 'auto' || cs.overflowX === 'scroll') && e.scrollWidth > e.clientWidth + 1 && e.clientHeight > 0; }).map((e) => (e.getAttribute('data-testid') || e.tagName) + ' ' + e.scrollWidth + '/' + e.clientWidth)`);
+  await page(`(document.querySelector('[data-testid=main]').scrollTop = 0, true)`);
+  check("Arabic: no stray sideways scrollbar on the dashboard", (await sideways()).length === 0, JSON.stringify(await sideways()));
+  await click("[data-testid=nav-settings]");
+  await sleep(300);
+  check("Arabic: no stray sideways scrollbar in Settings", (await sideways()).length === 0, JSON.stringify(await sideways()));
+  await click("[data-testid=nav-downloads]");
+  await sleep(300);
   check("Arabic: no letter-spacing on Arabic labels (it breaks the joins)", (await ev(`getComputedStyle(document.querySelector('.label')).letterSpacing`)) === "normal");
   await theme("dark");
   await sleep(500);

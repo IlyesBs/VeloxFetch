@@ -194,7 +194,10 @@ export default function App() {
           <TitleBar route={current} />
           <PowerBanner />
           <ClipboardBanner onReviewMany={(links) => setBatch({ links: links.join("\n") })} onStream={(url) => setStream({ url })} />
-          <main className="flex-1 overflow-y-auto" data-testid="main">
+          {/* Never scrolls sideways: right to left, the Linux web view puts the bar on the left but lays the content out as
+              if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers
+              the overlap, so nothing is hidden). */}
+          <main className="flex-1 overflow-y-auto overflow-x-hidden" data-testid="main">
             <div className={`mx-auto px-4 pb-6 pt-1 sm:px-6 ${route.name === "downloads" ? "max-w-[1720px]" : route.name === "active" ? "max-w-[1400px]" : "max-w-6xl"}`}>
               {route.name === "downloads" && (
                 <DownloadsView
