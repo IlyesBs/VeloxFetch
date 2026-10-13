@@ -1,6 +1,7 @@
-// End-to-end test of how fast the real desktop app feels: how soon its window shows the interface after launch, and
-// the frame rate of the dashboard with six running downloads (each card animates its connection matrix), still and
-// while scrolling. Prints the numbers; the checks hold on a virtual display (software drawing) too.
+// End-to-end test of how fast the real desktop app feels: how soon its window shows the interface after launch, the
+// frame rate of the dashboard with six running downloads (each card animates its connection matrix), still and
+// while scrolling, and how long a call from the interface to Rust takes (IPC, Phase 20), idle and with downloads
+// running. Prints the numbers; the checks hold on a virtual display (software drawing) too.
 //
 //   node tests/e2e/desktop-perf.mjs [path-to-debug-velox-desktop]
 //
@@ -47,6 +48,14 @@ try {
   check("the window is asked to show as soon as the interface is on the page (< 150 ms after the script ran)", start.ready !== null && start.ready - start.script < 150, JSON.stringify(start));
   check("the interface is painted within a second of the page loading", start.firstPaint !== null && start.firstPaint < 1000, JSON.stringify(start));
 
+  // ---- IPC latency (Phase 20): 200 calls from the page, one after the other ---------------------------------------
+  const ipc = (cmd, args = {}) =>
+    ev(`(async () => { const t = []; for (let i = 0; i < 200; i++) { const s = performance.now(); await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}); t.push(performance.now() - s); }
+      t.sort((a, b) => a - b); return { p50: +t[100].toFixed(2), p95: +t[190].toFixed(2), max: +t[199].toFixed(2) }; })()`);
+  const ipcIdle = await ipc("get_metrics");
+  const listIdle = await ipc("list_downloads", { filter: {} });
+  console.log(`      IPC idle: get_metrics ${JSON.stringify(ipcIdle)} ms, list_downloads ${JSON.stringify(listIdle)} ms`);
+
   // ---- frame rate ---------------------------------------------------------------------------------------------
   const idle = await frames(2000);
   console.log(`      idle dashboard: ${JSON.stringify(idle)}`);
@@ -61,6 +70,10 @@ try {
   console.log(`      downloads + scrolling: ${JSON.stringify(scrolling)}`);
   // The page reaches the screen's rate on a GPU (Linux: WebKitGTK's own 60 fps ceiling); a virtual display draws in
   // software, so the floor here is lower than what users see.
+  const ipcBusy = await ipc("get_metrics");
+  console.log(`      IPC with downloads running: get_metrics ${JSON.stringify(ipcBusy)} ms`);
+  check("a call to Rust answers quickly, idle (p95 < 20 ms)", ipcIdle.p95 < 20 && listIdle.p95 < 20, JSON.stringify({ ipcIdle, listIdle }));
+  check("and with downloads running (p95 < 30 ms)", ipcBusy.p95 < 30, JSON.stringify(ipcBusy));
   check("running downloads keep the dashboard smooth (>= 45 fps)", running.fps >= 45, JSON.stringify(running));
   check("and scrolling over them too (>= 40 fps)", scrolling.fps >= 40, JSON.stringify(scrolling));
   if ((await ev("document.documentElement.dataset.platform")) === "linux") {

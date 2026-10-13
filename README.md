@@ -23,6 +23,7 @@ crates/download-manager  application controller used by the UI
 crates/diagnostics  local log (redacted, rotated) and the text reports; no telemetry
 crates/update-verify  checks an update before anything is written or run (Ed25519 manifest, version, hash)
 tests/integration   fault-injecting local server + end-to-end layer tests
+tests/bench         `velox-bench`: the performance benchmark (not shipped)
 tests/e2e           drives the real desktop app through WebView2
 ```
 
@@ -161,6 +162,10 @@ Speed: each download uses up to 64 connections (it starts on 4 and climbs 4 -> 1
 On a slow server it is at least as fast as a browser. Going down in connections never cuts a transfer, and a broken
 one-connection transfer continues where it stopped (only when the server proves it is the same file). See
 [`docs/slow-servers.md`](docs/slow-servers.md).
+
+**Performance** (`docs/benchmarks.md`): the engine moves 1.1 – 1.8 GB/s on loopback whatever the connection count,
+uses 1.4 – 3 % of one core at gigabit speed, and finishes the file as the last byte lands. Measure it yourself with
+`cargo build --release -p velox-bench && ./target/release/velox-bench run --sizes 1G --conns 1,16,64`.
 
 **Updates**: Settings > Updates (and the status bar) tells you when a newer version exists, downloads it when you ask
 and installs it (the Windows setup, an AppImage that replaces itself, the system's installer for `.deb` / `.rpm` /

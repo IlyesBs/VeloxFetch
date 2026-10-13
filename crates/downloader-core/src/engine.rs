@@ -177,6 +177,10 @@ struct ProgressInner {
     /// When bytes started to be transferred.
     transfer_started: Mutex<Option<Instant>>,
     events: Mutex<std::collections::VecDeque<RunEvent>>,
+    /// Segment restarts this run (see `RunningHashes`).
+    resets: AtomicU64,
+    /// Hashes of the segments being downloaded, continued at each checkpoint (`verify::hash_progressive`).
+    running: Mutex<crate::verify::RunningHashes>,
 }
 
 /// Cheap, cloneable, lock-light view of a running download.
@@ -200,6 +204,8 @@ impl Default for ProgressHandle {
             peak_connections: AtomicUsize::new(0),
             transfer_started: Mutex::new(None),
             events: Mutex::new(std::collections::VecDeque::new()),
+            resets: AtomicU64::new(0),
+            running: Mutex::new(Default::default()),
         }))
     }
 }
@@ -227,6 +233,11 @@ impl ProgressHandle {
             downloaded: self.0.downloaded.load(Ordering::Relaxed),
             segments: self.0.segments.lock().unwrap().clone(),
         }
+    }
+
+    /// Bytes of the file written so far (what `snapshot().downloaded` says, without copying the segment list).
+    pub fn downloaded(&self) -> u64 {
+        self.0.downloaded.load(Ordering::Relaxed)
     }
 
     /// Bytes actually received from the network during this run (monotonic).
@@ -301,6 +312,8 @@ impl ProgressHandle {
         self.0.downloaded.store(segments.iter().map(|s| s.downloaded).sum(), Ordering::Relaxed);
         self.0.retry_baseline.store(segments.iter().map(|s| s.retry_count).sum(), Ordering::Relaxed);
         *self.0.segments.lock().unwrap() = segments;
+        // A new plan: no running hash carries over (a segment is hashed from its first byte at the next checkpoint).
+        *self.0.running.lock().unwrap_or_else(|p| p.into_inner()) = Default::default();
         *self.0.transfer_started.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
     }
 
@@ -339,6 +352,7 @@ impl ProgressHandle {
 
     /// Forget a segment's progress (used when a non-resumable transfer restarts).
     fn reset_segment(&self, idx: usize) {
+        self.0.resets.fetch_add(1, Ordering::SeqCst);
         if let Some(s) = self.0.segments.lock().unwrap().get_mut(idx) {
             self.0.downloaded.fetch_sub(s.downloaded, Ordering::Relaxed);
             s.downloaded = 0;
@@ -2167,7 +2181,11 @@ async fn checkpoint(
     part: &Path,
     control: &DownloadControl,
 ) -> Result<()> {
+    // Taken before the sync: every byte counted here is then on disk, so the hashes below describe durable bytes.
     let snap = progress.snapshot();
+    // After the snapshot: a restart it already shows is seen here, and running hashes are dropped (one after it is
+    // seen at the next checkpoint).
+    let resets = progress.0.resets.load(Ordering::SeqCst);
     if let Ok(mut f) = tokio::fs::OpenOptions::new().write(true).open(part).await {
         f.flush().await?;
         failpoint::hit_io("disk.fsync")?;
@@ -2181,11 +2199,14 @@ async fn checkpoint(
         // writer has stopped, so its stamp is exact.
         crate::verify::carry_hashes(&rec.segments, &mut segments);
         let (p, mut hashed) = (part.to_path_buf(), segments.clone());
-        let (result, stamp) = blocking(move || {
-            let r = crate::verify::hash_new(&p, &mut hashed).map(|_| hashed);
-            Ok((r, crate::verify::stamp(&p)))
+        let mut running = std::mem::take(&mut *progress.0.running.lock().unwrap_or_else(|p| p.into_inner()));
+        running.note_resets(resets);
+        let (result, stamp, running) = blocking(move || {
+            let r = crate::verify::hash_progressive(&p, &mut hashed, &mut running).map(|_| hashed);
+            Ok((r, crate::verify::stamp(&p), running))
         })
         .await?;
+        *progress.0.running.lock().unwrap_or_else(|p| p.into_inner()) = running;
         match result {
             Ok(h) => {
                 segments = h;

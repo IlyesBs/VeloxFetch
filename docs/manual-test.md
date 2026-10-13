@@ -463,3 +463,9 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 6. Turn off **Check for updates automatically**, restart, wait two minutes: no request to github.com (a network
    monitor); **Check now** still works.
 7. Offline: "Could not reach the update server"; the app keeps working.
+
+## AH. Performance (once per OS, on a fast line)
+1. Download a large file (several GB) from a fast server: the speed matches what a browser gets, or more with a server
+   that caps each connection; the card shows "Completed" within a moment of reaching 100 % (no long "Verifying").
+2. With downloads running, the window scrolls smoothly and buttons answer at once.
+3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".

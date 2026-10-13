@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/http-client", "crates/downloader-core", "crates/persistence", "crates/download-manager", "crates/scheduler", "crates/system-integration", "crates/browser-bridge", "crates/media-engine", "crates/path-safety", "crates/secrets", "crates/failpoint", "crates/diagnostics", "crates/update-verify", "apps/cli", "apps/native-host", "apps/desktop/src-tauri", "tests/integration"]
+members = ["crates/http-client", "crates/downloader-core", "crates/persistence", "crates/download-manager", "crates/scheduler", "crates/system-integration", "crates/browser-bridge", "crates/media-engine", "crates/path-safety", "crates/secrets", "crates/failpoint", "crates/diagnostics", "crates/update-verify", "apps/cli", "apps/native-host", "apps/desktop/src-tauri", "tests/integration", "tests/bench"]
 
 [workspace.package]
 version = "0.1.0"

@@ -665,3 +665,13 @@ passphrases refused); its output signed the interop fixture.
 `desktop-usability.mjs` counts 10 Settings sections since Updates came (it counted 9); `desktop-diagnostics.mjs` reads
 every on-screen status for "error" / "cannot", so the Updates panel says "Updates are not offered in this copy"
 when a build has no update key. All 20 desktop suites pass on Linux.
+
+## Performance (Phase 20, October 2026)
+
+| Test | Checks |
+|---|---|
+| `tests/bench` (`velox-bench run`, by hand) | MB/s, CPU, peak RAM, DB time and time after the last byte for sizes × connections; every file SHA-256-checked against the server's pattern (a mismatch stops it). Results: `docs/benchmarks.md` |
+| `tests/bench` unit (2) | the pattern depends on the position and any range equals the same bytes of the whole; sizes with units |
+| `downloader-core` `verify` (4 new) | running hashes continued over three checkpoints equal a full read; progress that went back or a restart reads from the first byte again (a rewritten byte is in the hash); another plan's range never reuses a running hash; a later checkpoint on another copy of the record reuses this run's hashes without reading, and not after a restart |
+| `tests/integration/tests/reverify.rs::hashes_built_while_downloading_are_exactly_the_hashes_of_the_bytes` | a real download paused part-way: every saved segment hash equals the SHA-256 of the server's bytes for that range |
+| `tests/e2e/desktop-perf.mjs` (2 new checks) | 200 IPC calls from the page: p95 < 20 ms idle, < 30 ms with downloads running (measured 1 ms) |

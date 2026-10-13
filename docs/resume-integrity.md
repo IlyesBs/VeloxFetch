@@ -84,6 +84,13 @@ emptied), unhashed (saved by an older version: counted, kept, reported as unchec
    The hash is saved **in the same store write** as its counters. A hash therefore always describes durable bytes;
    a segment is never "verified" before its bytes are committed. A hash is kept only while its segment stays complete
    over the **same range** (`carry_hashes`). It is never stored for an incomplete segment (also enforced by the store).
+   **Spread over the download (Phase 20, `RunningHashes`):** each checkpoint, after the `fsync`, also reads the bytes
+   an unfinished segment received since the previous checkpoint and adds them to that segment's running hash (kept in
+   memory for the run); a segment that completes then only reads its last bytes. Hashes made this run are kept for the
+   final checkpoint, which saves into another copy of the record and used to read **the whole file again** after the
+   last byte (0.5 s per GiB on this machine, more from a disk once the file no longer fits in memory). The result is
+   the same SHA-256 of the same synced bytes; a restart (`ProgressHandle::reset_segment`), progress that went back, a
+   new plan or a changed range drops the running hashes, and the bytes are read from the segment's first byte again.
 2. **Stamp.** With the hashes, the `.part` file's stamp (`<size>:<mtime ns>`) is saved. The last checkpoint of a
    clean stop (pause, failure) runs after every writer has stopped, so its stamp is exact.
 3. **Resume** (`reverify_if_touched`):

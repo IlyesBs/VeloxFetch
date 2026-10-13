@@ -318,3 +318,21 @@ async fn a_file_changed_while_paused_with_the_same_date_is_caught_and_never_mixe
     wait_status(&m, id, DownloadStatus::Completed).await;
     assert!(std::fs::read(e.root.join("paused.bin")).unwrap() == *new, "entirely the new version");
 }
+
+/// Segment hashes are built checkpoint by checkpoint while the bytes arrive (and kept for the last checkpoint, which
+/// no longer reads the whole file again): each saved one must still be exactly the hash of the server's bytes there.
+#[tokio::test]
+async fn hashes_built_while_downloading_are_exactly_the_hashes_of_the_bytes() {
+    use sha2::{Digest, Sha256};
+    let data = random_data(6 * MB, 97);
+    let srv = serve(data.clone()).await;
+    let e = env("progressive");
+    let id = paused_part_way(&e, &srv, "/progressive.bin").await;
+    let rec = SqliteStore::open(&e.db).unwrap().load(id).unwrap().unwrap();
+    let done: Vec<_> = rec.segments.iter().filter(|s| s.is_complete()).collect();
+    assert!(!done.is_empty());
+    for s in done {
+        let want: String = Sha256::digest(&data[s.start as usize..=s.end as usize]).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(s.hash.as_deref(), Some(format!("sha256:{want}").as_str()), "segment {} [{}, {}]", s.id, s.start, s.end);
+    }
+}
