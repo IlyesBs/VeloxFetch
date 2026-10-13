@@ -73,6 +73,10 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
   * completed segments are hashed and re-verified before being trusted after a crash or an outside change of the
     `.part` file;
   * a broken segment map is never resumed or finished.
+  * a one-connection transfer continued after a broken connection (issue #21) uses the new bytes only on proof
+    of the same file: 206 from the exact offset, `If-Range` with the version, the same total in `Content-Range`, a
+    strong ETag equal to the download's, and the last saved KiB sent again identical. Anything else starts again
+    from byte 0. Two versions are never joined.
   * A segment hash proves only that local bytes did not change. End-to-end authenticity needs a strong validator or
     a trusted checksum, and is not claimed otherwise.
 * Downloads land in a `.part` file and are renamed only after size (and checksum, if supplied)

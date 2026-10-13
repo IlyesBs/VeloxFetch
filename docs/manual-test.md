@@ -441,3 +441,11 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    message goes. Start: the file downloads.
 3. Wrong password: the download fails with "Sign in…" on its card and in its details; signing in there works.
 4. On a normal site the part stays closed and nothing changes.
+
+## AF. A slow server (issue #21; once per OS: Windows, Linux, macOS)
+1. Download a large file from a slow server (10–100 KB/s), and the same file in a browser at the same time, for 10
+   minutes. VeloxFetch's saved size is at least the browser's.
+2. In its details, Diagnostics: no "connection lost" lines while the connection count went down.
+3. A server that is slow to answer and breaks the connection (a file prepared on request, over a flaky line): the
+   download goes on from where it was ("Retrying", then the size keeps growing); it never falls back to 0 B, and the
+   finished file is exact (compare with the browser's copy).

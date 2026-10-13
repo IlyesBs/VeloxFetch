@@ -115,6 +115,15 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   limit: global, category, per download or Smart throttle), the controller changes nothing: a capped speed
   says nothing about the network. HTTP 429 / 503 reduce connections *immediately* and have their own retry
   budget.
+* Who stops when the count goes down (issue #21, `docs/slow-servers.md`): the controller's own lowerings (no gain,
+  a dip, errors, 429 / 503) are soft (`AdaptiveGate::set_limit_soft`). No new request goes over the limit, and a
+  request still waiting for its answer gives way (`GatePermit::until_over_limit`, raced against the request with
+  the answer first). A transfer checks `give_way_transferring`, which follows the `keep` count, lowered only by
+  `set_limit` (a speed limit, the user's settings). Joins: a request ending before an unfinished part reads a 1 KiB
+  tail. `check_joins` fetches what is left 4 at a time (`JOIN_LOOKS_AT_ONCE`). `run_sequential`: with a known size,
+  a broken attempt continues (`continue_sequential`: `Range` + `If-Range`, Content-Range total, 1 KiB overlap),
+  patiently for a server slow to answer (`HttpClient::get_range_patient`). It falls back to byte 0 once, for good,
+  when the server cannot.
 * A refused request ("too many connections") holds back the download's *new* requests: 1 s, then 2, 4… up to
   16 s while the server keeps refusing after each wait (`AdaptiveGate::server_refused`; a shorter `Retry-After`
   is taken, a longer one only for the refused part's own retry). Refusals that arrive during a wait are the same

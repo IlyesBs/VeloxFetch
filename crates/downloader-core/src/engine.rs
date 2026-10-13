@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, AtomicU16, AtomicU32, AtomicU64, AtomicU8, At
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use http_client::{parse_url, ClientConfig, HttpClient, HttpError, RequestExtras, ResourceInfo, Response};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
@@ -1033,7 +1033,14 @@ impl Downloader {
             // No size announced: the file is made while it is sent (an export, a generated report). Like a browser,
             // wait for such a server as long as it takes, before it answers and between two pieces.
             let patient = slow_server || rec.total_size.is_none();
-            self.run_sequential(&url, &part, &cancel, &progress, &throttle, &extras, patient.then(|| first_answer.take())).await.map(|_| 1)
+            // A known size: after a broken connection the transfer may continue where it stopped (see `run_sequential`).
+            let size = rec
+                .total_size
+                .filter(|t| *t > 0)
+                .map(|t| (t, info.etag.clone().filter(|e| !e.starts_with("W/")).or_else(|| info.last_modified.clone())));
+            self.run_sequential(&url, &part, &cancel, &progress, &throttle, &extras, patient.then(|| first_answer.take()), size)
+                .await
+                .map(|_| 1)
         };
         // Stop periodic checkpoints (letting an in-flight one land) before the final, authoritative one.
         if let Some(c) = checkpointer {
@@ -1359,7 +1366,8 @@ impl Downloader {
                                     if let Some(n) = ctl.lock().unwrap().on_throttled(Instant::now()) {
                                         tracing::info!(connections = n, "server is throttling: reducing connections");
                                         progress.note(RunEventKind::Throttled { connections: n });
-                                        gate.set_limit(n);
+                                        // Refused requests are new ones: the transfers already accepted go on.
+                                        gate.set_limit_soft(n);
                                     }
                                 }
                             }
@@ -1442,12 +1450,31 @@ impl Downloader {
                                         joins.lock().unwrap().unverified.insert(from);
                                     }
                                     // A run that ends at a part's end reads a little past it: the tail is kept (hashed) to
-                                    // check the join with whatever request writes the next part.
-                                    // Only needed when the part after it already started with nothing saved before it.
-                                    let tail_needed = capped.is_none() && end + 1 < total && joins.lock().unwrap().unverified.contains(&(end + 1));
+                                    // check the join with whatever request writes the next part. Needed when the part after
+                                    // it started with nothing saved before it, or may still (it is not finished): reading
+                                    // 1 KiB more now saves a separate request at the very end, which on a slow server waits
+                                    // for its answer like any other.
+                                    let tail_needed = capped.is_none()
+                                        && end + 1 < total
+                                        && (joins.lock().unwrap().unverified.contains(&(end + 1))
+                                            || progress.snapshot().segments.iter().any(|s| s.start == end + 1 && !s.is_complete()));
                                     let tail_end = if tail_needed { (end + OVERLAP).min(total - 1) } else { end };
                                     let sent = Instant::now();
-                                    let stream = client.get_range_with(url, from - back, tail_end, validator.as_deref(), extras).await?;
+                                    // While it waits for the answer, a lower limit makes it give way first: it has
+                                    // received nothing yet (a server that serves one request at a time keeps the
+                                    // others waiting), whereas a transferring connection would lose what is on its way.
+                                    // An answer already there is taken first (even a refusal: it is counted).
+                                    let stream = tokio::select! {
+                                        biased;
+                                        r = client.get_range_with(url, from - back, tail_end, validator.as_deref(), extras) => r?,
+                                        _ = _permit.until_over_limit() => {
+                                            if back == 0 && from > 0 {
+                                                joins.lock().unwrap().unverified.remove(&from);
+                                            }
+                                            progress.set_status(id, SegmentStatus::Pending);
+                                            continue 'again;
+                                        }
+                                    };
                                     // The answer's total must be the download's: another size is another file, whose
                                     // bytes must never be written among the saved ones.
                                     if stream.total().is_some_and(|t| t != total) {
@@ -1470,7 +1497,7 @@ impl Downloader {
                                         if i > 0 {
                                             // Too many connections now (the limit went down): this one stops here, the rest
                                             // of its run goes back to the parts' own turn.
-                                            if _permit.give_way() {
+                                            if _permit.give_way_transferring() {
                                                 break;
                                             }
                                             progress.set_status(seg, SegmentStatus::Downloading);
@@ -1488,7 +1515,7 @@ impl Downloader {
                                         // A request made before a speed limit came goes on for one short request's worth
                                         // (`AdaptiveGate::set_request_cap`), then its part continues on a new connection.
                                         // One after the other: closing every connection at once makes servers refuse.
-                                        let give_way = || _permit.give_way();
+                                        let give_way = || _permit.give_way_transferring();
                                         let enough = || {
                                             let (Some(c), None) = (gate.request_cap(), capped) else { return false };
                                             let now = request_bytes.load(Ordering::Relaxed);
@@ -1621,31 +1648,45 @@ impl Downloader {
         cancel: &CancellationToken,
     ) -> Result<()> {
         let mut file = tokio::fs::File::open(part).await?;
+        // Joins without a tail: (start of the window, the saved window) — fetched again below.
+        let mut look = Vec::new();
         for b in joins.unverified {
             if cancel.is_cancelled() {
                 return Err(DownloadError::Cancelled);
             }
             let len = OVERLAP.min(total - b);
-            let mut saved = vec![0u8; len as usize];
-            tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(b)).await?;
+            let start = b - OVERLAP.min(b);
+            let mut saved = vec![0u8; (b + len - start) as usize];
+            tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start)).await?;
             tokio::io::AsyncReadExt::read_exact(&mut file, &mut saved).await?;
             let same = match joins.tails.get(&b) {
-                Some(d) => *d == tail_digest(&saved),
+                Some(d) => *d == tail_digest(&saved[(b - start) as usize..]),
                 None => {
-                    // A final look: the bytes on both sides of the join, fetched again in one request.
-                    let start = b - OVERLAP.min(b);
-                    let mut before = vec![0u8; (b - start) as usize];
-                    tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start)).await?;
-                    tokio::io::AsyncReadExt::read_exact(&mut file, &mut before).await?;
-                    let body = self.fetch_exact(url, start, b + len - 1, validator, extras).await?;
-                    body[..before.len()] == before[..] && body[before.len()..] == saved[..]
+                    look.push((b, start, saved));
+                    true
                 }
             };
             if !same {
                 return Err(HttpError::SourceChanged(format!("the bytes at offset {b} come from another version of the file")).into());
             }
         }
-        Ok(())
+        // A final look: the bytes on both sides of each join, fetched again. Several at once: one after the other,
+        // each waits for its own answer, which on a slow server added seconds per join to the very end.
+        let checks = futures_util::stream::iter(look.into_iter().map(|(at, start, saved)| async move {
+            let end = start + saved.len() as u64 - 1;
+            let body = self.fetch_exact(url, start, end, validator, extras).await?;
+            if body != saved {
+                return Err(HttpError::SourceChanged(format!("the bytes at offset {at} come from another version of the file")).into());
+            }
+            Ok::<_, DownloadError>(())
+        }))
+        .buffer_unordered(JOIN_LOOKS_AT_ONCE)
+        .try_collect::<Vec<()>>();
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(DownloadError::Cancelled),
+            r = checks => r.map(|_| ()),
+        }
     }
 
     /// Exactly the bytes `start..=end`, from one checked ranged request (retried like a segment).
@@ -1707,6 +1748,13 @@ impl Downloader {
     /// `slow`: the server prepares the file before answering (`Some`, with its first answer if not used yet): every
     /// request waits for it patiently.
     #[allow(clippy::too_many_arguments)]
+    ///
+    /// With a known `size` (total, version tag), a broken connection need not cost what was saved: the next attempt
+    /// asks for the rest (a ranged request, `If-Range`), and those bytes are used only when the server proves it is the
+    /// same file (206 from that exact offset, the same total and version, and the last saved KiB sent again
+    /// identical). A server that cannot do that gets the old way: from byte 0, and is not asked again. A browser keeps
+    /// one unbroken connection; restarting a slow download from zero after each drop made it fall far behind.
+    #[allow(clippy::too_many_arguments)]
     async fn run_sequential(
         &self,
         url: &Url,
@@ -1716,9 +1764,11 @@ impl Downloader {
         throttle: &Throttle,
         extras: &RequestExtras,
         slow: Option<Option<Response>>,
+        size: Option<(u64, Option<String>)>,
     ) -> Result<u64> {
         let patient = slow.is_some();
         let first = std::sync::Mutex::new(slow.flatten());
+        let ranges = std::sync::atomic::AtomicBool::new(size.is_some());
         let res = retry::with_retry(
             &self.cfg.retry,
             cancel,
@@ -1729,6 +1779,22 @@ impl Downloader {
                 progress.note_retry(None, n, e, d);
             },
             |_| async {
+                let have = progress.segment(0).map_or(0, |s| s.downloaded);
+                if let Some((total, validator)) = size.as_ref().filter(|(t, _)| have > 0 && have < *t && ranges.load(Ordering::Relaxed)) {
+                    match self
+                        .continue_sequential(url, part, cancel, progress, throttle, extras, have, *total, validator.as_deref(), patient)
+                        .await
+                    {
+                        Ok(n) => return Ok(have + n),
+                        // A passing failure: the next attempt continues from what is saved by then.
+                        Err(e) if retry::classify(&e) == retry::ErrorClass::Retryable && !(patient && is_timeout(&e)) => return Err(e),
+                        Err(DownloadError::Cancelled) => return Err(DownloadError::Cancelled),
+                        Err(e) => {
+                            tracing::info!(error = %e, "the server cannot continue where the transfer stopped: starting again");
+                            ranges.store(false, Ordering::Relaxed);
+                        }
+                    }
+                }
                 progress.reset_segment(0);
                 progress.set_status(0, SegmentStatus::Downloading);
                 let sent = Instant::now();
@@ -1783,6 +1849,65 @@ impl Downloader {
         );
         res
     }
+
+    /// The rest of a single-connection transfer, from `have` (see [`run_sequential`](Self::run_sequential)): bytes
+    /// written after `have`.
+    #[allow(clippy::too_many_arguments)]
+    async fn continue_sequential(
+        &self,
+        url: &Url,
+        part: &Path,
+        cancel: &CancellationToken,
+        progress: &ProgressHandle,
+        throttle: &Throttle,
+        extras: &RequestExtras,
+        have: u64,
+        total: u64,
+        validator: Option<&str>,
+        patient: bool,
+    ) -> Result<u64> {
+        let back = have.min(OVERLAP);
+        let client = self.client();
+        let sent = Instant::now();
+        // A server that prepares the file before answering takes as long to answer this one.
+        let stream = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(DownloadError::Cancelled),
+            r = async {
+                if patient {
+                    client.get_range_patient(url, have - back, total - 1, validator, extras).await
+                } else {
+                    client.get_range_with(url, have - back, total - 1, validator, extras).await
+                }
+            } => r?,
+        };
+        if stream.total() != Some(total) {
+            return Err(HttpError::SourceChanged(format!("Content-Range total {:?}, expected {total}", stream.total())).into());
+        }
+        progress.note_status(206);
+        progress.record_latency(sent.elapsed());
+        progress.set_status(0, SegmentStatus::Downloading);
+        let mut stream = std::pin::pin!(if patient { client.patient_range_stream(stream).boxed() } else { stream.into_stream().boxed() });
+        let excess = check_overlap(&mut stream, part, have - back, back, 0).await?;
+        let want = total - have;
+        let source = futures_util::stream::iter(excess.map(Ok)).chain(stream.as_mut());
+        let params = PumpParams {
+            offset: have,
+            limit: Some(want),
+            buffer_size: self.cfg.buffer_size,
+            channel_capacity: self.cfg.channel_capacity,
+            throttle: Some(throttle.clone()),
+        };
+        let got = disk::pump(source, part, params, cancel, |n| progress.add(0, n)).await?;
+        if got < want {
+            return Err(DownloadError::ShortBody { index: 0, got, expected: want });
+        }
+        Ok(got)
+    }
+}
+
+fn is_timeout(e: &DownloadError) -> bool {
+    matches!(e, DownloadError::Http(h) if h.is_timeout())
 }
 
 /// Longest run of parts one request carries.
@@ -1923,10 +2048,10 @@ fn spawn_sampler(
                     let one = sample.throughput / active as f64;
                     per_connection = if per_connection < 1.0 { one } else { per_connection + 0.3 * (one - per_connection) };
                 }
-                let (decision, free) = {
+                let (decision, free, lowered) = {
                     let mut c = ctl.lock().unwrap();
                     let lowered = c.set_ceiling(ceiling());
-                    (c.observe(sample).or(lowered), c.limit())
+                    (c.observe(sample).or(lowered), c.limit(), lowered)
                 };
                 if let Some(n) = decision {
                     tracing::debug!(connections = n, throughput = sample.throughput, errors = sample.errors, "adaptive resize");
@@ -1943,7 +2068,13 @@ fn spawn_sampler(
                 });
                 let want = capped.unwrap_or(free);
                 if gate.limit() != want {
-                    gate.set_limit(want);
+                    // A speed limit or the user's settings stop the connections over it at once; the download's own
+                    // judgement (no gain, a dip, errors) only stops new requests and the ones still waiting.
+                    if capped.is_some() || lowered.is_some() {
+                        gate.set_limit(want);
+                    } else {
+                        gate.set_limit_soft(want);
+                    }
                 }
                 // Each capped connection's request: about REQUEST_SECS of its share of the limit.
                 gate.set_request_cap(
@@ -1975,6 +2106,8 @@ fn tail_digest(b: &[u8]) -> [u8; 32] {
 
 /// Bytes re-fetched before a request's start to check the join (see `overlap_before`).
 pub const OVERLAP: u64 = 1024;
+/// Final looks at joins (see `check_joins`) asked for at the same time: few, short requests.
+const JOIN_LOOKS_AT_ONCE: usize = 4;
 
 /// How many bytes before `from` are already saved and final, to fetch again and compare: the segment's own written
 /// prefix (written by an earlier, finished request), else the end of the complete segment just before it.
