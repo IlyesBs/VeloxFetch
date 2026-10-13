@@ -330,6 +330,15 @@ Details: `docs/download-intelligence.md`.
   app's language. Starting VeloxFetch again brings the hidden window back.
 - Settings > Appearance > **On the desktop** holds the three switches.
 
+### Updates
+- **Settings > Updates** says whether a newer version exists, downloads it on request, and installs it: the Windows
+  setup runs, an AppImage replaces itself and restarts, a `.deb` / `.rpm` / `.dmg` opens in the system's installer,
+  a portable copy opens the release page. The status bar says "Up to date" or "Update x.y.z available / ready".
+- **Only the owner's offline key can sign an update.** Every check: the Ed25519 signature (key compiled in), a newer
+  version (never a downgrade), never older information than already seen, and the package's exact size and
+  SHA-256, before it is kept and again right before it is installed. Automatic checks (on by default) only check:
+  downloading and installing wait for the user. Details: `docs/auto-update.md`.
+
 ### Live preview
 - The details of an audio / video download can **play it while it downloads**, from the bytes already on disk.
 - **Every OS:**
@@ -595,7 +604,9 @@ messages, downloaded files, update data and UI requests.
   - ffmpeg, yt-dlp and the power tools run with fixed arguments as arrays;
   - no shell, and nothing user-typed reaches a command line.
 - **Power actions:** never fire on quit, and are forgotten at restart.
-- **Updates:** no in-app updater yet, on purpose. A signed design comes first (Phase 19).
+- **Updates:** only a manifest signed with the owner's offline Ed25519 key is believed (public key compiled in,
+  HTTPS, no downgrade, no replay); the package's size and SHA-256 are checked before it is kept and before it is
+  installed; nothing installs without the user (`docs/auto-update.md`).
 - **Release gate:** `scripts/security-gate.mjs` runs cargo-audit / deny, npm audit, a policy test, an SBOM and
   checksums.
 
@@ -614,12 +625,14 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
+| Updates | `<app data>/updates` (only the current package); settings `update.auto`, `update.checked`, `update.released` |
 | UI-only preferences (folded sidebar, density, sort, open queue tab, language, theme) | `localStorage` |
 | How the browser helper starts the app | `<app data>/app-path` (written by the app at each start) |
 | Start at login (when turned on) | Windows `HKCU\...\CurrentVersion\Run`, `~/.config/autostart/app.velox.fetch.desktop`, `~/Library/LaunchAgents/app.velox.fetch.plist` |
 | Second-launch signal (Linux / macOS) | `<app data>/show.sock` (or the user's runtime folder when the path is too long) |
 
-Nothing is sent to any server except the downloads themselves.
+Nothing is sent to any server except the downloads themselves and the anonymous update check (two small public
+files from GitHub; it can be turned off: `docs/PRIVACY.md`).
 
 ---
 
@@ -635,7 +648,7 @@ npm --prefix apps/desktop run build
 cargo build -p velox-desktop --features velox-desktop/custom-protocol -p velox-native-host -p velox-integration-tests
 node tests/e2e/desktop-<suite>.mjs
 #   suites: ipc, ui, redesign, views, usability, queue, smart-queue, intelligence, folders, batch, media, video,
-#           preview, diagnostics, browser, throttle, gaming, perf   (ipc also needs `cargo build --bin velox`)
+#           preview, diagnostics, browser, throttle, gaming, perf, updates   (ipc also needs `cargo build --bin velox`)
 
 # full release for the current OS (installer, portable zip, extension zips, SHA256SUMS, security gate):
 bash scripts/build-release.sh
@@ -693,18 +706,17 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | 18 | macOS | ✅ | .app / .dmg, code signing, notarization, entitlements, login item, native notifications |
 | + | Extras after Phase 18 | ✅ | Smart Throttle automatic mode; Smart Download Queue (several queues with rules, start times, order, express lane, timeline); Download Intelligence (pre-download analysis: resume, strategy, storage, duplicates, sign-in, temporary links, warnings); Download Doctor (failure diagnosis: cause, where, retry class, severity, factors, actions); Smart Duplicate Detection (a link the app already has, in any state, with a confidence and the finished file's state; a taken file name told apart from a duplicate; advisory, never replaces anything); Download Profiles (Default / Fast / Balanced / Low resource and your own: presets over existing settings, one precedence rule, applied live without restarts); Download again (a finished, cancelled or failed download fetched again from the start on its own entry; a deleted file shown as missing; never overwrites); Video download details (a details page for every video download, like a file's) |
 | + | Fixes after Phase 18 | ✅ | Smart throttle that really applies (same-window traffic measurement, a cap from today's speed, no fake browsing while capped), no stop when switching it or its modes, its card / Settings / status bar always agreeing; a steady download speed (no 4 → 2 → 1 connection cycling, no burst-then-stop when a limit changes, smooth progress at low speeds); a smooth interface on Linux (no costly shadows, the backdrop as a picture: 23 -> 62 fps with downloads running) and a window that appears as soon as the interface is ready, in the theme's colour; a gaming policy for Smart throttle (give way / low limit / pause, videos too, programs by name or full path, debounced detection, safe on scan failure and restart); live preview on Linux and macOS (private local address, growing-file answers, start first under a speed limit, media plugins installed with the Linux packages); every known test failure fixed; a steady speed on servers that limit connections (a refusal holds new requests back instead of a storm of refusals, runs of parts per request) and a Smart throttle cap that holds on the line (only the connections it needs, short requests, no stop at the start, no false browsing, no window flashing); up to 64 connections everywhere (the Fast profile and files of 10–200 MB were held at 32 or 16); drop-down lists drawn by the app in the theme's colours on every system (the system list was grey on Linux); the release script's AppImage step (patchelf and media plugins always installed, never a failed release for them) |
-| **19** | Auto update | 🔜 | Signed update manifest (offline key), HTTPS, no downgrade, verify *before* install; never "download then run" |
+| 19 | Auto update | ✅ | Ed25519-signed manifest (offline, passphrase-encrypted key; public key compiled in), HTTPS, no downgrade, no replay, size + SHA-256 verified before keeping and before install; Windows setup / AppImage self-replace / system installer / release page; Settings > Updates and the status bar |
 | 20 | Performance benchmarking | ⏳ | 100 MB to 50 GB × 1 to 32+ connections; MB/s, CPU, RAM, disk, startup, UI FPS, IPC latency, DB cost |
 | 21 | Release candidate | ⏳ | Gate: engine, resume, crash recovery, UI, browser, security, audit, signed installer, updater, 3 OSes tested |
 | 22 | Beta | ⏳ | Internal alpha, then private beta, public beta, RC and stable; opt-in, documented crash and performance reports |
 
-> **Phase 19 starts only when the owner says "Start phase 19".**
+> Phase 19 was started by the owner on 2026-10-13 ("start the phase 19 to 21").
 
 ### Open items (known gaps)
 
 **From the reference design**, these need data the app does not measure yet:
 - the time a download took, on its completed card;
-- "up to date" in the status bar, which needs Phase 19.
 
 **Other open items:**
 - release signing is wired but waits for the owner's certificates (docs/release-process.md);
@@ -748,7 +760,8 @@ More: `docs/testing.md`, `docs/release-process.md`.
     nothing new is asked, skip it. Commit on a branch named after the feature.
 14. **Document every task:** this overview, the README, `docs/architecture.md`, `docs/security.md`,
     `docs/threat-model.md`, `docs/manual-test.md`, `docs/testing.md`, and the feature's own document.
-15. **Phase 19** starts only when the owner says so.
+15. **Updates:** never add another way to fetch or run a new version. Only `crates/update-verify` decides whether an
+    update is genuine, and only the owner signs, offline (`docs/auto-update.md`).
 
 ---
 
@@ -800,6 +813,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Use a new link (expired links, sessions, mirrors) | `docs/new-link-recovery.md` |
 | Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
 | Slow servers (as fast as a browser) | `docs/slow-servers.md` |
+| Updates (signed, offline key, install per system) | `docs/auto-update.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Design decisions over time | `docs/adr/` |
@@ -816,6 +830,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `phase19_auto_update` | Phase 19 | Updates: Settings > Updates and the status bar. A manifest signed with the owner's offline Ed25519 key (`scripts/update-key.mjs`: passphrase-encrypted, terminal only, never in CI; public key in `update-keys.txt`, compiled in) is verified strictly before it is read (`crates/update-verify`); no downgrade, no replay; the package is kept only after its exact size and SHA-256 match, checked again before install; Windows setup run under a read-only-sharing lock, AppImage replaced atomically and restarted, `.deb` / `.rpm` / `.dmg` opened in the system's installer, portable copies get the release page. Automatic checks (on, can be turned off) never download or install by themselves. Six main-window commands, none taking an address or a path. | `docs/auto-update.md` |
 | 2026-10-12 | `fix_slow_server_speed` | Fix | Issue #21: a slow server downloaded slower than in a browser. (1) Lowering the connection count (a step that brought nothing, a dip, errors, 429 / 503) cut the connection that was transferring and kept the requests still waiting for an answer: now requests waiting give way and transfers finish (`set_limit_soft`); only a speed limit or the user's settings cut transfers. (2) Joins of parts started side by side were checked at the end, one request after the other: now from 1 KiB tails read with the request, the rest 4 at a time. (3) A one-connection transfer (server slow to answer) restarted from byte 0 after each broken connection: now it continues with `Range` + `If-Range` when the server proves the same file (206 at the offset, same total and version, last KiB identical), else from 0 as before. On a 10–50 KB/s server answering in 2 s: 226 s → 213.6 s next to curl's 210 s (the first check's wait is the difference). | `docs/slow-servers.md` |
 | 2026-10-12 | `fix_diagnostics_e2e_retry` | Test | `desktop-diagnostics.mjs` pressed the error box's last button, which became "Use a new link…" when that feature came: the details' Retry button now has its own id (`detail-retry`) and the test uses it. No change in behaviour. | `docs/testing.md` |
 | 2026-10-12 | `fix_pending_signin` | Fix | The browser confirmation popup can take the site's user name and password: its "Sign in to this site" part opens by itself when the check found that the server asks for them. Checked before the request is taken (a mistake keeps it waiting), sealed with the download like the Add dialog's, never shown back or logged. Without it, the card and details still offer Sign in. | `docs/security.md` |

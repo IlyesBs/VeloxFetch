@@ -1,0 +1,2 @@
+# Signed bytes: never converted (a CRLF checkout would break the signature).
+crates/update-verify/tests/fixtures/** -text

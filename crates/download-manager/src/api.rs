@@ -487,6 +487,63 @@ pub enum ManagerEvent {
     Profiles {
         profiles: crate::profiles::ProfilesDto,
     },
+    /// The update state changed (a check, a download's progress, ready to install).
+    Update {
+        update: UpdateDto,
+    },
+}
+
+/// Where updates come from and what they are checked against (Phase 19, `manager/update.rs`). Every value is
+/// fixed by the build: nothing here comes from the UI, a page or the network.
+#[derive(Debug, Clone)]
+pub struct UpdateConfig {
+    /// The public keys the signed manifest must match (an empty set: no updates).
+    pub keys: update_verify::TrustedKeys,
+    /// The product name and the release folder every package address must be in.
+    pub policy: update_verify::Policy,
+    /// The manifest's address; the signature is at the same address plus `.sig`.
+    pub feed: String,
+    /// The release page, for a copy that cannot install a package itself (portable).
+    pub release_page: String,
+    /// This copy's version.
+    pub current: update_verify::Version,
+    /// How this copy was installed: `nsis`, `appimage`, `deb`, `rpm`, `dmg`; `None` = portable.
+    pub kind: Option<String>,
+    /// Tests only: `http://127.0.0.1` addresses are accepted. Always false in the app.
+    pub allow_loopback_http: bool,
+    /// The first background check, after start-up, then one every `every` (when the user wants it).
+    pub first_check: std::time::Duration,
+    pub every: std::time::Duration,
+    /// Where packages are kept (`None`: `updates` next to the database).
+    pub dir: Option<PathBuf>,
+}
+
+/// The update state, for Settings > Updates and the status bar.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDto {
+    /// This copy has a trusted key and a fixed address: it can check for updates at all.
+    pub supported: bool,
+    /// Check in the background (on by default).
+    pub auto_check: bool,
+    /// `idle`, `checking`, `upToDate`, `available`, `elsewhere` (newer, but not as a package for this
+    /// installation), `downloading`, `ready`, `failed`.
+    pub phase: &'static str,
+    pub current: String,
+    /// The newer version, when there is one.
+    pub version: Option<String>,
+    /// Its package's size.
+    pub size: Option<u64>,
+    pub received: u64,
+    pub total: u64,
+    /// The last finished check (seconds since 1970).
+    pub checked_at: Option<u64>,
+    /// `network`, `signature`, `malformed`, `rejected`, `stale`, `corrupt`, `disk`, `install`.
+    pub error: Option<&'static str>,
+    /// `restart` (the app installs and starts again), `package` (the system's installer opens), `page`
+    /// (the release page opens: a portable copy).
+    pub install: &'static str,
+    pub release_page: Option<String>,
 }
 
 /// What the UI may specify to download a stream (HLS / DASH). Ids come from an earlier analysis;
@@ -1175,6 +1232,8 @@ pub struct ManagerConfig {
     pub log: Option<diagnostics::LogHandle>,
     /// The program to start at login (the app itself; an AppImage file). `None`: starting at login is not offered.
     pub app_launcher: Option<PathBuf>,
+    /// Updates (`None`: this copy never checks; tests and the command-line tool).
+    pub update: Option<UpdateConfig>,
 }
 
 impl ManagerConfig {
@@ -1201,6 +1260,7 @@ impl ManagerConfig {
             organize_default: false,
             log: None,
             app_launcher: None,
+            update: None,
         }
     }
 }

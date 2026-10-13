@@ -23,5 +23,5 @@ pub use batch::{BatchItem, BatchPreview, BatchRequest, BatchResult, ItemState, M
 pub use downloader_core::{DownloadStatus, Priority};
 pub use manager::{
     is_stream_link, preview_media_type, smart_throttle_find_running, smart_throttle_is_app_path, DownloadManager, PreviewHead,
-    PreviewResponse, ThrottleSignals, MAIN_QUEUE, SECRET_KEY_NAME, SMART_THROTTLE_DEFAULT_APPS, THROTTLE_IDLE_AFTER,
+    PreviewResponse, ThrottleSignals, UpdatePlan, MAIN_QUEUE, SECRET_KEY_NAME, SMART_THROTTLE_DEFAULT_APPS, THROTTLE_IDLE_AFTER,
 };

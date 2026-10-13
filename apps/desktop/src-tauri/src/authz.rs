@@ -94,11 +94,17 @@ pub enum Command {
     DeleteQueue,
     QueueAction,
     PlaceDownload,
+    GetUpdateStatus,
+    CheckForUpdates,
+    DownloadUpdate,
+    InstallUpdate,
+    SetUpdateAuto,
+    OpenReleasePage,
 }
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 82] = [
+    pub const ALL: [Command; 88] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -181,6 +187,12 @@ impl Command {
         Command::DeleteQueue,
         Command::QueueAction,
         Command::PlaceDownload,
+        Command::GetUpdateStatus,
+        Command::CheckForUpdates,
+        Command::DownloadUpdate,
+        Command::InstallUpdate,
+        Command::SetUpdateAuto,
+        Command::OpenReleasePage,
     ];
 
     /// The Rust/JS command name, e.g. `create_download`.
@@ -268,6 +280,12 @@ impl Command {
             Command::DeleteQueue => "delete_queue",
             Command::QueueAction => "queue_action",
             Command::PlaceDownload => "place_download",
+            Command::GetUpdateStatus => "get_update_status",
+            Command::CheckForUpdates => "check_for_updates",
+            Command::DownloadUpdate => "download_update",
+            Command::InstallUpdate => "install_update",
+            Command::SetUpdateAuto => "set_update_auto",
+            Command::OpenReleasePage => "open_release_page",
         }
     }
 
@@ -410,6 +428,12 @@ mod tests {
             Command::FetchVideoTools,
             Command::SetVideoBar,
             Command::WindowControl,
+            Command::GetUpdateStatus,
+            Command::CheckForUpdates,
+            Command::DownloadUpdate,
+            Command::InstallUpdate,
+            Command::SetUpdateAuto,
+            Command::OpenReleasePage,
         ] {
             assert!(allowed(MAIN, cmd));
             assert!(!allowed(SETTINGS, cmd) && !allowed(DOWNLOAD_DETAIL, cmd), "{cmd:?}");

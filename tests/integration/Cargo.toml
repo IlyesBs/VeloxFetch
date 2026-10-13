@@ -31,3 +31,6 @@ tracing.workspace = true
 serde_json = "1"
 url.workspace = true
 sha2 = "0.11.0"
+update-verify = { path = "../../crates/update-verify" }
+# Signs the test manifests with a throwaway key (the app itself only verifies).
+ed25519-dalek = { version = "3", default-features = false, features = ["fast", "zeroize"] }

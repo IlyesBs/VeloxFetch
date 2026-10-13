@@ -611,3 +611,29 @@ download's analysis says `access: authRequired`. `api.confirmPendingDownload(...
 `ConfirmPending` (`username`, `password`); `manager/pending.rs::confirm_pending` validates them before taking the
 request, then sets them on the `NewDownload`, and `create_inner` seals them like the Add dialog's. Without a sign-in a
 protected download fails with `needs: signIn`, and its card and details page still offer **Sign in…**.
+
+## Updates (Phase 19)
+
+```
+lib.rs update_config()  --UpdateConfig (keys from update-keys.txt, fixed feed, kind)-->  DownloadManager
+manager/update.rs       check_for_updates -> update_verify::{verify_manifest, decide} -> state + ManagerEvent::Update
+                        download_update   -> <app data>/updates/<name>.part -> check_file -> rename  ("ready")
+                        prepare_update_install -> check_file again -> UpdatePlan
+lib.rs install_update   -> system_integration::update::install(kind, path, size, sha256)  (checks again)
+                        -> Restart: app.exit(0) (normal shutdown)  |  Opened: the system's installer
+```
+
+* `crates/update-verify`: pure checks (no network, no writes): trusted keys, the signed manifest, versions, the
+  package for a target, a file's exact size and SHA-256. Used by the manager, `system-integration` and its tests.
+* `download-manager/src/manager/update.rs`: the state machine (`idle`, `checking`, `upToDate`, `available`,
+  `elsewhere`, `downloading`, `ready`, `failed`), the background check (60 s after start, then every 12 h, when the
+  setting `update.auto` is on), its own HTTP client (the user's proxy, no cookies, no extra headers).
+* `system-integration/src/update.rs`: the installation kind (`installation_kind`), the install per system
+  (`run_windows_setup` with a read-only-sharing handle, `replace_file` for the AppImage, the system's opener for
+  `.deb` / `.rpm` / `.dmg`), the release page. A relaunched AppImage gets `--after-update` and waits (up to 60 s) in
+  `lib.rs` for the old copy to free the browser link before taking over.
+* IPC (main window only): `get_update_status`, `check_for_updates`, `download_update`, `install_update`,
+  `set_update_auto`, `open_release_page`. None takes an address, a path or a version.
+* UI: `components/UpdateSettings.tsx` (Settings > Updates), the status bar item, `State.update` fed by the `update`
+  event. Text in `locales/*.json` (`upd.*`, `foot.update*`).
+* Release side: `scripts/update-key.mjs` (`generate`, `manifest`, `sign`, `verify`). Details: `docs/auto-update.md`.

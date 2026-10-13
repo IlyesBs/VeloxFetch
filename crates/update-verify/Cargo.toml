@@ -1,0 +1,16 @@
+[package]
+name = "update-verify"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Checks a VeloxFetch update before anything is written or run: signed manifest, version, package hash"
+
+# Pure checks: no network, no runtime, no file writes. Ed25519 (RustCrypto / dalek, pure Rust) and SHA-256.
+[dependencies]
+ed25519-dalek = { version = "3", default-features = false, features = ["fast", "zeroize"] }
+sha2 = "0.11"
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true
+

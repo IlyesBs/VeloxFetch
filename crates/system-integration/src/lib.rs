@@ -16,6 +16,7 @@ pub mod network;
 pub mod sandboxed_browsers;
 pub mod store_extension;
 pub mod system;
+pub mod update;
 
 pub use network::{ConnectionKind, NetworkState};
 pub use system::{DryRunSystem, KeepAwake, NativeSystem, Notification, ProtocolHandler, SystemCall, SystemError, SystemIntegration};

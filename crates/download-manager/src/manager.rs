@@ -31,6 +31,7 @@ mod smart_throttle;
 mod storage;
 mod sysio;
 mod tools;
+mod update;
 
 pub use media::is_stream_link;
 use pending::PendingList;
@@ -42,6 +43,7 @@ pub use smart_throttle::{
     DEFAULT_APPS as SMART_THROTTLE_DEFAULT_APPS, IDLE_AFTER as THROTTLE_IDLE_AFTER,
 };
 use storage::{Sorter, Storage};
+pub use update::UpdatePlan;
 
 /// Time constant of the speed shown for each download: long enough that the short pause between two parts of
 /// a connection (a new request) and bursts of buffered data do not make the number jump, short enough that a
@@ -139,6 +141,8 @@ struct Inner {
     profiles: Mutex<profiles::ProfilesState>,
     /// yt-dlp / Deno / ffmpeg fetched on first use (`tools.rs`).
     tools: tools::ToolsState,
+    /// Updates of VeloxFetch itself (`update.rs`).
+    update: update::UpdateRuntime,
     /// Replaced when the network settings change (see `network.rs`).
     media_http: std::sync::RwLock<http_client::HttpClient>,
     /// Seals secrets kept in the settings (the proxy password). `None`: they stay in memory only.
@@ -295,6 +299,7 @@ impl DownloadManager {
             preview: Mutex::new(Default::default()),
             profiles: Mutex::new(profiles),
             tools: Default::default(),
+            update: Default::default(),
             media_http,
             sealer: settings_sealer,
             network: Mutex::new(network),
@@ -320,6 +325,7 @@ impl DownloadManager {
         mgr.reconcile().await;
         mgr.evaluate_queues().await;
         mgr.spawn_queue_loop();
+        mgr.spawn_update_checks();
         Ok(mgr)
     }
 

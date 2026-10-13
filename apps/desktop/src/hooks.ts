@@ -59,6 +59,11 @@ export async function bootstrap(): Promise<() => void> {
         (profiles) => store.dispatch({ type: "profiles", profiles }),
         () => {},
       );
+      // Updates: Settings > Updates and the status bar degrade on their own too.
+      api.getUpdateStatus().then(
+        (update) => store.dispatch({ type: "update", update }),
+        () => {},
+      );
     } catch (e) {
       store.toast("error", normalizeError(e).message);
     }

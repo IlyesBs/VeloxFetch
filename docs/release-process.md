@@ -134,11 +134,22 @@ exists (otherwise that system's files are unsigned, and the build says so). Loca
 1. Compare the installer's SHA-256 with `SHA256SUMS.txt` (`certutil -hashfile <file> SHA256` on Windows, `shasum -a 256 <file>` elsewhere), and get `SHA256SUMS.txt` from a channel you trust (the release page over HTTPS), not from the same place as a mirror.
 2. When signatures exist: verify the detached signature over `SHA256SUMS.txt`, and check that the installer's Windows signature says "VeloxFetch" (right-click > Properties > Digital Signatures).
 
-## Updates
+## Updates (Phase 19)
 
-There is no in-app updater, on purpose: a bad updater is the most powerful attack on a desktop app. Until one is designed:
-users install new versions manually, and `tauri-plugin-updater` is a banned crate. The design that has to exist first: an update manifest signed with an offline key
-whose public half is compiled into the app, HTTPS only, monotonic version numbers (no downgrade), verification *before* anything is written or run, and a documented key-rotation plan.
+The app updates itself only from a manifest signed with the owner's **offline** Ed25519 key (`docs/auto-update.md`).
+`tauri-plugin-updater` stays banned: the design is our own and reviewed. CI never signs and holds no update key.
+
+For each release, after the packages are built and checked:
+
+```
+node scripts/update-key.mjs manifest --version x.y.z --dir release [--dir <another system's release folder>]...
+node scripts/update-key.mjs sign --key <offline drive>/update-signing-key.json     # asks the passphrase
+node scripts/update-key.mjs verify
+```
+
+then upload `latest.json` and `latest.json.sig` with the packages to the draft release, check it, and publish it.
+The key itself is made once with `node scripts/update-key.mjs generate` (before the first release, so that release
+already trusts it); its public line goes into `apps/desktop/src-tauri/update-keys.txt`.
 
 ## Dependency policy
 

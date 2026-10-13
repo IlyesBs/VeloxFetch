@@ -577,7 +577,27 @@ export type ManagerEvent =
   | { type: "pendingRemoved"; token: number }
   | { type: "media"; job: MediaJob }
   | { type: "mediaRemoved"; id: number }
-  | { type: "profiles"; profiles: Profiles };
+  | { type: "profiles"; profiles: Profiles }
+  | { type: "update"; update: UpdateStatus };
+
+/** Updates of VeloxFetch itself (Settings > Updates, the status bar). Checked in Rust against the publisher's signature. */
+export interface UpdateStatus {
+  /** This copy can check for updates at all (a trusted key and a fixed address are built in). */
+  supported: boolean;
+  autoCheck: boolean;
+  phase: "idle" | "checking" | "upToDate" | "available" | "elsewhere" | "downloading" | "ready" | "failed";
+  current: string;
+  version: string | null;
+  size: number | null;
+  received: number;
+  total: number;
+  /** Seconds since 1970. */
+  checkedAt: number | null;
+  error: "network" | "signature" | "malformed" | "rejected" | "stale" | "corrupt" | "disk" | "install" | "off" | null;
+  /** restart: the app installs and starts again; package: the system's installer opens; page: the release page opens. */
+  install: "restart" | "package" | "page";
+  releasePage: string | null;
+}
 
 /** Download Profiles: presets over the existing settings (null: the user's own setting stays). */
 export interface ProfileSettings {
