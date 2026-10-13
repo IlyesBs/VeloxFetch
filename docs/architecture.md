@@ -648,6 +648,10 @@ lib.rs install_update   -> system_integration::update::install(kind, path, size,
 * UI: `components/UpdateSettings.tsx` (Settings > Updates), the status bar item, `State.update` fed by the `update`
   event. Text in `locales/*.json` (`upd.*`, `foot.update*`).
 * Release side: `scripts/update-key.mjs` (`generate`, `manifest`, `sign`, `verify`). Details: `docs/auto-update.md`.
+* Publishing: `scripts/publish-release.sh` drives `build-release.sh`, `scripts/publish-kit.mjs` (`preflight`,
+  `check-binary`, `stage`: no dependencies) and `update-key.mjs`; the texts are templates in `docs/publish/`. The
+  update feed, the release page and the manifest's package addresses all name the public repository
+  `IlyesBs/VeloxFetch-releases`. Details: `docs/publishing.md`.
 
 ## Performance measurement (Phase 20)
 

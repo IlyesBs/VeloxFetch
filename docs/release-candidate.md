@@ -33,12 +33,16 @@ Done on top of the per-feature reviews in `docs/security.md` and `docs/threat-mo
   while hashed (AppImage). Key handling in `docs/auto-update.md`.
 * **Dependencies:** 0 known vulnerabilities (Rust and npm); only crates.io; permissive licences; the new crate
   `ed25519-dalek` (BSD-3-Clause, RustCrypto / dalek) is pure Rust, no unsafe C.
-* **Tampering ("cracking"):** VeloxFetch is open source (MIT) with nothing to unlock, so the protection that matters
-  is that users run *genuine* builds: published checksums (`SHA256SUMS.txt`, its GPG signature when the key exists),
+* **Tampering ("cracking"):** VeloxFetch is free with nothing to unlock (its source is kept private; the public
+  repository `IlyesBs/VeloxFetch-releases` holds only the releases), so the protection that matters is that users
+  run *genuine* builds: published checksums (`SHA256SUMS.txt`, its GPG signature when the key exists),
   code signatures (when the certificates exist), and updates that only the owner's key can sign. A modified copy
   from elsewhere cannot get its changes into installed copies through the updater.
 
 ## Release steps (owner)
+
+Steps 3 – 4 (and the release text, the public README, the texts for download sites) are one command since the
+publishing kit: `bash scripts/publish-release.sh` (`docs/publishing.md`).
 
 1. **Update key** (once, before building 1.0.0): `node scripts/update-key.mjs generate` in a terminal; commit
    `apps/desktop/src-tauri/update-keys.txt`; copy the private key file to two offline drives.

@@ -23,7 +23,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let KEYS_FILE = path.join(ROOT, "apps", "desktop", "src-tauri", "update-keys.txt");
 const DEFAULT_KEY = path.join(os.homedir(), ".config", "veloxfetch-release", "update-signing-key.json");
-const REPO = "IlyesBs/VeloxFetch";
+// The public download repository (the app's UPDATE_PACKAGES); the source repository is private.
+const REPO = "IlyesBs/VeloxFetch-releases";
 const PRODUCT = "VeloxFetch";
 const SIGNING_CONTEXT = Buffer.from("VeloxFetch update manifest v1\n");
 const KEY_PREFIX = "velox-update-key-v1";
@@ -93,9 +94,10 @@ function hashFile(file) {
 function askHidden(prompt) {
   if (!process.stdin.isTTY) fail("the passphrase is only read from a terminal (not a pipe, a file or a variable)");
   return new Promise((resolve) => {
-    process.stdout.write(prompt);
     const stdin = process.stdin;
+    // Echo off before the question is shown: what is typed the moment it appears never reaches the screen.
     stdin.setRawMode(true);
+    process.stdout.write(prompt);
     stdin.resume();
     let chars = [];
     const done = (value) => {

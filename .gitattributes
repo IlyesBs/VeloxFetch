@@ -1,2 +1,4 @@
 # Signed bytes: never converted (a CRLF checkout would break the signature).
 crates/update-verify/tests/fixtures/** -text
+# Shell scripts run in bash on every system (Git Bash on Windows): a CRLF checkout would break them.
+*.sh text eol=lf

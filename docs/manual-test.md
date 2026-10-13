@@ -471,6 +471,15 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AL. Publishing a release (owner, once per release)
+1. `bash scripts/publish-release.sh --key <drive>/update-signing-key.json --merge <Windows release> --merge <macOS
+   release>`: it builds, runs the full gate, asks the passphrase once, and ends with "Ready".
+2. `release/publish/v<version>/files`: every system's installer, the portable zips, the extension zips,
+   `SHA256SUMS.txt`, `latest.json` and `latest.json.sig`. `RELEASE_NOTES.md` lists them by system.
+3. Open `repo/README.md` in a Markdown viewer: the pictures show, the links go to `IlyesBs/VeloxFetch-releases`.
+4. After publishing on GitHub: an older installed copy (Settings > Updates > Check now) finds the new version, and
+   downloading it from the release page gives a file whose SHA-256 is the line in `SHA256SUMS.txt`.
+
 ## AK. Arabic layout (once per OS)
 1. Settings > Language > العربية, with a few downloads in the list: the window has a vertical scrollbar on the
    downloads (on the left on Linux) and never a sideways scrollbar along the bottom; nothing is cut at either edge.

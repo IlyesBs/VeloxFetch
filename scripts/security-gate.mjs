@@ -133,6 +133,7 @@ if (full) {
   run("Rust tests (unit, integration, robustness)", "cargo", ["test", "--workspace", "--locked"]);
   run("UI tests", "npm", ["test", "--prefix", "apps/desktop"]);
   run("Extension tests", "npm", ["test", "--prefix", "apps/browser-extension"]);
+  run("Release kit tests (publish-release.sh, throwaway key)", process.execPath, ["--test", "tests/release/publish-kit.test.mjs"]);
 }
 run("Security policy tests", process.execPath, ["--test", "tests/security/policy.test.mjs"]);
 
