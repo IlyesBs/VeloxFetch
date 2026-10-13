@@ -16,7 +16,7 @@ Free, no account, no ads, no tracking. For {{SYSTEMS}}.
 * **Videos:** video pages and HLS / DASH streams in the quality you pick; MP3 / M4A / Opus sound only; watch while
   it downloads.
 * **Browser extension** for Chrome, Edge, Brave and Firefox; sign-in protected downloads work.
-* **English, French and Arabic**, dark and light themes; signed automatic updates (you choose when to install).
+* **English, Spanish, Portuguese, German, French, Russian, Turkish and Arabic** (it starts in your computer's language), dark and light themes; signed automatic updates (you choose when to install).
 
 ### Downloads
 

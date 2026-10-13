@@ -4,7 +4,7 @@
 
 ### Faster downloads that never get lost.
 
-Free download manager for **{{PLATFORMS}}** · English · Français · العربية
+Free download manager for **{{PLATFORMS}}** · English · Español · Português · Deutsch · Français · Русский · Türkçe · العربية
 
 No ads · No account · No tracking
 
@@ -58,7 +58,7 @@ sites where you are signed in.
 * Speed limits whenever you need them, and ready-made profiles: Fast, Balanced, Low resource
 * Files sorted into folders by type, and a file is never overwritten
 * A history of everything you downloaded, to open it again or download it again
-* Light and dark themes, fully translated into English, French and Arabic
+* Light and dark themes, in English, Spanish, Portuguese, German, French, Russian, Turkish and Arabic (it starts in your computer's language)
 * Updates itself safely, and only when you agree
 
 | | |

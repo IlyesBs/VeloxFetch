@@ -706,8 +706,8 @@ when a build has no update key. All 20 desktop suites pass on Linux.
 
 | Test | Checks |
 |---|---|
-| `tests/e2e/desktop-i18n.mjs` | French and Arabic: every page, every Settings section, the Add and Batch dialogs and a failed download's details have no English words (links, paths, file names, the product name and log lines left out) |
-| `apps/desktop/src/timeline.test.ts` (3) | every kind of timeline line the manager writes is said in French and Arabic without English left; English unchanged; unknown lines kept |
+| `tests/e2e/desktop-i18n.mjs` | Every language (`docs/languages.md`): every page, every Settings section, the Add and Batch dialogs and a failed download's details have no English words (links, paths, file names, the product name and log lines left out) |
+| `apps/desktop/src/timeline.test.ts` (3) | every kind of timeline line the manager writes is said in every language without English left (words a language shares with English allowed); English unchanged; unknown lines kept |
 | `apps/desktop/src/messages.test.ts` (2) | every `ManagerError::invalid("…")` in `crates/download-manager/src` is in `messages.ts`; a refusal is said in French / Arabic; English and unknown messages unchanged |
 | `apps/desktop/src/errors.test.ts` (2) | video job errors by code; the Queue page's failed download in the user's language |
 | `download-manager` `video_failures_get_a_stable_code_for_the_ui` | DRM, live, playlist, sign-in, no video, site, remux, disk full, other file errors |

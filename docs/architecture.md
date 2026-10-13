@@ -453,10 +453,11 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   buttons, as they narrow (container queries). The window opens at 1360 x 860 but never larger than 92 % of the
   screen's work area (`fit_to_screen` in `lib.rs`). Layout choices (folded sidebar, density, sort) are kept in
   `prefs.ts` (localStorage `velox.ui`, cosmetic only).
-* **Languages** (`src/i18n.ts`): English, French, Arabic. `<html lang dir>`; layouts use logical sides
+* **Languages** (`src/i18n.ts`, `docs/languages.md`): English, French, Arabic, Spanish, Portuguese (Brazil), German, Russian and Turkish; the first start follows `navigator.languages`
+  (`pickLang`). `<html lang dir>`; layouts use logical sides
   (`ms/me/ps/pe/start/end`) so Arabic mirrors the whole window; Arabic uses the bundled Cairo font
   (`@fontsource-variable/cairo`, loaded only for Arabic glyphs, never letter-spaced); values inside Arabic
-  sentences are bidi isolates. Everything the user reads is translated (checked in French and Arabic on every page,
+  sentences are bidi isolates. Everything the user reads is translated (checked in every language on every page,
   Settings section, dialog and a failed download's details by `tests/e2e/desktop-i18n.mjs`). Texts that Rust
   writes in English are said in the user's language in the UI: download errors by code (`errors.ts`), video job
   errors by `errorCode` (`localMediaError`), the diagnostics timeline by the shape of its lines (`timeline.ts`), and

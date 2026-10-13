@@ -207,6 +207,17 @@
   text-transform: none;
   font-size: 12px;
 }
+/* Chinese: the system's Chinese UI font (never a Japanese one for shared characters), and no tracking or capitals. */
+:root[lang="zh-cn"] {
+  --font-ui: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
+  --font-display: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
+}
+:root[lang="zh-cn"] body * {
+  letter-spacing: normal !important;
+}
+:root[lang="zh-cn"] .label {
+  text-transform: none;
+}
 /* Pointing glyphs (back, chevrons) mirror with the text direction. */
 [dir="rtl"] .flip-rtl {
   transform: scaleX(-1);

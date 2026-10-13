@@ -84,7 +84,7 @@ function LanguageSwitch() {
         <span className="hidden min-w-5 sm:inline">{cur.short}</span>
         <Icon name="chevronDown" size={14} className="text-dim" />
       </button>
-      <div role="radiogroup" aria-label={t("win.language")} className="popover end-0 top-12" hidden={!open}>
+      <div role="radiogroup" aria-label={t("win.language")} className="popover end-0 top-12 max-h-[min(70vh,26rem)] overflow-y-auto" hidden={!open}>
         {LANGS.map((l) => (
           <button
             key={l.lang}
