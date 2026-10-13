@@ -594,6 +594,11 @@ Full description: `docs/video-details.md`.
   * `MediaControls` and `MediaPlayer` are shared with the row.
 * No new command.
 
+## Scroll areas
+
+The main area scrolls up and down only (`overflow-y-auto overflow-x-hidden`): right to left, WebKitGTK lays a scroll
+area out one scrollbar too wide, which would otherwise show a sideways bar. Details: `docs/ui-performance.md`.
+
 ## Drop-down lists
 
 `apps/desktop/src/ui/selectMenu.ts`, installed in `main.tsx`: every native `<select>` opens an app-drawn, themed

@@ -471,6 +471,10 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AK. Arabic layout (once per OS)
+1. Settings > Language > العربية, with a few downloads in the list: the window has a vertical scrollbar on the
+   downloads (on the left on Linux) and never a sideways scrollbar along the bottom; nothing is cut at either edge.
+
 ## AJ. Numbers and names in lists (once per OS)
 1. Queue page, a download running: its line says "host · 12.3%" (one decimal), never a long number.
 2. Pause the queue, add a link, then Add download > the same link > Check link: "In your list: <file name> · same

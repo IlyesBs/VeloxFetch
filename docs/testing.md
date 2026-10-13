@@ -565,6 +565,11 @@ pays.
 Tests: `planner::tests` (100 MB with 64 → ceiling 64; 12 MB → 48 by piece size), `profiles::tests`,
 `profiles.test.ts`. Rust 724 passed.
 
+## Arabic: no stray sideways scrollbar (October 2026)
+
+`desktop-redesign.mjs`: in Arabic, no element that can scroll sideways is wider than itself, on the dashboard and in
+Settings. Without the fix it fails (`main 1116/1106`); with it, it passes (3 runs under CPU load).
+
 ## Queue percentage and the name of a waiting duplicate (October 2026)
 
 Found while taking the 1.0.0 screenshots. `formatPercent` (`format.test.ts`): one decimal everywhere; the queue's
