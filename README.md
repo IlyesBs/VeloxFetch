@@ -157,7 +157,9 @@ becomes its main button. A file that is still there is never overwritten. See [`
 
 **Resume integrity**: finished parts of a download are hashed as they are saved and checked again before being
 trusted after a crash or an outside change. Every ranged answer must carry the download's version and total size,
-uncompressed, so two versions of a file are never combined. See [`docs/resume-integrity.md`](docs/resume-integrity.md).
+uncompressed, so two versions of a file are never combined. Servers that give no strong version tag (most of them)
+no longer make a resume start over: a few small pieces of the saved bytes are compared with the server's first.
+See [`docs/resume-integrity.md`](docs/resume-integrity.md).
 
 **Use a new link**: a paused or failed download (an expired signed link, an ended session, a mirror gone) continues
 from a fresh link, pasted or re-clicked in the browser. The saved bytes are kept only when the new link is proven to

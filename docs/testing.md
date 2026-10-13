@@ -481,6 +481,12 @@ See `docs/resume-integrity.md` §8. Tests:
 * stress: 30 parallel copies of `reverify` (16 threads each) and 25 runs in a row, all green after the fixes below.
   Under load they first showed two real problems, both fixed: milestones evicted by retry lines, and diagnostics
   read in the moment between a run's end and the saving of its timeline;
+* **Resume with a weak or no `ETag` (October 2026, `fix_resume_weak_etag`):** `downloader-core/src/resume.rs` (5:
+  validators — strong proves, weak or a date hints, any contradiction is a change; sample windows inside saved bytes,
+  never overlapping); `reverify.rs` +7 (17 in all): no validator / weak `ETag` with a date / weak `ETag` alone
+  continue and download only what is missing; changed while paused (no validator, same weak `ETag` and date, only a
+  date) start over with entirely the new version; a server refusing the comparison keeps every byte and the retry
+  continues. 7 of them fail on the old engine. `timeline.test.ts`: the new reason in French and Arabic;
 * `relink.rs` and `reverify.rs` delete their folders when they finish. Leftover test folders in a RAM-backed `/tmp`
   (11 GB after many runs of the older suites) slowed the whole machine.
 

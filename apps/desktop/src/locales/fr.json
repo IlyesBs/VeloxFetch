@@ -1341,6 +1341,7 @@
   "tl.r.partSize": "la partie enregistrée n'a pas la taille attendue",
   "tl.r.partMissing": "la partie enregistrée est introuvable",
   "tl.r.inconsistent": "la progression enregistrée est incohérente",
+  "tl.r.bytes": "la partie enregistrée diffère du fichier sur le serveur",
   "tl.l.same": "c'est déjà le lien du téléchargement",
   "tl.l.unreachable": "il n'a pas répondu ou a refusé",
   "tl.l.webPage": "il donne une page web, pas le fichier",

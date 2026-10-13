@@ -10,6 +10,7 @@ pub mod filetype;
 pub mod integrity;
 pub mod limiter;
 pub mod planner;
+pub mod resume;
 pub mod retry;
 pub mod scheduler;
 pub mod segment;

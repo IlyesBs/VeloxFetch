@@ -154,6 +154,9 @@ pub struct RunEvent {
 }
 
 /// Events kept per run; a flood of retries keeps only the newest.
+/// How long one comparison of saved bytes may take (64 KiB; a server that does not answer in time is retried).
+const SAMPLE_TIMEOUT: Duration = Duration::from_secs(30);
+
 const MAX_RUN_EVENTS: usize = 40;
 
 struct ProgressInner {
@@ -711,9 +714,12 @@ impl Downloader {
     /// a partial file with what a new link sends, never for downloading.
     pub async fn sample_range(&self, url: &str, headers: &[(String, String)], start: u64, len: u64) -> Result<Vec<u8>> {
         let url = parse_url(url)?;
-        let extras = RequestExtras::from_pairs(headers);
+        self.sample_range_with(&url, &RequestExtras::from_pairs(headers), start, len).await
+    }
+
+    async fn sample_range_with(&self, url: &Url, extras: &RequestExtras, start: u64, len: u64) -> Result<Vec<u8>> {
         let end = start + len.max(1) - 1;
-        let mut body = std::pin::pin!(self.client().get_range_with(&url, start, end, None, &extras).await?.into_stream());
+        let mut body = std::pin::pin!(self.client().get_range_with(url, start, end, None, extras).await?.into_stream());
         let mut out = Vec::with_capacity(len as usize);
         while (out.len() as u64) < len {
             match body.next().await {
@@ -924,16 +930,27 @@ impl Downloader {
             }
             Some(rec) => {
                 _name_claim = Some(self.claim_existing(&rec.destination));
-                match self.check_resumable(&rec, &info).await {
-                    Ok(()) => {
+                let checked = match self.check_resumable(&rec, &info).await {
+                    Ok(proof) => {
                         let mut rec = rec;
                         for s in &mut rec.segments {
                             s.status = if s.is_complete() { SegmentStatus::Completed } else { SegmentStatus::Pending };
                         }
                         self.reverify_if_touched(&mut rec, &progress).await?;
-                        (rec, true)
+                        // Without a strong ETag, the saved bytes must match the server's before they are trusted.
+                        match self.compare_saved_bytes(&url, &extras, &cancel, &rec, proof).await {
+                            Ok(None) => Ok(rec),
+                            Ok(Some(reason)) => Err((rec, reason)),
+                            Err(DownloadError::Cancelled) => return Err(self.stopped_early(&control, Some(rec)).await),
+                            // Could not ask (the network, a refusal): keep every saved byte and stop like any failure.
+                            Err(e) => return Err(e),
+                        }
                     }
-                    Err(reason) => {
+                    Err(reason) => Err((rec, reason)),
+                };
+                match checked {
+                    Ok(rec) => (rec, true),
+                    Err((rec, reason)) => {
                         tracing::warn!(%reason, "cannot resume, restarting download from scratch");
                         progress.note(RunEventKind::StartingOver { reason: reason.clone() });
                         let _ = tokio::fs::remove_file(part_path(&rec.destination)).await;
@@ -1147,8 +1164,8 @@ impl Downloader {
         })
     }
 
-    /// Why a stored download can't be continued (`Ok` = safe to resume).
-    async fn check_resumable(&self, rec: &DownloadRecord, info: &ResourceInfo) -> std::result::Result<(), String> {
+    /// Why a stored download can't be continued (`Ok`: what the server proves; see [`Self::compare_saved_bytes`]).
+    async fn check_resumable(&self, rec: &DownloadRecord, info: &ResourceInfo) -> std::result::Result<crate::resume::Proof, String> {
         if rec.status == DownloadStatus::Completed {
             return Err("already completed".into());
         }
@@ -1161,18 +1178,14 @@ impl Downloader {
         if info.content_length != rec.total_size {
             return Err(format!("size changed: {:?} -> {:?}", rec.total_size, info.content_length));
         }
-        // ETag first (strong only), then Last-Modified. No validator at all = cannot prove sameness.
-        let same = match (&rec.etag, &info.etag) {
-            (Some(a), Some(b)) if !a.starts_with("W/") => a == b,
-            (Some(_), _) => false,
-            (None, _) => match (&rec.last_modified, &info.last_modified) {
-                (Some(a), Some(b)) => a == b,
-                _ => false,
-            },
-        };
-        if !same {
-            return Err("remote resource changed or cannot be validated (ETag / Last-Modified)".into());
-        }
+        // A strong ETag proves the same version; a weak one or a date only hints at it (samples decide later).
+        let proof = crate::resume::validators(
+            rec.etag.as_deref(),
+            rec.last_modified.as_deref(),
+            info.etag.as_deref(),
+            info.last_modified.as_deref(),
+        )
+        .map_err(String::from)?;
         let part = part_path(&rec.destination);
         match tokio::fs::metadata(&part).await {
             Ok(m) if Some(m.len()) == rec.total_size => {}
@@ -1182,7 +1195,78 @@ impl Downloader {
         if let Some(why) = crate::verify::coverage_problem(&rec.segments, rec.total_size.unwrap_or(0)) {
             return Err(format!("stored segment state is inconsistent: {why}"));
         }
-        Ok(())
+        Ok(proof)
+    }
+
+    /// When the server cannot prove the file unchanged (no strong ETag): compare a few small pieces of the saved
+    /// bytes with what it sends at the same places. `Ok(None)`: continue; `Ok(Some(reason))`: another file, start
+    /// over. `Err`: the server could not be asked (after the usual retries); the saved bytes are kept.
+    async fn compare_saved_bytes(
+        &self,
+        url: &Url,
+        extras: &RequestExtras,
+        cancel: &CancellationToken,
+        rec: &DownloadRecord,
+        proof: crate::resume::Proof,
+    ) -> Result<Option<String>> {
+        use crate::resume::{Proof, BYTES_DIFFER, CHANGED, RESUME_SAMPLES};
+        if proof == Proof::Proven {
+            return Ok(None);
+        }
+        let windows = crate::resume::sample_windows(&rec.segments, RESUME_SAMPLES);
+        if windows.is_empty() {
+            // Nothing saved: continuing costs nothing either way, but only a hint may vouch for the plan.
+            return Ok((proof == Proof::Unproven).then(|| CHANGED.to_string()));
+        }
+        // Never read through a folder swapped for a link since the record was written.
+        self.confine(&rec.destination)?;
+        let part = part_path(&rec.destination);
+        let saved = blocking(move || {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut f = std::fs::File::open(&part)?;
+            windows
+                .into_iter()
+                .map(|(offset, len)| {
+                    let mut buf = vec![0u8; len as usize];
+                    f.seek(SeekFrom::Start(offset))?;
+                    f.read_exact(&mut buf)?;
+                    Ok((offset, buf))
+                })
+                .collect::<std::io::Result<Vec<_>>>()
+                .map_err(DownloadError::from)
+        })
+        .await?;
+        for (offset, bytes) in saved {
+            let len = bytes.len() as u64;
+            let got = retry::with_retry(
+                &self.cfg.retry,
+                cancel,
+                |n, e, d| tracing::warn!(attempt = n, error = %e, ?d, "comparing saved bytes failed, retrying"),
+                |_| async {
+                    tokio::select! {
+                        biased;
+                        _ = cancel.cancelled() => Err(DownloadError::Cancelled),
+                        r = tokio::time::timeout(SAMPLE_TIMEOUT, self.sample_range_with(url, extras, offset, len)) => {
+                            r.unwrap_or(Err(DownloadError::Http(HttpError::Stalled)))
+                        }
+                    }
+                },
+            )
+            .await;
+            match got {
+                Ok(b) if b == bytes => {}
+                Ok(_) | Err(DownloadError::Http(HttpError::SourceChanged(_))) => {
+                    tracing::info!(offset, "saved bytes differ from the server's");
+                    return Ok(Some(BYTES_DIFFER.to_string()));
+                }
+                Err(DownloadError::Http(HttpError::RangeNotHonored(_))) => {
+                    return Ok(Some("server no longer supports verified range requests".to_string()));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        tracing::info!(?proof, "saved bytes match the server's: continuing them");
+        Ok(None)
     }
 
     /// Before trusting saved segments again: if the `.part` file is not exactly as it was when their hashes were saved

@@ -1341,6 +1341,7 @@
   "tl.r.partSize": "the saved part has another size than expected",
   "tl.r.partMissing": "the saved part is missing",
   "tl.r.inconsistent": "the saved progress is inconsistent",
+  "tl.r.bytes": "the saved part differs from the file on the server",
   "tl.l.same": "it is the link the download already uses",
   "tl.l.unreachable": "it did not answer or refused",
   "tl.l.webPage": "it gives a web page, not the file",

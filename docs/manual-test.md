@@ -471,6 +471,13 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AM. Resume on everyday servers (once per OS)
+1. Start a large download from a site served by nginx or Apache (many Linux mirrors: a `.iso` of a few GB), pause
+   at about 30 %, quit VeloxFetch, open it again and resume: the size goes on from about 30 %, never back to 0 B.
+   Details > Diagnostics: "Continuing from …", no "starting over".
+2. The same with the network unplugged at resume: it fails ("Retry" offered) and still shows about 30 %; plug the
+   network back in, Retry: it continues from there.
+
 ## AL. Publishing a release (owner, once per release)
 1. `bash scripts/publish-release.sh --key <drive>/update-signing-key.json --merge <Windows release> --merge <macOS
    release>`: it builds, runs the full gate, asks the passphrase once, and ends with "Ready".

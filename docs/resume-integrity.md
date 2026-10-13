@@ -17,7 +17,7 @@ Code:
 | Capability | Before | Now |
 |---|---|---|
 | Source identity saved with the download (size, `ETag`, `Last-Modified`) | **Done** | Unchanged |
-| Resume only the same version | **Done**: size + strong `ETag` (a weak one never counts), else `Last-Modified`. No validator at all: "cannot be validated" → start over. | Unchanged, plus a segment-map check (§5) |
+| Resume only the same version | **Done**: size + strong `ETag` (a weak one never counts), else `Last-Modified`. No validator at all: "cannot be validated" → start over. | A segment-map check (§5). October 2026: without a strong `ETag`, saved-byte samples decide instead of starting over (§2) |
 | `If-Range` on every ranged request | **Done**: a server that honours it answers `200` when the file changed → refused | Unchanged |
 | `206` required, `Content-Range` start = asked, end ≤ asked | **Done** | Unchanged |
 | `Content-Range` **total** = the download's size | **Missing**: another size was not noticed mid-download | Checked by every worker → `source_changed` |
@@ -46,8 +46,14 @@ Before a single byte of a ranged answer is written (`get_range_with` and the wor
 
 At resume (`check_resumable`), before any worker starts:
 * the size is the same;
-* the strong `ETag` is the same, or, without one, the `Last-Modified` is the same. With no validator: **identity
-  uncertain**, so the saved part is not continued and the download starts over;
+* the version (`resume::validators`): the same strong `ETag` proves it, nothing more is asked. A weak `ETag`, a
+  date, or nothing at all only hints at it, so **up to four 64 KiB samples of the saved bytes** (the start of the
+  first saved bytes, the end of the furthest, the middle of the largest; only bytes recorded as written) are fetched
+  again and compared, after the segment re-check (§3). All equal: continued. Any difference (another strong or weak
+  `ETag`, another date, other bytes): another file, start over ("the saved bytes differ from the file on the
+  server"). The server cannot be asked (after the usual retries, 30 s per sample): **no byte is thrown away**, the
+  download stops like any failure and is checked again on the next try. Before October 2026 a weak `ETag` (nginx with
+  compression, Apache, many CDNs) or a missing one always started over;
 * the server still answers ranges correctly (verified `bytes=0-0`, uncompressed);
 * the `.part` file has the expected size;
 * the segment map is sound (§5).
@@ -159,7 +165,8 @@ and never claim more bytes than they hold.
 * **After a crash or an outside change:** one read of the completed bytes. For tens of GB this takes on the order of a
   minute on an SSD; a hard disk is slower. It is the price of not trusting possibly-changed bytes. Bytes that are
   intact are never downloaded again.
-* No extra network request: the checks use answers the download already receives.
+* No extra network request when the server gives a strong `ETag`. Otherwise, at resume only: up to four ranged
+  requests of 64 KiB (at most 256 KiB), instead of downloading the whole file again.
 
 ## 8. Tests
 
@@ -182,7 +189,11 @@ and never claim more bytes than they hold.
   * same size, new content and new `ETag` mid-download (server ignoring `If-Range`) → `source_changed`, never
     finished; retry → entirely the new version;
   * another total size mid-download → `source_changed`, progress kept;
-  * no validator → not continued (start over);
+  * no validator, a weak `ETag` with a date, a weak `ETag` alone: continued once the samples match, only the
+    missing bytes downloaded;
+  * changed while paused with no validator, the same weak `ETag` and date, or only the same date: the samples
+    differ → start over, entirely the new version;
+  * the server refuses the comparison: the download fails with every saved byte kept, and the retry continues them;
   * a gap in the saved map → not resumed.
 * `tests/integration/tests/crash.rs` (1 new, real process): killed while invalidating a changed segment → detected
   again → finished byte for byte, no stray files.
@@ -195,6 +206,7 @@ and never claim more bytes than they hold.
 | Another version, strong `ETag` | `If-Range` (`200`) and the answer's `ETag`, on every request |
 | Another size | the `Content-Range` total, on every request; the size check at resume |
 | Another version, same size, **no tag or only a date** (during a run or while paused) | the join checks at every join (1 KiB overlaps and tails), before finishing |
+| A version change while paused, **weak or no tag** | saved-byte samples at resume; then the join checks |
 | A version change after a `source_changed` | the saved part is never continued (validators cleared) |
 | Local change of a finished part | its hash, re-checked when the `.part` stamp differs |
 | Local change that restores the exact size and time | joins next to that part, plus the final size and checksum |

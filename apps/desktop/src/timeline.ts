@@ -30,6 +30,7 @@ const REASONS: [RegExp, Key][] = [
   [/^\.part size /, "tl.r.partSize"],
   [/^\.part file missing$/, "tl.r.partMissing"],
   [/^stored segment state is inconsistent/, "tl.r.inconsistent"],
+  [/^the saved bytes differ from the file on the server$/, "tl.r.bytes"],
 ];
 
 /** Why a new link was not used (`download-manager` `relink_report`). */
