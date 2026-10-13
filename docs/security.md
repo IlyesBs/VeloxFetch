@@ -69,6 +69,10 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
 * Only http(s) redirects are followed (capped). `Accept-Encoding: identity` so byte ranges are
   meaningful. `Range` responses are validated against what was requested (status, `Content-Range`);
   `If-Range` guards against the file changing mid-download.
+* **Never lose a download** (`docs/never-lose-a-download.md`): a failed download is tried again on its own only for
+  failures the network or the server may get over (never 401 / 403 / 404, disk, folder, integrity, web page), at least
+  10 s apart and at most 20 times, with its own address and headers only; nothing is sent while offline; any user
+  action stops the tries first; nothing survives a restart. Each try passes the usual run slots and resume checks.
 * **Resume integrity** (`docs/resume-integrity.md`):
   * a ranged answer is refused if it is compressed, carries another strong ETag, or states another total size;
   * completed segments are hashed and re-verified before being trusted after a crash or an outside change of the

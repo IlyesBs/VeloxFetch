@@ -165,6 +165,21 @@ pub struct DownloadDto {
     pub doctor: Option<crate::doctor::Diagnosis>,
     /// Completed, but its file is no longer on disk (deleted or moved by hand): the UI offers "Download again".
     pub file_missing: bool,
+    /// Failed because of the network or a server's passing trouble: it is tried again on its own (`recovery.rs`).
+    pub auto_retry: Option<AutoRetryDto>,
+}
+
+/// When a failed download is tried again on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRetryDto {
+    /// The next try (ms since 1970); `None` while waiting for the network.
+    pub at_ms: Option<u64>,
+    /// The computer is offline: the download starts as soon as it is back online.
+    pub waiting_for_network: bool,
+    /// Tries already made on its own, and the most it makes.
+    pub tries: u32,
+    pub max_tries: u32,
 }
 
 /// One chunk of a download, for the segment monitor.
@@ -1237,6 +1252,10 @@ pub struct ManagerConfig {
     pub app_launcher: Option<PathBuf>,
     /// Updates (`None`: this copy never checks; tests and the command-line tool).
     pub update: Option<UpdateConfig>,
+    /// Waits before a failed download is tried again on its own (the last one repeats; `recovery.rs`).
+    pub recovery_delays: Vec<std::time::Duration>,
+    /// Tries on its own at most while the network is up (0: never).
+    pub recovery_max_tries: u32,
 }
 
 impl ManagerConfig {
@@ -1264,6 +1283,8 @@ impl ManagerConfig {
             log: None,
             app_launcher: None,
             update: None,
+            recovery_delays: crate::manager::RECOVERY_DELAYS.to_vec(),
+            recovery_max_tries: crate::manager::RECOVERY_MAX_TRIES,
         }
     }
 }

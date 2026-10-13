@@ -40,6 +40,8 @@ export function visualState(d: Download, q?: QueueInfo): VisualState {
     case "completed":
       return "completed";
     case "failed":
+      // Tried again on its own (no network, a server's passing trouble): not given up.
+      return d.autoRetry ? "retrying" : "failed";
     case "cancelled":
       return "failed";
     case "downloading":

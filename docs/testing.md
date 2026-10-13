@@ -481,6 +481,11 @@ See `docs/resume-integrity.md` §8. Tests:
 * stress: 30 parallel copies of `reverify` (16 threads each) and 25 runs in a row, all green after the fixes below.
   Under load they first showed two real problems, both fixed: milestones evicted by retry lines, and diagnostics
   read in the moment between a run's end and the saving of its timeline;
+* **Never lose a download (October 2026, `feat_never_lose_download`):** see `docs/never-lose-a-download.md` §6:
+  `manager/recovery.rs` (3 unit), `explain.rs` (+1), `tests/integration/tests/recovery.rs` (7: tried until it
+  finishes, offline spends no try and sends nothing, wake-up tries at once, gives up after its tries, never for
+  403 / 404, Pause stops, Cancel / Remove forget), `autoRetry.test.ts` (4), `timeline.test.ts` (+1 line),
+  `desktop-usability.mjs` (+4, the e2e file server's `/busy/` answers 502 while `busy` is set);
 * **Resume with a weak or no `ETag` (October 2026, `fix_resume_weak_etag`):** `downloader-core/src/resume.rs` (5:
   validators — strong proves, weak or a date hints, any contradiction is a change; sample windows inside saved bytes,
   never overlapping); `reverify.rs` +7 (17 in all): no validator / weak `ETag` with a date / weak `ETag` alone

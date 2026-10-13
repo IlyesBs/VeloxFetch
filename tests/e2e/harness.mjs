@@ -31,11 +31,13 @@ export async function quitOnClose(h) {
 export async function startFileServer(sizeBytes) {
   const FILE = crypto.randomBytes(sizeBytes);
   // `rateBps`: the whole server's speed, shared by every connection (like a real line), when set.
-  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, FILE, sha: sha256(FILE), base: "", headers: [] };
+  // `busy`: `/busy/..` answers 502 (a server in passing trouble) while it is set.
+  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, busy: false, FILE, sha: sha256(FILE), base: "", headers: [] };
   const server = http.createServer(async (req, res) => {
     state.requests++;
     state.headers.push(req.headers); // lets a test check what the client sent
     if (req.url.startsWith("/404")) return void res.writeHead(404).end();
+    if (req.url.startsWith("/busy/") && state.busy) return void res.writeHead(502).end();
     // `/auth/..` wants user:pass (HTTP Basic), like a members-only file.
     if (req.url.startsWith("/auth/") && req.headers.authorization !== `Basic ${Buffer.from("user:pass").toString("base64")}`) {
       return void res.writeHead(401, { "WWW-Authenticate": 'Basic realm="e2e"' }).end();

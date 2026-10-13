@@ -1,5 +1,6 @@
 import { localError } from "../errors";
-import { memo, useCallback, useState, type MouseEvent } from "react";
+import { memo, useCallback, useEffect, useState, type MouseEvent } from "react";
+import { autoRetryLine } from "../autoRetry";
 import { actions } from "../actions";
 import { formatBytes, formatEta, formatSpeed, fraction, hostOf, percent } from "../format";
 import { useDownload } from "../hooks";
@@ -53,6 +54,24 @@ export function PrimaryAction({ d, compact = false, round = false, onSignIn }: {
   }
 }
 
+/** "Trying again on its own in 30 s" / "Waiting for the network": counts down every second while shown. */
+function AutoRetryNote({ d }: { d: Download }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const line = autoRetryLine(d, now);
+  if (!line) return null;
+  return (
+    <p className="mt-1.5 flex items-center gap-1.5 text-xs text-warn" role="status" data-testid="card-auto-retry">
+      <Icon name={d.autoRetry?.waitingForNetwork ? "network" : "retry"} size={14} className="shrink-0" />
+      {t(line.key, line.vars)}
+    </p>
+  );
+}
+
 /** The right-click / "..." menu of a download (labels in the current language; callers re-render on a change). */
 export function downloadMenu(d: Download, onOpen: (id: number) => void, onSignIn?: () => void, onDelete?: () => void): MenuItem[] {
   const cancellable = !["completed", "cancelled"].includes(d.status);
@@ -62,6 +81,7 @@ export function downloadMenu(d: Download, onOpen: (id: number) => void, onSignIn
     ...(d.status === "completed" && !d.fileMissing && canOpen(d.filename, d.kind) ? [{ label: t("card.open"), icon: "external" as const, onSelect: () => void actions.openFile(target) }] : []),
     ...(d.status !== "cancelled" ? [{ label: t("card.showFolder"), icon: "folder" as const, onSelect: () => void actions.showInFolder(target) }] : []),
     ...(d.status === "failed" && onSignIn ? [{ label: t("card.signInRetry"), icon: "lock" as const, onSelect: onSignIn }] : []),
+    ...(d.status === "failed" && d.autoRetry ? [{ label: t("card.stopTrying"), icon: "pause" as const, onSelect: () => void actions.pause(d.id) }] : []),
     ...(canUseNewLink(d) ? [{ label: t("nl.menu"), icon: "link" as const, onSelect: () => openNewLink(d.id) }] : []),
     ...(canRedownload(d) ? [{ label: t("card.redownload"), icon: "download" as const, onSelect: () => void actions.redownload(d) }] : []),
     { label: t("card.details"), icon: "layers", onSelect: () => onOpen(d.id) },
@@ -218,6 +238,7 @@ export const DownloadCard = memo(function DownloadCard({ id, onOpen, density = "
               {localError(d.errorCode, d.error)}
             </p>
           )}
+          {d.status === "failed" && d.autoRetry && <AutoRetryNote d={d} />}
         </div>
 
         <div className="task-threads">
