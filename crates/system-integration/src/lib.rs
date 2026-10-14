@@ -19,6 +19,8 @@ pub mod system;
 pub mod update;
 
 pub use network::{ConnectionKind, NetworkState};
+pub mod adapters;
+pub use adapters::AdapterKind;
 pub use system::{DryRunSystem, KeepAwake, NativeSystem, Notification, ProtocolHandler, SystemCall, SystemError, SystemIntegration};
 
 use serde::{Deserialize, Serialize};

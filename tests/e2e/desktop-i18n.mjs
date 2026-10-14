@@ -1,6 +1,7 @@
 // End-to-end check that the real app speaks the user's language everywhere (Phase 21): in every language it ships,
 // every page, every Settings section and the Add and Batch dialogs are read, and English words are looked for. Only
-// what the user is meant to read counts: links, file names, the product name and the technical log lines are left out.
+// what the user is meant to read counts: links, file names, network names (the system's), the product name and the
+// technical log lines are left out.
 //
 //   node tests/e2e/desktop-i18n.mjs [path-to-debug-velox-desktop]
 
@@ -33,7 +34,7 @@ const ENGLISH = /\b(the|and|your|with|when|this|that|will|never|download(s|ed|in
 /** Visible text of the page, without links, file names, logs and the product's name. */
 const visibleText = () =>
   ev(`(() => {
-    const skip = (el) => el.closest('[data-testid=log-lines], [data-testid=shortcuts] kbd, .font-mono, [data-testid^=download-] [data-testid=card-name], input, textarea, code');
+    const skip = (el) => el.closest('[data-testid=log-lines], [data-testid=shortcuts] kbd, .font-mono, [data-testid^=download-] [data-testid=card-name], [data-testid=multinet-name], input, textarea, code');
     const out = [];
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     while (walk.nextNode()) {

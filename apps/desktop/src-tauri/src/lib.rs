@@ -26,10 +26,10 @@ use download_manager::profiles::{ProfileAction, ProfilesDto};
 use download_manager::relink::{NewLinkOutcome, UseNewLink};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
-    FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, NetworkDto,
-    NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PreviewDto, QueueAction, QueueStateDto,
-    QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetNetwork, SetPowerAction, SetQueueConfig, SetSmartThrottle,
-    SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
+    FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, MultiNetworkDto,
+    NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PreviewDto, QueueAction,
+    QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetMultiNetwork, SetNetwork, SetPowerAction,
+    SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
 };
 use std::sync::Arc;
 use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
@@ -271,6 +271,8 @@ command!(reset_download_folder, ResetDownloadFolder, () -> StorageDto, |m| m.res
 // Network settings (proxy, user agent). The proxy password is accepted here but never sent back.
 command!(get_network, GetNetwork, () -> NetworkDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_network()) });
 command!(set_network, SetNetwork, (request: SetNetwork) -> NetworkDto, |m| m.set_network(request));
+command!(get_multi_network, GetMultiNetwork, () -> MultiNetworkDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_multi_network().await) });
+command!(set_multi_network, SetMultiNetwork, (request: SetMultiNetwork) -> MultiNetworkDto, |m| m.set_multi_network(request));
 command!(get_speed_limits, GetSpeedLimits, () -> SpeedLimitsDto, |m| async { Ok::<_, download_manager::ManagerError>(m.speed_limits()) });
 command!(
     set_download_credentials,
@@ -541,6 +543,27 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
     // their files in the download folder itself. Debug builds only.
     if let Some(v) = dev_only("VELOX_ORGANIZE") {
         cfg.organize_default = v != "0";
+    }
+    // Stand-in networks for "several networks at once" (`name=interface@address,...`), spreading every link (the
+    // test servers are local, plain http). Debug builds only.
+    if let Some(v) = dev_only("VELOX_TEST_NETWORKS") {
+        let nets: Vec<download_manager::RouteSpec> = v
+            .split(',')
+            .filter_map(|n| {
+                let (name, rest) = n.split_once('=')?;
+                let (iface, addr) = rest.split_once('@')?;
+                let ip: std::net::IpAddr = addr.parse().ok()?;
+                let v4 = match ip {
+                    std::net::IpAddr::V4(a) => Some(a),
+                    _ => None,
+                };
+                // The system reaches the local test server from 127.0.0.1: one of "these networks'" addresses.
+                let addresses = vec![ip, std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)];
+                Some(download_manager::RouteSpec { name: name.to_string(), interface: Some(iface.to_string()), v4, v6: None, addresses })
+            })
+            .collect();
+        cfg.client.spread_any_link = true;
+        cfg.test_networks = Some(nets);
     }
     if let Some(secs) = std::env::var("VELOX_POWER_GRACE_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
         cfg.power_grace = std::time::Duration::from_secs(secs);
@@ -1030,6 +1053,8 @@ pub fn run() {
             choose_download_folder,
             get_network,
             set_network,
+            get_multi_network,
+            set_multi_network,
             set_download_credentials,
             show_in_folder,
             open_file,

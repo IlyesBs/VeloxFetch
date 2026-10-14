@@ -29,7 +29,9 @@ import type {
   PickedFolder,
   Storage,
   FileTarget,
+  MultiNetwork,
   NetworkSettings,
+  SetMultiNetwork,
   SetNetwork,
   SpeedLimits,
   BrowserName,
@@ -152,6 +154,8 @@ export const api = {
   chooseDownloadFolder: () => call<Storage | null>("choose_download_folder"),
   getNetwork: () => call<NetworkSettings>("get_network"),
   setNetwork: (request: SetNetwork) => call<NetworkSettings>("set_network", { request }),
+  getMultiNetwork: () => call<MultiNetwork>("get_multi_network"),
+  setMultiNetwork: (request: SetMultiNetwork) => call<MultiNetwork>("set_multi_network", { request }),
   getSpeedLimits: () => call<SpeedLimits>("get_speed_limits"),
   /** Give a download the user name / password its server asked for and start it again. */
   signIn: (id: number, username: string, password: string) => call<Download>("set_download_credentials", { request: { id, username, password } }),

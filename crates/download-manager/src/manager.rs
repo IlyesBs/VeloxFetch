@@ -20,6 +20,7 @@ mod doctor;
 mod files;
 mod intelligence;
 mod media;
+mod multinet;
 mod network;
 mod recovery;
 pub(crate) use recovery::{DELAYS as RECOVERY_DELAYS, MAX_TRIES as RECOVERY_MAX_TRIES};
@@ -150,6 +151,8 @@ struct Inner {
     /// Seals secrets kept in the settings (the proxy password). `None`: they stay in memory only.
     sealer: Option<Arc<secrets::Sealer>>,
     network: Mutex<network::Network>,
+    /// Several networks at once (`multinet.rs`).
+    multinet: Mutex<multinet::MultiNet>,
     /// Failed downloads tried again on their own (`recovery.rs`), in memory only.
     recovery: Mutex<recovery::Recovery>,
     /// Serialises gate changes (pause/resume queue, schedule boundaries).
@@ -277,6 +280,7 @@ impl DownloadManager {
         let (events, _) = broadcast::channel(1024);
         let media_http = std::sync::RwLock::new(media::client(&client_cfg)?);
         let smart = smart_throttle::SmartState::load(&store);
+        let multinet = multinet::MultiNet::load(&store);
         let inner = Arc::new(Inner {
             cfg,
             store,
@@ -307,6 +311,7 @@ impl DownloadManager {
             media_http,
             sealer: settings_sealer,
             network: Mutex::new(network),
+            multinet: Mutex::new(multinet),
             recovery: Mutex::new(Default::default()),
             queue_lock: tokio::sync::Mutex::new(()),
             game_hold_lock: tokio::sync::Mutex::new(()),
@@ -330,6 +335,12 @@ impl DownloadManager {
         mgr.reconcile().await;
         mgr.evaluate_queues().await;
         mgr.spawn_queue_loop();
+        // The networks to spread over, read off the start (the queue loop reads them again while it is on).
+        if mgr.inner.multinet.lock().unwrap_or_else(|p| p.into_inner()).on {
+            mgr.hold_smart_for_networks(true);
+            let m = mgr.clone();
+            tokio::spawn(async move { m.refresh_networks(true).await });
+        }
         mgr.spawn_update_checks();
         Ok(mgr)
     }

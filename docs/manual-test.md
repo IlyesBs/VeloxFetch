@@ -471,6 +471,24 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. With downloads running, the window scrolls smoothly and buttons answer at once.
 3. Optional: `velox-bench run --sizes 1G --conns 1,16,64` (`docs/benchmarks.md`) on that machine; every file "exact".
 
+## AO. Several networks at once (once per OS, a computer with two connected networks)
+1. Connect a cable and Wi-Fi (or Wi-Fi and a phone shared over USB). Settings > Network > Several networks at once:
+   both are listed by name, the usual one marked "usual", no address shown. Turn it on: both say "Ready".
+2. Download a large https file from a fast mirror (several hundred MB): both say "In use" and show what they
+   received; the system's own network monitor shows traffic on both; the download is faster than on either alone
+   and keeps its speed to the very end (no long slow finish); the download's details say "Networks: … · …". The
+   file's checksum matches the mirror's. (Linux: `node tests/e2e/real-multinet.mjs` does this with the real app.)
+3. Unplug the cable during the download: it goes on through Wi-Fi without failing or stopping; the cable leaves the
+   list and comes back "In use" within seconds of being plugged back. The same for the Wi-Fi (turn it off) and a
+   phone (unplug it). (Linux: `multinet_real.rs` `switching_...` does this with `nmcli`.)
+3b. The networks are named by what they are ("Ethernet", "Wi-Fi", "Phone (USB)", "USB Ethernet"), never by the
+   system's identifier. Smart throttle (sidebar and Settings) is greyed out, "Off while several networks at once is
+   on", and back as it was once several networks is turned off.
+4. Untick one network: "Choose at least two networks"; the next download uses the usual route only.
+5. Turn a VPN on (full tunnel): Settings says a VPN carries the traffic; a download is not spread (only the VPN's
+   adapter shows traffic). Set a proxy in Settings: it says a proxy is set.
+6. A plain http link and a link to a local address (`192.168.x.x`, `.local`) are never spread.
+
 ## AN. Never lose a download (once per OS)
 1. Start a large download, then unplug the network (or turn Wi-Fi off) for 2 minutes: the card fails, then says "No
    internet connection: it continues on its own when the connection is back". Plug it back in: within a few seconds

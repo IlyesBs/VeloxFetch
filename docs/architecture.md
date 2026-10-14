@@ -88,6 +88,23 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   version; a weak ETag, a date or nothing only hints, and up to four 64 KiB samples of the saved bytes are compared
   with the server's, `Downloader::compare_saved_bytes`). If it changed, the download restarts instead of splicing old
   and new bytes; if the server cannot be asked, the saved bytes are kept and the run fails like any other.
+* **Several networks at once** (`docs/several-networks.md`): `http_client::lanes` keeps one `reqwest` client per
+  chosen network (bound by interface on Linux / macOS, by address on Windows; one names cache, one cookie jar shared
+  with the usual client). `HttpClient::range_on` spreads a ranged request when `spreads(url)` (https, public, no proxy,
+  two or more networks) and `Lanes::system_route_is_ours` (the system's route to the server leaves from one of them)
+  hold: `Lanes::pick` takes the least busy for its measured speed; a transport failure rests the network and the
+  request goes the usual way at once; 401 / 403 / 404 / 410 / 451 keep that server off it for 10 min. `RangeStream`
+  carries the network (bytes counted, failures rest it; nothing for 10 s gives up, a crawl under an eighth of the best
+  per-connection speed ends the request; both yield `HttpError::NetworkLost`, which the engine's connection control
+  does not count as a server error). When spread, `run_parallel` starts with 2 connections per network, keeps at least
+  4 per network (`AdaptiveController::with_floor`; 8 each to start) and sends requests of about 4 s
+  (`spread_request_size`, 512 KiB – 16 MiB) so connections are handed out again often. A network no longer listed
+  is `mark_gone`: its transfers end at once. `system_integration::adapters` names each adapter's kind (Linux `/sys`,
+  Windows `GetIfTable2`, macOS `networksetup`), cached by name; `SmartState::held_by_networks` holds Smart throttle
+  off while several networks are on. `manager/multinet.rs` reads the networks (`sysinfo`, every
+  15 s while on), detects a VPN (the system's route to documentation addresses) and a proxy, and calls
+  `Downloader::set_routes`; `set_client` carries the networks over to a new client. The engine adds each request's
+  bytes to `ProgressHandle::networks`; `DiagRecord::networks` keeps them per download.
 * **Never lose a download** (`docs/never-lose-a-download.md`, `manager/recovery.rs`): `finish()` puts a failure the
   network or the server may get over in `Recovery.waiting`; the queue loop's `recovery_turn(online, seen_offline)`
   starts it again through `start_inner` when it is due (10 s … 10 min, 20 tries), never while offline, at once after a

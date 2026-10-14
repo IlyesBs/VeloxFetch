@@ -292,6 +292,46 @@ pub struct NetworkDto {
     pub secrets_protected: bool,
 }
 
+/// Several networks at once, as shown in Settings > Network.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiNetworkDto {
+    pub enabled: bool,
+    /// On, but nothing is spread: `vpn` (the system's route to the internet goes through a VPN or another tunnel),
+    /// `proxy` (a proxy carries everything).
+    pub blocked: Option<String>,
+    /// The computer's networks now.
+    pub networks: Vec<NetworkLaneDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkLaneDto {
+    /// As the system calls it ("Wi-Fi", "enp5s0"...). Never an address. The key the user's choices are saved by.
+    pub name: String,
+    /// What it is: the UI names it by that ("Wi-Fi", "Phone (USB)"...), the system's name when `other`.
+    pub kind: system_integration::AdapterKind,
+    /// The system's own route to the internet leaves from it.
+    pub main: bool,
+    /// Not left out by the user.
+    pub chosen: bool,
+    /// What it is doing, while downloads are spread over it (`None`: not used now).
+    pub state: Option<http_client::LaneState>,
+    /// Connections open through it now.
+    pub active: usize,
+    /// Bytes received through it since the app started.
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetMultiNetwork {
+    pub enabled: bool,
+    /// Names of the networks left out.
+    #[serde(default)]
+    pub skip: Vec<String>,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetNetwork {
@@ -368,11 +408,24 @@ pub struct DiagnosticsDto {
     pub active_secs: u64,
     /// Bytes received from the network over every attempt (a restart counts again).
     pub transferred: u64,
+    /// Bytes received through each network, when several were used at once (else empty).
+    pub networks: Vec<NetworkShareDto>,
     pub events: Vec<DiagEventDto>,
     /// Download Doctor's diagnosis of the last failure (with every piece of evidence the failure left), while it is failed.
     pub doctor: Option<crate::doctor::Diagnosis>,
     /// Plain-text summary for a bug report.
     pub report: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkShareDto {
+    /// The system's name for it (shown when its kind is not known).
+    pub name: String,
+    pub bytes: u64,
+    /// What it is (Wi-Fi, a phone...), when the system says; the UI names it by that.
+    #[serde(default)]
+    pub kind: Option<system_integration::AdapterKind>,
 }
 
 /// A line of the application log (already redacted).
@@ -712,6 +765,8 @@ pub struct SmartThrottleDto {
     /// The active Download Profile sets the automatic mode (`true` also turns Smart throttle on); `None`: it leaves
     /// Smart throttle as the user set it (`enabled` / `auto` are always the user's own switches).
     pub profile_adaptive: Option<bool>,
+    /// Off because several networks at once is on (every network at full speed); the user's switch is kept.
+    pub held_by_networks: bool,
 }
 
 /// What downloads do while a listed program (a game, a call) runs. Nothing the user set is changed: the policy is
@@ -1256,6 +1311,9 @@ pub struct ManagerConfig {
     pub recovery_delays: Vec<std::time::Duration>,
     /// Tries on its own at most while the network is up (0: never).
     pub recovery_max_tries: u32,
+    /// Tests only: these networks instead of the computer's for "several networks at once" (`multinet.rs`; the
+    /// first is the main one).
+    pub test_networks: Option<Vec<http_client::RouteSpec>>,
 }
 
 impl ManagerConfig {
@@ -1285,6 +1343,7 @@ impl ManagerConfig {
             update: None,
             recovery_delays: crate::manager::RECOVERY_DELAYS.to_vec(),
             recovery_max_tries: crate::manager::RECOVERY_MAX_TRIES,
+            test_networks: None,
         }
     }
 }

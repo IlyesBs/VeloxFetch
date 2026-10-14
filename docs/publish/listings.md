@@ -62,6 +62,7 @@ signed automatic updates that never install without your click. No account, no a
 
 * Up to 64 connections per file, adjusted live
 * Crash-safe resume (progress saved every 500 ms, pieces checked with SHA-256)
+* Several networks at once: Wi-Fi, a cable and a shared phone together (opt-in, secure links only, never around a VPN)
 * Use a new link: continue a download from a fresh link to the same file
 * Download Doctor: clear diagnosis and fix for every failed download
 * Download Intelligence: size, free space, resume support and duplicates checked before starting

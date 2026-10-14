@@ -73,6 +73,18 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
   matching `^[a-z]{2,3}(-[a-z0-9]{1,8})*$` that names a shipped file is used; Rust accepts only such codes for the
   tray (`valid_language`). Translations are plain text with `<b>` as the only markup (tested). The Windows web view's
   `--lang` argument exists only in debug builds started by the e2e harness.
+* **Several networks at once** (`docs/several-networks.md`): off by default. Spreads only https requests to public
+  addresses (the certificate proves the server on every network), never through a proxy (Settings or the
+  environment) and never around a VPN: the system's own route to each server must leave from one of the networks
+  (asked of the system, no packet sent; a full or split tunnel stops it). Every answer passes the same checks as the
+  usual route; credentials go only to the same server; a network that fails or presents another certificate rests
+  and its request goes the usual way. Adapter kinds (for plain names) come from the system's own description of its
+  adapters (`/sys/class/net`, `GetIfTable2`, `networksetup -listallhardwareports` with fixed arguments and no shell),
+  nothing is sent. Smart throttle is held off while it is on. Network addresses are never shown, saved, reported or logged (names only).
+  `set_multi_network` takes `{ enabled, skip }` only (`deny_unknown_fields`, at most 64 printable names). The test
+  hooks (`spread_any_link`, `test_networks`, `VELOX_TEST_NETWORKS`) are never set by the app; the variable is read by
+  debug builds only. Asking the system for its route uses one datagram socket that is connected only (never bound by
+  hand, sent on, read or listening); the policy test allows exactly that and nothing more.
 * **Never lose a download** (`docs/never-lose-a-download.md`): a failed download is tried again on its own only for
   failures the network or the server may get over (never 401 / 403 / 404, disk, folder, integrity, web page), at least
   10 s apart and at most 20 times, with its own address and headers only; nothing is sent while offline; any user

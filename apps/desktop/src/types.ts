@@ -132,6 +132,8 @@ export interface Diagnostics {
   avgSpeedBps: number;
   activeSecs: number;
   transferred: number;
+  /** Bytes received through each network, when several were used at once. */
+  networks: { name: string; bytes: number; kind?: AdapterKind | null }[];
   events: DiagEvent[];
   /** Download Doctor's diagnosis of the last failure, while it is failed. */
   doctor: Diagnosis | null;
@@ -199,6 +201,8 @@ export interface SmartThrottle {
   gameHold: boolean;
   /** The active Download Profile sets the automatic mode (true also turns Smart throttle on); null: it leaves it. */
   profileAdaptive: boolean | null;
+  /** Off because several networks at once is on (every network at full speed); `enabled` is the user's kept switch. */
+  heldByNetworks: boolean;
 }
 
 export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
@@ -285,6 +289,38 @@ export interface NetworkSettings {
   userAgent: string | null;
   defaultUserAgent: string;
   secretsProtected: boolean;
+}
+
+/** Several networks at once (Settings > Network). Network addresses are never sent, only names. */
+export interface MultiNetwork {
+  enabled: boolean;
+  /** On, but nothing is spread: a VPN carries the traffic, or a proxy does. */
+  blocked: "vpn" | "proxy" | null;
+  networks: NetworkLane[];
+}
+
+/** What a network adapter is (Rust `system_integration::AdapterKind`). */
+export type AdapterKind = "wifi" | "ethernet" | "usbEthernet" | "phone" | "mobile" | "bluetooth" | "other";
+
+export interface NetworkLane {
+  /** The system's name (the key choices are saved by); shown only when `kind` is "other". */
+  name: string;
+  kind: AdapterKind;
+  /** The computer's usual route to the internet leaves from it. */
+  main: boolean;
+  /** Not left out by the user. */
+  chosen: boolean;
+  /** While downloads are spread over it; `null`: not used now. */
+  state: "ready" | "working" | "resting" | null;
+  active: number;
+  /** Received through it since the app started. */
+  bytes: number;
+}
+
+export interface SetMultiNetwork {
+  enabled: boolean;
+  /** Names of the networks left out. */
+  skip: string[];
 }
 
 export interface SetNetwork {

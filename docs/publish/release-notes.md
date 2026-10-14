@@ -9,6 +9,8 @@ Free, no account, no ads, no tracking. For {{SYSTEMS}}.
   Fast / Balanced / Low resource profiles.
 * **Never lose a download:** progress saved every half second and checked piece by piece; resume after a crash or a
   power cut; **Use a new link** when a link expires; never mixes two versions of a file.
+* **Several networks at once:** Wi-Fi, a cable and a shared phone together, their speeds added up (opt-in; secure
+  links only, never around your VPN).
 * **Download Doctor:** what failed, where, whether retrying helps, and what to do.
 * **Download Intelligence:** size, free space, resume support, temporary links and duplicates checked before you start.
 * **Smart throttle:** slows down while you browse, play (League of Legends, Valorant, CS2…) or call (Zoom, Teams…).

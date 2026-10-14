@@ -178,8 +178,8 @@ export function SmartThrottleSettings() {
         <input
           type="checkbox"
           data-testid="smart-enabled"
-          checked={userOn}
-          disabled={!s}
+          checked={userOn && !s?.heldByNetworks}
+          disabled={!s || s.heldByNetworks}
           onChange={(e) =>
             save(
               { enabled: e.target.checked },
@@ -189,7 +189,12 @@ export function SmartThrottleSettings() {
         />
         {t("smart.enable")}
       </label>
-      {s?.profileAdaptive != null && (
+      {s?.heldByNetworks && (
+        <p className="mt-1 text-[11px] text-accent" data-testid="smart-held-note">
+          {t("multi.smartHeld")}
+        </p>
+      )}
+      {s?.profileAdaptive != null && !s.heldByNetworks && (
         <p className="mt-1 text-[11px] text-accent" data-testid="smart-profile-note">
           {t(s.profileAdaptive ? "prof.smartAutoOn" : "prof.smartAutoOff")}
         </p>

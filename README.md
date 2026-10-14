@@ -158,6 +158,11 @@ becomes its main button. A file that is still there is never overwritten. See [`
 **Languages**: English, French, Arabic, Spanish, Portuguese (Brazil), German, Russian and Turkish. VeloxFetch starts in your computer's language. See
 [`docs/languages.md`](docs/languages.md).
 
+**Several networks at once**: turn it on in Settings > Network and a download's connections are spread over your
+networks (Wi-Fi, a cable, a phone shared over USB), so their speeds add up. Only for secure links to the internet,
+never through a proxy or around a VPN; leave out any network (a phone with a data limit). A network that stops
+working hands its part back to your usual connection at once. See [`docs/several-networks.md`](docs/several-networks.md).
+
 **Never lose a download**: a download that failed because of the network or a server's passing trouble is tried
 again on its own, from its saved bytes; offline it waits for the connection, and after the computer sleeps it is tried
 at once. See [`docs/never-lose-a-download.md`](docs/never-lose-a-download.md).

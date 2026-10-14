@@ -76,6 +76,11 @@ manifest, a README with screenshots). The app updates from there. Details: `docs
   server's passing trouble is tried again on its own from its saved bytes (10 s, 30 s, 1 min … every 10 min, 20
   tries). Offline, it waits without spending a try and starts when the network is back; after the computer sleeps,
   at once. The card counts down; "Stop trying" pauses it; anything that needs the user is never tried on its own.
+- **Several networks at once** (`docs/several-networks.md`, opt-in in Settings > Network): a download's connections
+  are spread over the computer's networks (Wi-Fi, a cable, a shared phone), so their speeds add up. Only https links
+  to the internet, never through a proxy or around a VPN; each network can be left out; a network that fails or that
+  a server refuses hands its requests back to the usual route at once, so it never fails a download. The details
+  say what came through each network.
 - **Crash-safe:** the progress is saved every 500 ms, in a safe order. After a crash or a power cut, the
   download continues from the bytes that really reached the disk.
 - **Integrity:** an optional SHA-256 / SHA-512 checksum is checked at the end.
@@ -601,7 +606,7 @@ messages, downloaded files, update data and UI requests.
   - strict CSP: no inline scripts or styles in HTML, no remote origins, no `eval`;
   - the page cannot make network requests.
 - **IPC:**
-  - 82 fixed commands, each its own permission (most are main-window only);
+  - 90 fixed commands, each its own permission (most are main-window only);
   - **no generic** "run / read any file" command;
   - inputs are typed, and unknown fields are refused;
   - a per-window authorization in Rust mirrors the capability files (a test keeps them identical).
@@ -617,6 +622,9 @@ messages, downloaded files, update data and UI requests.
   - ffmpeg, yt-dlp and the power tools run with fixed arguments as arrays;
   - no shell, and nothing user-typed reaches a command line.
 - **Power actions:** never fire on quit, and are forgotten at restart.
+- **Several networks:** only https to public addresses, never through a proxy, never around a VPN (the system's own
+  route to each server must leave from one of the networks); the same answer checks on every network; names only,
+  never addresses, in the UI, reports and logs.
 - **Updates:** only a manifest signed with the owner's offline Ed25519 key is believed (public key compiled in,
   HTTPS, no downgrade, no replay); the package's size and SHA-256 are checked before it is kept and before it is
   installed; nothing installs without the user (`docs/auto-update.md`).
@@ -835,6 +843,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Resume integrity (segment hashes, source changes) | `docs/resume-integrity.md` |
 | Never lose a download (tried again on its own, offline, after sleep) | `docs/never-lose-a-download.md` |
 | Languages (files, first start in the computer's language, tests) | `docs/languages.md` |
+| Several networks at once (spreading, VPN / proxy rules, fallbacks, tests) | `docs/several-networks.md` |
 | Slow servers (as fast as a browser) | `docs/slow-servers.md` |
 | Updates (signed, offline key, install per system) | `docs/auto-update.md` |
 | Performance numbers and how to measure them | `docs/benchmarks.md` |
@@ -855,6 +864,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-13 | `feat_multi_network` | Feature | Several networks at once (Settings > Network, off by default): ranged requests of https links to public addresses are spread over the chosen networks, each with its own bound connections (Linux `SO_BINDTODEVICE`, macOS `IP_BOUND_IF`, Windows by address), to the least busy for its speed per connection (an unmeasured one is tried at once; one part per request; a crawling or silent transfer moves to a faster network; a weak network's lost transfers never shrink the others' connections). Networks shown by plain name (Wi-Fi, Ethernet, USB Ethernet, Phone (USB), Mobile network, Bluetooth; `system_integration::adapters`); Smart throttle held off while on. Aggressive: 8 connections per network to start, at least 4, requests of about 4 s; a network going away ends its transfers at once, one coming back is used within seconds. Measured on a real cable + USB Wi-Fi + phone: 145 MB in 32 – 37.6 s against 52.5 s the usual way, at least `curl`'s speed with 8 connections per network; each network unplugged and plugged back during a 4 GB download: never a stop (longest wait 1.5 s). Never through a proxy, never around a VPN (the system's route to each server is checked, no packet sent); the same answer checks; one cookie jar for every route. A failing network rests (30 s … 5 min) and its request goes the usual way at once (no retry spent); a server refusing a network (401 / 403 / 404 / 410 / 451) is asked the usual way for 10 min. Networks read every 15 s while on (virtual adapters, tunnels, link-local left out). Settings lists them by name ("usual", in use, resting, received); the details and report say what came through each. Commands `get_multi_network`, `set_multi_network` (90 commands). 8 languages. Tests: 13 + 4 + 5 + 4 unit, 6 integration, 21 e2e checks, vitest +3; 30 runs under load; real networks (`multinet_real.rs` speed and switching, `real-multinet.mjs` 15 checks). | `docs/several-networks.md` |
 | 2026-10-13 | `feat_more_languages` | Feature | Five new languages: Spanish, Portuguese (Brazil), German, Russian, Turkish (every text, the tray and notifications). The first start follows the computer's language (`pickLang`: exact code, else the same language from another country; nothing saved until the user picks). Settings > Language is a drop-down; the title-bar menu scrolls. Shorter Smart throttle titles where they were cut (French too). The e2e harness runs in English unless a test sets a language (`--lang` for the Windows web view, debug builds only). Tests: locales, detection (4), timeline in every language, `desktop-i18n.mjs` for every language (no English, nothing wider than the window, sidebar labels fit, first start on a French computer). | `docs/languages.md` |
 | 2026-10-13 | `feat_never_lose_download` | Feature | Never lose a download: a failure the network or the server may get over (no connection, DNS, timeout, dropped connection, 408 / 425 / 429 / 5xx) is tried again on its own from the saved bytes (10 s … every 10 min, 20 tries, `manager/recovery.rs`). Offline: no try spent, nothing sent, starts when the network is back. After sleep (a gap of 30 s or more in the one-second loop, either clock): at once. Card countdown / "No internet connection" line, "Stop trying" (= Pause, now allowed on a waiting failed download), Retrying in the Queue page, Doctor's next-try time, timeline line, 3 languages. A stall is now `timeout`. In memory only. Tests: 4 unit, 7 integration, 4 vitest, 4 e2e checks. | `docs/never-lose-a-download.md` |
 | 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |

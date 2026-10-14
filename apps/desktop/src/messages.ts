@@ -19,6 +19,8 @@ export const MESSAGES: Record<string, Key> = {
   "cookies are too long or contain forbidden characters": "msg.cookies_are_too_long_or_contain_forbidden_charac",
   "cookies from a private window are never accepted": "msg.cookies_from_a_private_window_are_never_accepted",
   "enter the proxy address, like http://proxy.example:3128": "msg.enter_the_proxy_address_like_http_proxy_example",
+  "these network names cannot be saved": "msg.these_network_names_cannot_be_saved",
+  "Smart throttle stays off while several networks at once is on": "msg.smart_throttle_stays_off_while_several_networks",
   "enter the proxy as http://host:port (or socks5://host:port)": "msg.enter_the_proxy_as_http_host_port_or_socks5_host",
   "file name must not contain path separators": "msg.file_name_must_not_contain_path_separators",
   "give either a link or a waiting browser download": "msg.give_either_a_link_or_a_waiting_browser_download",

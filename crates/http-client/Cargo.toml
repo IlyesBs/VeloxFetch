@@ -14,3 +14,5 @@ thiserror.workspace = true
 serde.workspace = true
 url.workspace = true
 tracing.workspace = true
+# Asks the system which route it would use (a datagram socket that is never bound, sent or read: `lanes::system_source_for`).
+socket2 = "0.6"

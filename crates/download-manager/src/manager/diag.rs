@@ -31,6 +31,8 @@ pub(super) struct DiagRecord {
     last_failure: Option<String>,
     /// Download Doctor's diagnosis of the last failure.
     doctor: Option<crate::doctor::Diagnosis>,
+    /// Bytes received through each network when several were used at once, over every attempt.
+    networks: Vec<NetworkShareDto>,
 }
 
 impl DiagRecord {
@@ -55,7 +57,14 @@ impl DiagRecord {
     }
 
     /// Add what a run (running or just ended) did.
-    fn add_run(&mut self, p: &ProgressHandle, tracker_peak: usize, redactor: &Redactor) {
+    /// `kinds`: what each network is, by name (for the details' plain names).
+    fn add_run(
+        &mut self,
+        p: &ProgressHandle,
+        tracker_peak: usize,
+        redactor: &Redactor,
+        kinds: &HashMap<String, system_integration::AdapterKind>,
+    ) {
         self.retries = self.retries.saturating_add(p.retries());
         if let Some(s) = p.http_status() {
             self.http_status = Some(s);
@@ -65,12 +74,35 @@ impl DiagRecord {
             self.active_ms = self.active_ms.saturating_add(t.elapsed().as_millis() as u64);
         }
         self.bytes = self.bytes.saturating_add(p.received());
+        for (name, bytes) in p.networks() {
+            let kind = kinds.get(&name).copied();
+            if let Some(n) = self.networks.iter_mut().find(|n| n.name == name) {
+                n.bytes = n.bytes.saturating_add(bytes);
+                n.kind = n.kind.or(kind);
+            } else if self.networks.len() < 16 {
+                self.networks.push(NetworkShareDto { name, bytes, kind });
+            }
+        }
         for ev in p.events() {
             let at = ev.at.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
             let (level, text) = describe(&ev.kind);
             let noise = matches!(ev.kind, RunEventKind::Retrying { .. } | RunEventKind::Throttled { .. });
             self.push_event(level, redactor.redact(&text).into_owned(), at, noise);
         }
+    }
+}
+
+/// An adapter kind in the (English) report.
+fn kind_word(k: system_integration::AdapterKind) -> &'static str {
+    use system_integration::AdapterKind as K;
+    match k {
+        K::Wifi => "Wi-Fi",
+        K::Ethernet => "Ethernet",
+        K::UsbEthernet => "USB Ethernet",
+        K::Phone => "Phone (USB)",
+        K::Mobile => "Mobile network",
+        K::Bluetooth => "Bluetooth",
+        K::Other => "Network",
     }
 }
 
@@ -211,6 +243,7 @@ impl DownloadManager {
         };
         let mut diagnosis = None;
         let (mut run_bytes, mut run_ms) = (0u64, 0u64);
+        let kinds = self.network_kinds();
         let (status, d) = {
             let mut status = "completed";
             let d = self
@@ -218,7 +251,7 @@ impl DownloadManager {
                     if let Some(p) = progress {
                         run_bytes = p.received();
                         run_ms = p.transfer_started().map_or(0, |t| t.elapsed().as_millis() as u64);
-                        d.add_run(p, tracker_peak, &redactor);
+                        d.add_run(p, tracker_peak, &redactor, &kinds);
                     }
                     // Saved below, under the same lock the diagnostics are read with: never shown twice, never missing.
                     self.inner.finishing.lock().unwrap().remove(&id);
@@ -320,7 +353,7 @@ impl DownloadManager {
         let live = self.active_handle_progress(id).or_else(|| self.inner.finishing.lock().unwrap().get(&id).cloned());
         if let Some(p) = &live {
             let peak = self.inner.trackers.lock().unwrap().get(&id).map_or(0, |t| t.peak);
-            d.add_run(p, peak, &redactor);
+            d.add_run(p, peak, &redactor, &self.network_kinds());
         }
         let error_detail = rec.last_error.as_deref().filter(|e| !e.is_empty()).map(|e| redactor.redact(e).into_owned());
         let mut out = DiagnosticsDto {
@@ -337,6 +370,7 @@ impl DownloadManager {
             avg_speed_bps: d.avg_speed(),
             active_secs: d.active_ms / 1000,
             transferred: d.bytes,
+            networks: d.networks,
             doctor: if rec.status == DownloadStatus::Failed { d.doctor.clone() } else { None },
             events: d.events,
             report: String::new(),
@@ -384,6 +418,19 @@ impl DownloadManager {
             d.active_secs,
             human_bytes(d.transferred)
         );
+        if !d.networks.is_empty() {
+            let each: Vec<String> = d
+                .networks
+                .iter()
+                .map(|n| match n.kind {
+                    Some(k) if k != system_integration::AdapterKind::Other => {
+                        format!("{} [{}] {}", kind_word(k), n.name, human_bytes(n.bytes))
+                    }
+                    _ => format!("{} {}", n.name, human_bytes(n.bytes)),
+                })
+                .collect();
+            let _ = writeln!(r, "Networks: {}", each.join(", "));
+        }
         let _ = writeln!(
             r,
             "Progress: {} of {} - resumable: {}",
