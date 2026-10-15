@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { networkLabel } from "./networks";
+import { networkLabel, networksInUse, shareOf } from "./networks";
 
 const t = (k: string) => ({ "multi.kind.wifi": "Wi-Fi", "multi.kind.ethernet": "Ethernet", "multi.kind.phone": "Phone (USB)" })[k] ?? k;
 
@@ -21,5 +21,21 @@ describe("network names", () => {
       { name: "old", kind: null },
     ];
     expect(all.map((n) => networkLabel(n, all, t))).toEqual(["Wi-Fi", "Wi-Fi 2", "tailnet9", "old"]);
+  });
+});
+
+describe("the live indicator and card (issue #44)", () => {
+  it("counts the networks downloads are spread over: the chosen ones, none while a proxy or a VPN carries everything", () => {
+    const nets = [{ chosen: true }, { chosen: true }, { chosen: false }];
+    expect(networksInUse({ blocked: null, networks: nets })).toBe(2);
+    expect(networksInUse({ blocked: "vpn", networks: nets })).toBe(0);
+    expect(networksInUse({ blocked: "proxy", networks: nets })).toBe(0);
+  });
+
+  it("each network's bar is its part of the total, never outside 0..1", () => {
+    expect(shareOf(3, 4)).toBe(0.75);
+    expect(shareOf(0, 0)).toBe(0);
+    expect(shareOf(5, 4)).toBe(1);
+    expect(shareOf(-1, 4)).toBe(0);
   });
 });

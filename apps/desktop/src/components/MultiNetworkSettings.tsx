@@ -44,6 +44,8 @@ export function MultiNetworkSettings() {
     const next = await act(() => api.setMultiNetwork({ enabled, skip }), done);
     setBusy(false);
     if (next) setState(next);
+    // The dashboard's indicator and card appear / go at once, even with nothing downloading.
+    api.getMetrics().then(store.setMetrics, () => {});
     // Smart throttle is held off while it is on: the sidebar shows it at once.
     void throttleStore.refresh();
   };

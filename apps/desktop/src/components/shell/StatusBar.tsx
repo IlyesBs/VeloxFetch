@@ -3,6 +3,7 @@ import { useStore } from "../../hooks";
 import { useT } from "../../i18n";
 import { throttleOn, throttleStatus, useThrottle } from "../../throttle";
 import { Icon } from "../../ui/icons";
+import { MultiNetworkBadge } from "../MultiNetworkCard";
 import { ProfileSwitch } from "../ProfilesSettings";
 import { updateLine } from "../UpdateSettings";
 
@@ -44,6 +45,12 @@ export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
         <Icon name="arrowDown" size={13} className="text-accent" />
         {formatSpeed(m.speedBps)}
       </span>
+      {m.networks && (
+        <>
+          <span className="sep hidden sm:block" />
+          <MultiNetworkBadge compact />
+        </>
+      )}
       <span className="sep hidden sm:block" />
       <span className="hidden sm:flex">
         <ProfileSwitch />

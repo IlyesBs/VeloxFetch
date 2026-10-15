@@ -85,6 +85,9 @@ least-privilege, in layers. A failure in one layer must not be enough to comprom
   hooks (`spread_any_link`, `test_networks`, `VELOX_TEST_NETWORKS`) are never set by the app; the variable is read by
   debug builds only. Asking the system for its route uses one datagram socket that is connected only (never bound by
   hand, sent on, read or listening); the policy test allows exactly that and nothing more.
+  The live card and indicator (issue #44) show network names and speeds only: the `metrics` tick carries each
+  network's system name, kind, state, connection count and speed, never an address, and nothing while the feature is
+  off. Nothing new is stored, and no new command or permission was added.
 * **Never lose a download** (`docs/never-lose-a-download.md`): a failed download is tried again on its own only for
   failures the network or the server may get over (never 401 / 403 / 404, disk, folder, integrity, web page), at least
   10 s apart and at most 20 times, with its own address and headers only; nothing is sent while offline; any user

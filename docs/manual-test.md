@@ -488,6 +488,13 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 5. Turn a VPN on (full tunnel): Settings says a VPN carries the traffic; a download is not spread (only the VPN's
    adapter shows traffic). Set a proxy in Settings: it says a proxy is set.
 6. A plain http link and a link to a local address (`192.168.x.x`, `.local`) are never spread.
+7. The indicator and the live card (issue #44): turn it on with nothing downloading: the Total speed card and the
+   status bar say "2 networks" at once, and the dashboard's side column starts with "Networks in use" listing each
+   network by name (no address). Download a large https file: each network shows its own speed, bar and connections;
+   the total is their sum and close to the Total speed card; compare each network with the system's monitor (Windows
+   Task Manager > Performance, Linux `nload` / System Monitor, macOS Activity Monitor > Network): about the same.
+   Untick one network: the indicator turns orange and says "1 network"; with a VPN or a proxy it says "Not spread". Turn it off: the
+   indicator and the card go at once. Arabic: the card reads right to left, speeds stay left to right.
 
 ## AN. Never lose a download (once per OS)
 1. Start a large download, then unplug the network (or turn Wi-Fi off) for 2 minutes: the card fails, then says "No

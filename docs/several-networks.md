@@ -104,6 +104,24 @@ finished on the others.
 * A download's details: "Networks: Wi-Fi 6.0 MB · Ethernet 6.0 MB" (what came through each, over every attempt, by
   plain name); the copied report says "Wi-Fi [wlx…] 6.0 MB" (the system's name in brackets, for support).
 * Smart throttle (sidebar card and Settings): greyed out, "Off while several networks at once is on".
+* **The indicator and the live card (issue #44).** While it is on, the dashboard's Total speed card and the status bar
+  say "2 networks" (how many networks downloads are spread over; orange "1 network" when fewer than two are chosen,
+  orange "Not spread" when a VPN or a proxy carries everything; the tooltip lists each network's speed). The dashboard's side column starts with
+  "Networks in use": each network by its plain name, its speed now, a bar for its part of the total, its connections
+  and its state, and **the total of all networks**, which is always the sum of the rows. The usual network is listed
+  even when left out ("usual · not spread"): links that are not spread (http, local addresses, videos) go through it,
+  and their speed is counted there. Behind a VPN no listed network carries the usual route: that part shows as "Usual
+  route (VPN)". The gear opens Settings. The card and the indicator appear and go at once when the switch is turned,
+  even with nothing downloading.
+  * How it is measured: `MetricsDto.networks` (`NetworkSpeedsDto`), built at every dashboard tick by
+    `DownloadManager::network_speeds` (`manager/multinet.rs`). `Speeds::measure` reads the bytes counted through each
+    network (`LaneStatus::bytes`) and by all downloads (`session_bytes`) over windows of at least 0.9 s and smooths
+    them (half the last value, half the new one; under 512 B/s is 0). What downloads received through none of the
+    networks went the usual way. Videos (their own tool) add their speed to the usual network. When nothing runs every
+    speed is 0 at once. `None` while it is off, so nothing is measured or sent then.
+  * Measured on the real cable + USB Wi-Fi (3 runs, a 145 MB download): every 3 s reading, each network's speed in the
+    card matched the system's own counter for that adapter (`/proc/net/dev`) within a few percent (for example
+    Ethernet 1.64 / Wi-Fi 0.74 MB/s in the app, 1.85 / 0.80 by the system), and the total was the sum every time.
 * Names only, everywhere (UI, report, log): never an address.
 
 ## 4. Design
@@ -175,16 +193,24 @@ finished on the others.
   one network, a proxy and a VPN-like route spread nothing, and the choice is saved; bad choices are refused; Smart
   throttle is held off while it is on (the user's switch kept, cannot be turned on meanwhile, held after a restart,
   back when it is turned off).
-* `tests/e2e/desktop-multinet.mjs` (21 checks, real app): the panel lists the networks by name (no address), the
-  switch, a 12 MB download through both networks (server side), intact, "In use" and what each received, the details
-  line, the report, leaving one out ("choose at least two"; nothing spread), refused input, off. Screenshot
-  `docs/screenshots/multi-network-dark.png`.
+* `tests/e2e/desktop-multinet.mjs` (34 checks, real app): the panel lists the networks by name (no address), the
+  switch, the indicator ("2 networks" on the Total speed card and the status bar) and the "Networks in use" card with
+  both networks, while a 96 MB download runs each network's own speed and connections, the total is the sum and
+  matches what downloads receive (within 35 %), no address in the card, the card fits its column, every speed back to
+  0 once nothing runs; a 12 MB download through both networks (server side), intact, "In use" and what each received,
+  the details line, the report, leaving one out ("choose at least two", the indicator says "1 network"; nothing spread), refused input, off (no
+  indicator, no card); in all 8 languages the card and the indicator fit and are translated. Screenshots `docs/screenshots/multi-network-dark.png`, `docs/screenshots/multi-network-card.png`.
+* Live speeds: `download-manager` `multinet` unit test `each_network_speed_and_the_usual_route_add_up_to_what_downloads_receive`
+  (per network and usual route, windows, smoothing, a network gone or restarted, 0 at once when nothing runs, the
+  rest of an ended transfer shown as 0); `networks.test.ts` (+2: the count, the bars).
 * Stress: the integration tests 30 times and the unit tests 20 times with every core busy, no failure.
 * Real networks (by hand, two or more connected networks and the internet): `multinet_real.rs` (`--ignored`: the
   usual route, then spread, whole file, every network carried part of it by the system's counters, at least 1.2× faster;
   and a per-network timeline every 2 s) and `tests/e2e/real-multinet.mjs` (the real app with the computer's networks:
   listed by plain name and one "usual", Smart throttle held off with its switch greyed out at once, a 145 MB download
-  through every network, whole, Settings shows them in use, Smart throttle back when it is turned off: 15 checks);
+  through every network, whole, Settings shows them in use, Smart throttle back when it is turned off; the indicator
+  and the card while it runs, each network's live speed against the system's counters for that adapter every 3 s,
+  the total always the sum: 20 checks);
   `switching_between_real_networks_when_one_goes_or_comes_back` (each network disconnected and connected again with
   `nmcli` during a 4 GB download: never stops, never fails, nothing through a disconnected network by the app's
   count, each one used again) and `show_one_network_going_and_coming_back` (`VELOX_TEST_UNPLUG=<device>`).

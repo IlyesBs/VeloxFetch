@@ -1148,6 +1148,7 @@ impl DownloadManager {
         let root = self.inner.storage.lock().unwrap_or_else(|p| p.into_inner()).root.clone();
         self.inner.sysio.refresh(root);
         let io = self.inner.sysio.rates();
+        let networks = self.network_speeds(media_speed, speed_bps + media_speed > 0 || count("downloading") > 0 || media_running > 0);
         let disk = self.inner.disk.lock().unwrap();
         MetricsDto {
             speed_bps: speed_bps + media_speed,
@@ -1167,6 +1168,7 @@ impl DownloadManager {
             disk_read_bps: io.disk_read,
             disk_write_bps: io.disk_write,
             io_sample: io.sample,
+            networks,
         }
     }
 

@@ -486,6 +486,41 @@ pub struct MetricsDto {
     pub disk_write_bps: Option<u64>,
     /// Number of the network / disk reading above (changes about once a second while someone looks).
     pub io_sample: u64,
+    /// Several networks at once is on: what each network brings now (`None` while it is off).
+    pub networks: Option<NetworkSpeedsDto>,
+}
+
+/// Several networks at once, live: the dashboard's indicator and card.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSpeedsDto {
+    /// On, but nothing is spread: `vpn`, `proxy` (as [`MultiNetworkDto::blocked`]).
+    pub blocked: Option<String>,
+    /// The chosen networks, and the usual one (the system's route) even when left out: downloads that are not spread
+    /// use it.
+    pub networks: Vec<NetworkSpeedDto>,
+    /// What downloads receive through the system's route when none of the networks carries it (a VPN), bytes/s.
+    pub other_bps: u64,
+    /// The sum of every network's speed (and `other_bps`), bytes/s.
+    pub total_bps: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSpeedDto {
+    /// As in Settings: the system's name, never an address.
+    pub name: String,
+    pub kind: system_integration::AdapterKind,
+    /// The system's own route to the internet leaves from it.
+    pub main: bool,
+    /// Not left out by the user (the usual network is listed even when left out: what is not spread goes through it).
+    pub chosen: bool,
+    /// What it is doing (`None`: not used yet).
+    pub state: Option<http_client::LaneState>,
+    /// Connections open through it now.
+    pub connections: usize,
+    /// What downloads receive through it now, bytes/s (smoothed over about a second).
+    pub speed_bps: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

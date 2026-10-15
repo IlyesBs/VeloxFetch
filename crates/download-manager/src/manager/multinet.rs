@@ -59,6 +59,77 @@ pub(super) struct MultiNet {
     /// The last reading said so.
     pub tunnel_seen: bool,
     pub read_at: Option<Instant>,
+    /// Live speed of each network (the dashboard).
+    pub speeds: Speeds,
+}
+
+/// Shortest window a network's speed is measured over (the dashboard asks about 5 times a second).
+const SPEED_WINDOW: Duration = Duration::from_millis(900);
+/// A smoothed speed below this (bytes/s) is shown as 0: what is left of a transfer that ended.
+const SPEED_FLOOR: f64 = 512.0;
+
+/// What each network brings now: bytes counted through each network ([`http_client::LaneStatus::bytes`]) and by all
+/// downloads ([`Inner::session_bytes`]) over windows of at least [`SPEED_WINDOW`], smoothed. What downloads received
+/// through none of the networks went through the system's usual route.
+#[derive(Default)]
+pub(super) struct Speeds {
+    at: Option<Instant>,
+    /// Bytes received by every download, and through each network, at `at`.
+    total: u64,
+    lanes: HashMap<String, u64>,
+    speed: HashMap<String, f64>,
+    usual: f64,
+}
+
+impl Speeds {
+    /// A new reading: `total` bytes received by all downloads so far, `lanes` (name, bytes so far) through each
+    /// network. `running`: a download or a video is running (nothing runs: every speed is 0 at once).
+    pub(super) fn measure(&mut self, now: Instant, total: u64, lanes: &[(String, u64)], running: bool) {
+        let base = |me: &mut Self| {
+            me.at = Some(now);
+            me.total = total;
+            me.lanes = lanes.iter().cloned().collect();
+        };
+        if !running {
+            self.speed.clear();
+            self.usual = 0.0;
+            return base(self);
+        }
+        let Some(at) = self.at else { return base(self) };
+        let secs = now.duration_since(at).as_secs_f64();
+        if secs < SPEED_WINDOW.as_secs_f64() {
+            return;
+        }
+        let smooth = |old: f64, now: f64| {
+            let s = if old == 0.0 { now } else { 0.5 * old + 0.5 * now };
+            if s < SPEED_FLOOR {
+                0.0
+            } else {
+                s
+            }
+        };
+        let mut through = 0u64;
+        let mut speed = HashMap::new();
+        for (name, bytes) in lanes {
+            // A network that came since (or whose counter started again): counted from 0.
+            let before = self.lanes.get(name).copied().filter(|b| b <= bytes).unwrap_or(0);
+            let got = bytes - before;
+            through = through.saturating_add(got);
+            speed.insert(name.clone(), smooth(self.speed.get(name).copied().unwrap_or(0.0), got as f64 / secs));
+        }
+        self.speed = speed;
+        let usual = total.saturating_sub(self.total).saturating_sub(through);
+        self.usual = smooth(self.usual, usual as f64 / secs);
+        base(self);
+    }
+
+    pub(super) fn of(&self, name: &str) -> u64 {
+        self.speed.get(name).copied().unwrap_or(0.0) as u64
+    }
+
+    pub(super) fn usual(&self) -> u64 {
+        self.usual as u64
+    }
 }
 
 impl MultiNet {
@@ -310,6 +381,47 @@ impl DownloadManager {
         self.multinet().found.iter().map(|f| (f.spec.name.clone(), f.kind)).collect()
     }
 
+    /// Several networks at once, live (`None` while it is off). `media_bps`: the videos' speed (they use the usual
+    /// route); `running`: something is downloading.
+    pub(super) fn network_speeds(&self, media_bps: u64, running: bool) -> Option<NetworkSpeedsDto> {
+        let lanes = self.inner.downloader.routes();
+        let total = self.inner.session_bytes.load(Ordering::Relaxed);
+        let mut m = self.multinet();
+        if !m.on {
+            m.speeds = Speeds::default();
+            return None;
+        }
+        let counted: Vec<(String, u64)> = lanes.iter().map(|l| (l.name.clone(), l.bytes)).collect();
+        m.speeds.measure(Instant::now(), total, &counted, running);
+        let usual = m.speeds.usual().saturating_add(media_bps);
+        let mut carried = false;
+        let networks: Vec<NetworkSpeedDto> = m
+            .found
+            .iter()
+            .filter(|f| f.main || !m.skip.contains(&f.spec.name))
+            .map(|f| {
+                let lane = lanes.iter().find(|l| l.name == f.spec.name);
+                let mut speed = m.speeds.of(&f.spec.name);
+                if f.main && !carried {
+                    speed = speed.saturating_add(usual);
+                    carried = true;
+                }
+                NetworkSpeedDto {
+                    name: f.spec.name.clone(),
+                    kind: f.kind,
+                    main: f.main,
+                    chosen: !m.skip.contains(&f.spec.name),
+                    state: lane.map(|l| l.state),
+                    connections: lane.map_or(0, |l| l.active),
+                    speed_bps: speed,
+                }
+            })
+            .collect();
+        let other_bps = if carried { 0 } else { usual };
+        let total_bps = networks.iter().map(|n| n.speed_bps).fold(other_bps, u64::saturating_add);
+        Some(NetworkSpeedsDto { blocked: self.multinet_blocked(&m).map(str::to_string), networks, other_bps, total_bps })
+    }
+
     pub async fn get_multi_network(&self) -> MultiNetworkDto {
         self.refresh_networks(true).await;
         self.multi_network_dto()
@@ -373,6 +485,35 @@ impl DownloadManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_network_speed_and_the_usual_route_add_up_to_what_downloads_receive() {
+        const MB: u64 = 1 << 20;
+        let lanes = |w: u64, c: u64| vec![("wlan0".to_string(), w), ("eth0".to_string(), c)];
+        let t0 = Instant::now();
+        let mut s = Speeds::default();
+        s.measure(t0, 0, &lanes(0, 0), true);
+        assert_eq!((s.of("wlan0"), s.of("eth0"), s.usual()), (0, 0, 0), "the first reading is the base");
+        // 1 s: 3 MB through Wi-Fi, 5 MB through the cable, 1 MB not spread (the usual route).
+        s.measure(t0 + Duration::from_secs(1), 9 * MB, &lanes(3 * MB, 5 * MB), true);
+        assert_eq!((s.of("wlan0"), s.of("eth0"), s.usual()), (3 * MB, 5 * MB, MB));
+        // Too soon for a new window: kept.
+        s.measure(t0 + Duration::from_millis(1300), 9 * MB, &lanes(3 * MB, 5 * MB), true);
+        assert_eq!(s.of("eth0"), 5 * MB);
+        // Next second: Wi-Fi gives 1 MB/s: smoothed half way.
+        s.measure(t0 + Duration::from_secs(2), 16 * MB, &lanes(4 * MB, 10 * MB), true);
+        assert_eq!((s.of("wlan0"), s.of("eth0"), s.usual()), (2 * MB, 5 * MB, MB));
+        // A network that went away is dropped; one whose counter starts again counts from 0.
+        s.measure(t0 + Duration::from_secs(3), 17 * MB, &[("eth0".to_string(), MB)], true);
+        assert_eq!((s.of("wlan0"), s.of("eth0")), (0, 3 * MB));
+        // Nothing runs: 0 at once, not slowly.
+        s.measure(t0 + Duration::from_secs(4), 17 * MB, &[("eth0".to_string(), MB)], false);
+        assert_eq!((s.of("eth0"), s.usual()), (0, 0));
+        // What is left of a transfer that ended shows as 0, not as a few bytes a second.
+        s.measure(t0 + Duration::from_secs(5), 17 * MB, &[("eth0".to_string(), MB)], true);
+        s.measure(t0 + Duration::from_secs(6), 17 * MB + 100, &[("eth0".to_string(), MB + 100)], true);
+        assert_eq!(s.of("eth0"), 0);
+    }
 
     fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
