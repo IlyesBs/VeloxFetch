@@ -493,6 +493,12 @@ See `docs/resume-integrity.md` §8. Tests:
   way, every network carrying its part by the system's own counters, at least `curl`'s speed; each network unplugged
   and plugged back during a 4 GB download (`nmcli`): never a stop (`docs/several-networks.md`, "Measured",
   "Switching"). Plain names: `system-integration` `adapters` (5), `networks.test.ts` (2);
+* **Several networks: indicator and live card (October 2026, `feat_multinet_indicator`, issue #44):** `multinet` unit
+  test for `Speeds` (per network, usual route, windows, smoothing, a network gone, 0 when nothing runs),
+  `networks.test.ts` (+2), `desktop-multinet.mjs` 21 → 34 checks (indicator, status bar, card, each network's speed
+  and connections, total = sum ≈ download speed, no address, fits, 0 after, gone when off; 3 runs in a row green),
+  `real-multinet.mjs` 15 → 20 checks on the real cable + USB Wi-Fi (each network's card speed against `/proc/net/dev`
+  for that adapter every 3 s, within 35 % on most readings; it matched within a few percent; 3 runs green);
 * **Never lose a download (October 2026, `feat_never_lose_download`):** see `docs/never-lose-a-download.md` §6:
   `manager/recovery.rs` (3 unit), `explain.rs` (+1), `tests/integration/tests/recovery.rs` (7: tried until it
   finishes, offline spends no try and sends nothing, wake-up tries at once, gives up after its tries, never for
@@ -718,7 +724,7 @@ when a build has no update key. All 20 desktop suites pass on Linux.
 
 | Test | Checks |
 |---|---|
-| `tests/e2e/desktop-multinet.mjs` | Several networks at once (`docs/several-networks.md`): the networks listed by name (no address), on / off, a download through both loopback "networks" (server side), intact, Settings' states and bytes, the details line and report, leaving one out, refused input |
+| `tests/e2e/desktop-multinet.mjs` | Several networks at once (`docs/several-networks.md`): the networks listed by name (no address), on / off, the indicator and the live "Networks in use" card (each network's speed, total = sum), a download through both loopback "networks" (server side), intact, Settings' states and bytes, the details line and report, leaving one out, refused input |
 | `tests/e2e/desktop-i18n.mjs` | Every language (`docs/languages.md`): every page, every Settings section, the Add and Batch dialogs and a failed download's details have no English words (links, paths, file names, the product name and log lines left out) |
 | `apps/desktop/src/timeline.test.ts` (3) | every kind of timeline line the manager writes is said in every language without English left (words a language shares with English allowed); English unchanged; unknown lines kept |
 | `apps/desktop/src/messages.test.ts` (2) | every `ManagerError::invalid("…")` in `crates/download-manager/src` is in `messages.ts`; a refusal is said in French / Arabic; English and unknown messages unchanged |

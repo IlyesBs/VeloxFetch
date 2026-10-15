@@ -50,6 +50,7 @@ const metrics = (speedBps: number): Metrics => ({
   diskReadBps: null,
   diskWriteBps: null,
   ioSample: 0,
+  networks: null,
 });
 
 const tick = (downloads: Tick["downloads"], speed = 0): { type: "tick"; tick: Tick } => ({

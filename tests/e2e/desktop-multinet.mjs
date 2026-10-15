@@ -64,6 +64,61 @@ try {
   await waitFor(() => ev(`document.querySelectorAll('[data-testid=multinet-state][data-state=ready]').length === 2`), "both ready", 8000);
   check("on: both networks are ready", true);
 
+  // ============================================================ the indicator and the live card (issue #44)
+  await click("[data-testid=nav-downloads]");
+  await waitFor(() => has("[data-testid=panel-networks]"), "the networks card on the dashboard", 8000);
+  check("on: the indicator says how many networks", (await text("[data-testid=multinet-indicator]"))?.trim() === "2 networks", await text("[data-testid=multinet-indicator]"));
+  check("on: the status bar says it too", (await text("[data-testid=status-multinet]"))?.trim() === "2 networks");
+  check("the card lists both networks", (await ev(`document.querySelectorAll('[data-testid=netcard-item]').length`)) === 2);
+  const live = await startFileServer(96 * 1024 * 1024);
+  live.delayMs = 40; // about 1.6 MB/s per connection: the download runs long enough to be seen
+  const dl = (await invoke("create_download", { request: { url: `${live.base}/files/live.bin` } })).ok;
+  const metrics = async () => (await invoke("get_metrics")).ok;
+  let seen = null;
+  for (let i = 0; i < 40 && !seen; i++) {
+    await sleep(500);
+    const m = await metrics();
+    const n = m.networks?.networks ?? [];
+    if (n.length === 2 && n.every((x) => x.speedBps > 0 && x.connections > 0)) seen = m;
+  }
+  check("while downloading: each network has its own speed and connections", !!seen, JSON.stringify((await metrics()).networks));
+  if (seen) {
+    const sum = seen.networks.networks.reduce((a, x) => a + x.speedBps, seen.networks.otherBps);
+    check("the total is the sum of every network's speed", seen.networks.totalBps === sum, `${seen.networks.totalBps} vs ${sum}`);
+    check("the total matches what downloads receive (within 35 %)", Math.abs(seen.networks.totalBps - seen.speedBps) <= 0.35 * Math.max(seen.speedBps, 1), `${seen.networks.totalBps} vs ${seen.speedBps}`);
+  }
+  await waitFor(() => ev(`[...document.querySelectorAll('[data-testid=netcard-speed]')].every((e) => !/^0 B/.test(e.innerText.trim()))`), "the card shows both speeds", 8000);
+  const cardTotal = await text("[data-testid=netcard-total]");
+  check("the card shows the total", /\d/.test(cardTotal ?? "") && !/^0 B/.test(cardTotal), cardTotal);
+  check("the card names networks, never their addresses", !/\b\d+\.\d+\.\d+\.\d+\b/.test(await text("[data-testid=panel-networks]")));
+  const cardWide = await ev(`(() => { const p = document.querySelector('[data-testid=panel-networks]'); return p.scrollWidth > p.clientWidth + 1; })()`);
+  check("the card fits its column", !cardWide);
+  await h.screenshot(path.join(SHOTS, "multi-network-card.png"), { width: 1360, height: 860 });
+  await invoke("delete_download", { id: dl.id, deleteFile: true });
+  live.close();
+  await waitFor(async () => ((await metrics()).networks?.totalBps ?? 1) === 0, "speeds back to 0 once nothing runs", 10000);
+  check("nothing runs: every network at 0", true);
+
+  // Every language: the card, the indicator on the speed card and the status bar fit, and are translated.
+  const fits = (sel) => ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return !!e && e.scrollWidth <= e.clientWidth + 1; })()`);
+  const inside = (inner, outer) => ev(`(() => { const i = document.querySelector(${JSON.stringify(inner)})?.getBoundingClientRect(), o = document.querySelector(${JSON.stringify(outer)})?.getBoundingClientRect(); return !!i && !!o && i.left >= o.left - 1 && i.right <= o.right + 1; })()`);
+  const badLangs = [];
+  for (const lang of ["fr", "ar", "es", "pt-br", "de", "ru", "tr", "en"]) {
+    await click("[data-testid=nav-settings]");
+    await waitFor(() => has("[data-testid=settings-lang]"), "language drop-down");
+    await page(`(() => { const s = document.querySelector('[data-testid=settings-lang]');
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(s, ${JSON.stringify(lang)});
+      s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+    await waitFor(async () => (await ev("document.documentElement.lang")) === lang, `the ${lang} interface`);
+    await click("[data-testid=nav-downloads]");
+    await waitFor(() => has("[data-testid=panel-networks]"), "the card");
+    const ok = (await fits("[data-testid=panel-networks]")) && (await fits("[data-testid=tile-speed]")) && (await inside("[data-testid=multinet-indicator]", "[data-testid=tile-speed]")) && (await fits("[data-testid=statusbar]"));
+    const english = lang !== "en" && /Networks in use|Total of all networks|\bnetworks\b/.test(`${await text("[data-testid=panel-networks]")} ${await text("[data-testid=multinet-indicator]")}`);
+    if (!ok || english) badLangs.push(`${lang}${ok ? "" : " overflows"}${english ? " English" : ""}`);
+  }
+  check("every language: the card and the indicator fit and are translated", badLangs.length === 0, badLangs.join(", "));
+  await openNetwork();
+
   const d = (await invoke("create_download", { request: { url: `${srv.base}/files/spread.bin` } })).ok;
   await waitFor(async () => ["completed", "failed"].includes((await invoke("get_download", { id: d.id })).ok?.status), "download", 90000);
   const done = (await invoke("get_download", { id: d.id })).ok;
@@ -99,6 +154,8 @@ try {
   await waitFor(async () => (await multi()).networks.find((n) => n.name === "Ethernet")?.chosen === false, "Ethernet left out");
   await waitFor(() => has("[data-testid=multinet-one]"), "the 'choose two' hint");
   check("one network left: the panel asks for at least two", (await text("[data-testid=multinet-one]"))?.includes("at least two"));
+  await waitFor(async () => (await text("[data-testid=status-multinet]"))?.trim() === "1 network", "the status bar's indicator follows", 5000);
+  check("one network left: the indicator says \"1 network\"", true);
   const before = { ...srv.peers };
   const d2 = (await invoke("create_download", { request: { url: `${srv.base}/files/one.bin` } })).ok;
   await waitFor(async () => (await invoke("get_download", { id: d2.id })).ok?.status === "completed", "second download", 90000);
@@ -118,6 +175,9 @@ try {
   await waitFor(async () => !(await multi()).enabled, "turned off");
   await waitFor(async () => !(await has("[data-testid=multinet-state]")), "no network in use once off", 8000);
   check("off: no network in use", true);
+  await click("[data-testid=nav-downloads]");
+  await waitFor(async () => !(await has("[data-testid=panel-networks]")) && !(await has("[data-testid=multinet-indicator]")) && !(await has("[data-testid=status-multinet]")), "the indicator and card gone", 8000);
+  check("off: no indicator, no card", true);
 
   const errs = await ev("window.__errs");
   check("no JavaScript errors", errs.length === 0, errs.join(" | "));

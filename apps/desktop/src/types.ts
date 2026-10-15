@@ -358,6 +358,30 @@ export interface Metrics {
   diskWriteBps: number | null;
   /** Number of that reading: a new one adds a point to the side panels' charts. */
   ioSample: number;
+  /** Several networks at once is on: what each network brings now (null while it is off). */
+  networks: NetworkSpeeds | null;
+}
+
+/** Several networks at once, live (the dashboard's indicator and card). */
+export interface NetworkSpeeds {
+  /** On, but nothing is spread: a VPN carries the traffic, or a proxy does. */
+  blocked: "vpn" | "proxy" | null;
+  /** The chosen networks, and the usual one even when left out (what is not spread goes through it). */
+  networks: NetworkSpeed[];
+  /** Received through the system's route when none of the networks carries it (a VPN), bytes/s. */
+  otherBps: number;
+  /** Sum of every network's speed, bytes/s. */
+  totalBps: number;
+}
+
+export interface NetworkSpeed {
+  name: string;
+  kind: AdapterKind;
+  main: boolean;
+  chosen: boolean;
+  state: "ready" | "working" | "resting" | null;
+  connections: number;
+  speedBps: number;
 }
 
 export interface Progress {

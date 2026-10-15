@@ -104,7 +104,12 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   off while several networks are on. `manager/multinet.rs` reads the networks (`sysinfo`, every
   15 s while on), detects a VPN (the system's route to documentation addresses) and a proxy, and calls
   `Downloader::set_routes`; `set_client` carries the networks over to a new client. The engine adds each request's
-  bytes to `ProgressHandle::networks`; `DiagRecord::networks` keeps them per download.
+  bytes to `ProgressHandle::networks`; `DiagRecord::networks` keeps them per download. The dashboard's indicator
+  and "Networks in use" card (issue #44) read `MetricsDto.networks` (`NetworkSpeedsDto`, `None` while off), built in
+  `metrics()` by `DownloadManager::network_speeds`: `multinet::Speeds` turns each lane's byte counter and
+  `session_bytes` into speeds over windows of at least 0.9 s (smoothed; the rest went the usual way and is shown on the
+  usual network, with the videos' speed; 0 at once when nothing runs). UI: `MultiNetworkCard.tsx` (card and badge),
+  `networks.ts` (`networksInUse`, `shareOf`).
 * **Never lose a download** (`docs/never-lose-a-download.md`, `manager/recovery.rs`): `finish()` puts a failure the
   network or the server may get over in `Recovery.waiting`; the queue loop's `recovery_turn(online, seen_offline)`
   starts it again through `start_inner` when it is due (10 s … 10 min, 20 tries), never while offline, at once after a
