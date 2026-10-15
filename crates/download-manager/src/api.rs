@@ -780,7 +780,8 @@ pub struct SmartThrottleDto {
     pub auto: bool,
     /// The least downloads keep, whatever happens (bytes/s): they never stop.
     pub min_bps: u64,
-    /// What it is doing now: `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`.
+    /// What it is doing now: `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`, `checking` (a
+    /// few seconds slower to see whether another program wants the line), `programsOnly` (automatic mode off).
     pub reason: String,
     /// The computer's other download traffic (smoothed by nothing: the last reading), when known.
     pub other_bps: Option<u64>,

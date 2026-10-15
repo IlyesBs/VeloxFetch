@@ -165,7 +165,8 @@ Details: `docs/download-profiles.md`.
   Smart throttle's automatic mode. It holds only what it changes, and your own settings are never overwritten, so
   Default is your settings.
 - **Built-ins:**
-  - Fast: up to 64 connections (the most a download uses), still adaptive; no giving way.
+  - Fast: full speed: up to 64 connections (the most a download uses), still adaptive; no speed limit; Smart throttle
+    held off entirely (never gives way, not even to a listed program).
   - Balanced: Smart throttle automatic.
   - Low resource: 1 at once, 4 connections.
   - Plus up to 20 profiles of your own (create, duplicate, rename, edit, delete; built-ins protected).
@@ -299,10 +300,18 @@ Details: `docs/download-intelligence.md`.
 - **Refused, with a clear reason:** DRM-protected services (Netflix, Shahid…), encrypted streams and live streams.
 
 ### Smart throttle
-- **What it does:** downloads give way to what the user is doing and take the whole connection when it is free.
-  - **Automatic mode** (on by default once Smart throttle is on): when something else uses the internet while the
-    user is at the computer (browsing, a video), downloads slow down; heavy traffic while the user is away slows them
-    less; when the network is free or the computer idle (no input for 2 minutes), full speed.
+- **Three levels** (issue #46; the card and Settings): **Fast** (full speed, never slowed; the default), **Smart**
+  (automatic, below) and **Manual** (the level the user picks, all the time: Aggressive ~35 %, Balanced ~50 %,
+  Performance ~75 % of the line). The Fast download profile forces Fast.
+- **What Smart does:** downloads give way to what the user is doing and take the whole connection when it is free.
+  - **Automatic:** when something else uses the internet (browsing, a video, even watched without touching the mouse),
+    downloads slow down to half of the line, and leave more (down to a fifth) while the other program takes all the
+    room; when the network is free or the computer idle, full speed.
+  - **Checks:** with up to 64 connections, downloads starve a video player (a real 4K YouTube video got 0.18 MB/s), so
+    its traffic hardly shows. Now and then (~20 s, spacing out to ~3 min while nobody is found, soon after the user
+    comes back) downloads slow to half for ~9 s: a program that takes the room is found ("Checking whether another
+    app needs the connection"). On Linux the bytes waiting in VeloxFetch's own receive buffers are subtracted, so a
+    buffer filling up is never "someone else".
   - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), the gaming policy applies:
     *give way by the mode* (default: a share of the speed), *a low speed limit*, or *pause* (running downloads pause,
     none starts; only those resume when it closes, the user's own pauses stay). Detected at once, lifted after two
@@ -318,23 +327,20 @@ Details: `docs/download-intelligence.md`.
   or minimum moves the cap at once without lifting it first. Downloads never go below the reserved minimum, so they
   never stop. On a real line: a competing download is seen within ~3 s, downloads drop to half (Balanced), and full
   speed is back ~25 s after it stops.
-- **Settings:** on / off, Automatic, the mode, "Downloads always keep at least" (default 256 KB/s), and the maximum
-  download speed (the global speed limit).
-- **Modes:**
-
-  | Mode | While browsing | During a game or a call |
-  |---|---|---|
-  | Aggressive | ~35 % | 10 % |
-  | Balanced | ~50 % | 25 % |
-  | Conservative | ~75 % | 50 % |
+- **Settings:** the level (Fast / Smart / Manual), Manual's level, "Downloads always keep at least" (default
+  256 KB/s), and the maximum download speed (the global speed limit).
+- **Manual's levels:** Aggressive ~35 %, Balanced ~50 %, Performance ~75 % of the line, all the time. Smart keeps
+  ~50 % for other traffic and 25 % during a listed game or call (gaming policy "give way").
 
 - **Shows what it does:** a status line ("Full speed — nothing else is using the connection", "Reducing speed —
   active browsing detected", "Bandwidth optimized — speeding back up"…) on the dashboard card, in Settings and in the
   status bar (one shared state: they always agree), the gauge ("25% now": the share of their usual speed downloads
   keep), and a graph of the download speed with the current limit (Settings > Speed > Smart throttle).
-- **Clicks:** a switch or a mode changes on screen at once; quick clicks end where the last one says, never
-  flicking back; choosing a mode while it is off turns it on in that mode.
-- **Default and look:** off by default. While it is on, the accent colour turns amber.
+- **Clicks:** a switch, a level or a mode changes on screen at once; quick clicks end where the last one says, never
+  flicking back; choosing one of Manual's levels switches to Manual.
+- **Real line:** Smart found a real 4K YouTube video in 36 s and gave it 1.49 MB/s (from 0.18), full speed 29 s after
+  it stopped, never slowed for nobody (`tests/e2e/real-throttle.mjs`).
+- **Default and look:** Fast by default. While it is on, the accent colour turns amber.
 - **Privacy:** only program *names*, the computer's *total* traffic and the *time since the last input* are read;
   nothing is stored or sent.
 
@@ -865,6 +871,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-15 | `port_smart_throttle_v2` (from `main`, `fix_smart_throttle_probe`) | Fix | Issue #46, brought to v2.0.0 (texts in all 8 languages; several networks at once still holds it off, and the level buttons and radios are greyed out meanwhile): Smart throttle never saw a 4K YouTube video next to a download (64 connections starve it: 0.18 MB/s), counted someone watching without touching the mouse as away, and its modes changed nothing. Three levels: Fast (full speed), Smart (automatic: short checks at half speed find a starved program; a video counts without input; more room for a hungry program), Manual (Aggressive / Balanced / Performance all the time). Linux: VeloxFetch's own receive-buffer bytes subtracted from the measurement. The Fast profile holds Smart throttle off and lifts the speed limit. Real line: video found in 36 s, 0.18 -> 1.49 MB/s, full speed 29 s after. | `docs/smart-throttle-and-preview.md` |
 | 2026-10-15 | `feat_multinet_indicator` | Feature | Issue #44: with several networks at once on there was no sign of it. Now the Total speed card and the status bar say "2 networks" (orange behind a VPN / proxy or with fewer than two chosen; the tooltip lists each speed), and the dashboard's side column starts with "Networks in use": each network's speed now, its part of the total (bar), connections, state, and the total of all networks (always the sum; the usual network, also when left out, carries what is not spread; "Usual route (VPN)" behind a VPN). Appears and goes at once with the switch. `MetricsDto.networks` from `DownloadManager::network_speeds` / `multinet::Speeds` (bytes per network and of all downloads, windows of 0.9 s, smoothed; 0 at once when nothing runs; `None` while off). Names only, never addresses. 8 languages. Real cable + USB Wi-Fi: each network's speed matched the system's adapter counters within a few percent, 3 runs. Tests: 1 unit, vitest +2, `desktop-multinet.mjs` 21 → 34 checks (3 runs green), `real-multinet.mjs` 15 → 20 checks. | `docs/several-networks.md` |
 | 2026-10-13 | `feat_multi_network` | Feature | Several networks at once (Settings > Network, off by default): ranged requests of https links to public addresses are spread over the chosen networks, each with its own bound connections (Linux `SO_BINDTODEVICE`, macOS `IP_BOUND_IF`, Windows by address), to the least busy for its speed per connection (an unmeasured one is tried at once; one part per request; a crawling or silent transfer moves to a faster network; a weak network's lost transfers never shrink the others' connections). Networks shown by plain name (Wi-Fi, Ethernet, USB Ethernet, Phone (USB), Mobile network, Bluetooth; `system_integration::adapters`); Smart throttle held off while on. Aggressive: 8 connections per network to start, at least 4, requests of about 4 s; a network going away ends its transfers at once, one coming back is used within seconds. Measured on a real cable + USB Wi-Fi + phone: 145 MB in 32 – 37.6 s against 52.5 s the usual way, at least `curl`'s speed with 8 connections per network; each network unplugged and plugged back during a 4 GB download: never a stop (longest wait 1.5 s). Never through a proxy, never around a VPN (the system's route to each server is checked, no packet sent); the same answer checks; one cookie jar for every route. A failing network rests (30 s … 5 min) and its request goes the usual way at once (no retry spent); a server refusing a network (401 / 403 / 404 / 410 / 451) is asked the usual way for 10 min. Networks read every 15 s while on (virtual adapters, tunnels, link-local left out). Settings lists them by name ("usual", in use, resting, received); the details and report say what came through each. Commands `get_multi_network`, `set_multi_network` (90 commands). 8 languages. Tests: 13 + 4 + 5 + 4 unit, 6 integration, 21 e2e checks, vitest +3; 30 runs under load; real networks (`multinet_real.rs` speed and switching, `real-multinet.mjs` 15 checks). | `docs/several-networks.md` |
 | 2026-10-13 | `feat_more_languages` | Feature | Five new languages: Spanish, Portuguese (Brazil), German, Russian, Turkish (every text, the tray and notifications). The first start follows the computer's language (`pickLang`: exact code, else the same language from another country; nothing saved until the user picks). Settings > Language is a drop-down; the title-bar menu scrolls. Shorter Smart throttle titles where they were cut (French too). The e2e harness runs in English unless a test sets a language (`--lang` for the Windows web view, debug builds only). Tests: locales, detection (4), timeline in every language, `desktop-i18n.mjs` for every language (no English, nothing wider than the window, sidebar labels fit, first start on a French computer). | `docs/languages.md` |

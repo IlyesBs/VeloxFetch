@@ -5,7 +5,10 @@ import { useT } from "../i18n";
 import {
   gaugeShare,
   keepWhileActive,
+  LEVEL_REQUEST,
+  THROTTLE_LEVELS,
   THROTTLE_MODES as MODES,
+  throttleLevel,
   throttleOn,
   throttleStatus,
   throttleStore,
@@ -26,7 +29,8 @@ const SIDE_TICKS = ticks(80, 74, 70, 67);
 const WIDE_TICKS = ticks(60, 53, 50, 47);
 
 /**
- * Smart throttle HUD: a radial gauge whose core is the on/off button, a switch, and three modes. The arc
+ * Smart throttle HUD: a radial gauge whose core switches between Fast and Smart, the three levels (Fast, Smart,
+ * Manual) and, for Manual, its three modes (Aggressive, Balanced, Performance). The arc
  * shows the share of the connection downloads may use right now (all of it when nothing slows them). Turning
  * it on morphs the whole interface's accent to a stealthy amber (html[data-throttle], see throttle.ts).
  * `side`: the tall card of the sidebar (reference design). `wide`: a row card for the page, used while
@@ -44,34 +48,40 @@ export function ThrottleHud({
   const speed = useStore((st) => st.metrics.speedBps);
   const grad = `hud-${useId().replace(/:/g, "")}`;
   const on = throttleOn(s);
-  // The active profile turned it on: the switch is the profile's while it is active (change the profile instead).
-  const byProfile = s?.profileAdaptive === true && !s.enabled;
+  const level = throttleLevel(s);
+  // The active profile sets the level (Fast, or Balanced's Smart): change the profile instead.
+  const byProfile = s?.profileAdaptive === false || (s?.profileAdaptive === true && !s.enabled);
+  const profileTip = s?.profileAdaptive === false ? t("prof.smartFast") : t("prof.smartByProfile");
   // Several networks at once is on: Smart throttle stays off (every network at full speed) until it is turned off.
   const held = !!s?.heldByNetworks;
+  const lockTip = held ? t("multi.smartHeld") : byProfile ? profileTip : undefined;
   const limiting = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   // Live: the cap against the speed downloads usually get (the share they keep right now).
   const shown = gaugeShare(s);
   const pct = Math.round(shown * 100);
 
+  // The gauge's core: Fast <-> Smart.
   const toggle = () =>
     s &&
     void throttleStore.save(
-      { enabled: !on },
+      LEVEL_REQUEST[on ? "fast" : "smart"],
       on ? t("hud.offToast") : t("hud.on"),
     );
-  // Choosing a mode while it is off turns it on in that mode (what choosing one means).
+  const choose = (l: typeof level) =>
+    s && l !== level && void throttleStore.save(LEVEL_REQUEST[l], t("hud.modeSet", { name: t(`lvl.${l}`) }));
+  // Manual's levels (choosing one while in another level switches to Manual: what choosing one means).
   const pick = (share: number, name: string) =>
     s &&
-    (on
+    (level === "manual"
       ? share !== s.sharePercent &&
         void throttleStore.save(
           { sharePercent: share },
           t("hud.modeSet", { name }),
         )
       : void throttleStore.save(
-          { enabled: true, sharePercent: share },
-          t("hud.modeOn", { name }),
+          { ...LEVEL_REQUEST.manual, sharePercent: share },
+          t("hud.modeSet", { name }),
         ));
 
   const status = throttleStatus(t, s);
@@ -137,7 +147,7 @@ export function ThrottleHud({
         className={`hud-core absolute grid place-items-center rounded-full text-accent ${side ? "inset-[30px]" : "inset-[26px] border border-line bg-raised"} ${limiting ? "hud-live" : ""}`}
         aria-pressed={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
-        title={held ? t("multi.smartHeld") : byProfile ? t("prof.smartByProfile") : t("hud.gauge", { p: pct })}
+        title={lockTip ?? t("hud.gauge", { p: pct })}
         disabled={!s || byProfile || held}
         data-testid="hud-toggle"
         onClick={toggle}
@@ -170,8 +180,28 @@ export function ThrottleHud({
     </div>
   );
 
-  const modes = (
-    <div className="flex gap-1.5" role="radiogroup" aria-label={t("hud.mode")}>
+  const levels = (
+    <div className="flex gap-1.5" role="radiogroup" aria-label={t("smart.level")} data-testid="hud-levels">
+      {THROTTLE_LEVELS.map((l) => (
+        <button
+          key={l.level}
+          role="radio"
+          aria-checked={level === l.level}
+          className="mode-btn"
+          title={lockTip ?? t(`lvl.${l.level}Hint`)}
+          disabled={!s || byProfile || held}
+          data-testid={`hud-level-${l.level}`}
+          onClick={() => choose(l.level)}
+        >
+          <Icon name={l.icon} size={17} />
+          <span className="mode-label max-w-full truncate">{t(`lvl.${l.level}`)}</span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const modes = level === "manual" && (
+    <div className="flex gap-1.5" role="radiogroup" aria-label={t("hud.mode")} data-testid="hud-modes">
       {MODES.map((m) => {
         const name = t(m.name);
         return (
@@ -179,17 +209,15 @@ export function ThrottleHud({
             key={m.share}
             role="radio"
             aria-checked={share === m.share}
-            className="mode-btn"
+            className="mode-btn mode-btn-sm"
             title={t("hud.modeTip", {
               name,
               k: keepWhileActive(m.share),
-              p: m.share,
             })}
-            disabled={!s || held}
+            disabled={!s || byProfile || held}
             data-testid={`hud-mode-${m.share}`}
             onClick={() => pick(m.share, name)}
           >
-            <Icon name={m.icon} size={17} />
             <span className="mode-label max-w-full truncate">{name}</span>
           </button>
         );
@@ -215,7 +243,7 @@ export function ThrottleHud({
         aria-checked={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
         className="switch"
-        title={held ? t("multi.smartHeld") : byProfile ? t("prof.smartByProfile") : undefined}
+        title={lockTip}
         disabled={!s || byProfile || held}
         data-testid="hud-switch"
         onClick={toggle}
@@ -241,6 +269,7 @@ export function ThrottleHud({
       >
         {head}
         {gauge}
+        {levels}
         {modes}
         {statusLine}
       </div>
@@ -256,6 +285,7 @@ export function ThrottleHud({
       <div className="min-w-[14rem] flex-1 space-y-3">
         {head}
         {statusLine}
+        {levels}
         {modes}
       </div>
     </div>

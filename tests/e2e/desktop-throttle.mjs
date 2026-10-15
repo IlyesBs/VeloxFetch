@@ -43,14 +43,20 @@ try {
   })()`);
   await waitFor(async () => (await attr(SWITCH, "disabled")) === null, "the card to load its state");
 
-  // ---- off by default; a mode chosen while off turns it on in that mode ---------------------------------------
-  check("off by default", (await state()).enabled === false && (await attr(HUD, "data-state")) === "off");
-  await click(`${HUD} [data-testid=hud-mode-10]`);
+  // ---- Fast by default; Manual shows its three levels, and choosing one applies it -----------------------------
+  check("Fast (full speed) by default", (await state()).enabled === false && (await attr(HUD, "data-state")) === "off");
+  check("the three levels are there, Fast chosen", (await attr(`${HUD} [data-testid=hud-level-fast]`, "aria-checked")) === "true" && (await q(`${HUD} [data-testid=hud-level-smart]`)) && (await q(`${HUD} [data-testid=hud-level-manual]`)));
+  check("Manual's levels only show in Manual", !(await q(`${HUD} [data-testid=hud-mode-10]`)));
+  await click(`${HUD} [data-testid=hud-level-manual]`);
   check("the switch says on at once (before the answer)", (await attr(SWITCH, "aria-checked")) === "true");
-  await waitFor(async () => (await state()).enabled === true, "the app to turn it on");
+  await waitFor(() => q(`${HUD} [data-testid=hud-mode-10]`), "Manual's levels");
+  await click(`${HUD} [data-testid=hud-mode-10]`);
+  await waitFor(async () => (await state()).sharePercent === 10, "the app to take Aggressive");
   const s1 = await state();
-  check("choosing Aggressive while off turned it on in Aggressive", s1.enabled && s1.sharePercent === 10, JSON.stringify(s1));
-  check("the toast says so", (await ev(`document.body.innerText.includes('Smart throttle is on · Aggressive')`)) === true);
+  check("Manual, Aggressive", s1.enabled && !s1.auto && s1.sharePercent === 10, JSON.stringify(s1));
+  check("the toast says so", (await ev(`document.body.innerText.includes('Mode: Aggressive')`)) === true);
+  const cutLevels = await ev(`[...document.querySelectorAll('${HUD} .mode-label')].filter((e) => e.scrollWidth > e.clientWidth + 1).map((e) => e.textContent)`);
+  check("every level's and mode's name fits on its button", cutLevels.length === 0, JSON.stringify(cutLevels));
   check("the status bar shows it", await q("[data-testid=status-throttle]"));
   const status = await text(`${HUD} [data-testid=hud-status]`);
   check("the status line does not call a busy download 'network idle'", !/network idle/i.test(status ?? ""), status);
@@ -72,8 +78,9 @@ try {
   await sleep(7000); // the watcher learns what downloads get while nothing slows them (it looks every 3 s)
   const free = (await invoke("get_metrics")).ok?.speedBps ?? 0;
   await invoke("set_smart_throttle", { request: { apps: ["velox-desktop", "velox-desktop.exe"], sharePercent: 25 } });
-  await click(SWITCH);
+  await click(SWITCH); // Fast -> Smart
   await waitFor(async () => (await state()).reason === "app", "the scan to find the program", 15000);
+  check("the gauge's core turned on Smart", (await state()).auto === true && (await attr(`${HUD} [data-testid=hud-level-smart]`, "aria-checked")) === "true");
   const capped = await state();
   check("a listed program caps downloads", capped.limitBps !== null && capped.activeApp !== null, JSON.stringify(capped));
   check("the cap is the mode's share of what downloads really got (not of an old best speed)", capped.referenceBps !== null && Math.abs(capped.limitBps - Math.max(capped.minBps, capped.referenceBps * 0.25)) < 2, JSON.stringify(capped));
@@ -94,7 +101,10 @@ try {
   await sleep(1500);
   await h.screenshot(path.join(SHOTS, "throttle-hud-limiting-dark.png"), { width: 1240, height: 860 });
 
-  // Modes change while capped: the cap follows at once, and the download moves on every second (never stops).
+  // Manual, then its levels flipped while capped: the cap follows at once, and the download moves on every second.
+  await click(`${HUD} [data-testid=hud-level-manual]`);
+  await waitFor(async () => (await state()).reason === "manual", "Manual");
+  await waitFor(() => q(`${HUD} [data-testid=hud-mode-50]`), "Manual's levels");
   const moving = [];
   let last = await downloaded(d.id);
   for (const share of [50, 10, 25, 50, 25]) {
@@ -109,19 +119,19 @@ try {
   }
   check("switching modes never stops the download (bytes every second)", moving.every((b) => b > 0), moving.join(" "));
   const s2 = await state();
-  check("the last mode is in force", s2.sharePercent === 25 && s2.limitBps !== null);
+  check("the last mode is in force (Manual: half the connection)", s2.sharePercent === 25 && s2.limitBps !== null && s2.reason === "manual", JSON.stringify(s2));
 
   // ---- Settings shows the same state, and a change there shows on the card at once -----------------------------
   await click("[data-testid=nav-settings]");
-  await waitFor(() => q("[data-testid=smart-enabled]"), "Settings > Smart throttle");
-  check("Settings: the same on/off", (await ev(`document.querySelector('[data-testid=smart-enabled]').checked`)) === true);
+  await waitFor(() => q("[data-testid=smart-level-manual]"), "Settings > Smart throttle");
+  check("Settings: the same level", (await ev(`document.querySelector('[data-testid=smart-level-manual]').checked`)) === true);
   check("Settings: the same mode", (await ev(`document.querySelector('[data-testid=smart-mode]').value`)) === "25");
   await page(`(() => { const el = document.querySelector('[data-testid=smart-mode]');
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, '50');
     el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
   await waitFor(async () => (await state()).sharePercent === 50, "the mode set in Settings");
   check("the card follows a change made in Settings", (await attr(`${HUD} [data-testid=hud-mode-50]`, "aria-checked")) === "true");
-  await page(`(() => { const el = document.querySelector('[data-testid=smart-enabled]'); el.scrollIntoView({ block: 'start' }); return true; })()`);
+  await page(`(() => { const el = document.querySelector('[data-testid=smart-levels]'); el.scrollIntoView({ block: 'start' }); return true; })()`);
   await sleep(800);
   await h.screenshot(path.join(SHOTS, "throttle-settings-dark.png"), { width: 1240, height: 860 });
   await click("[data-testid=nav-downloads]");
@@ -155,6 +165,18 @@ try {
   await waitFor(async () => (await profiles()).active === "balanced", "Balanced from the status bar");
   await waitFor(async () => (await state()).profileAdaptive === true, "Smart throttle follows");
   check("Balanced turns Smart throttle's automatic mode on, your switch stays off", (await state()).enabled === false && (await q("[data-testid=smart-profile-note]")));
+  // Fast: full speed, whatever the user chose (Manual here): Smart throttle held off, the levels greyed out.
+  await invoke("set_smart_throttle", { request: { enabled: true, auto: false } });
+  await invoke("profile_action", { request: { kind: "select", id: "fast" } });
+  await waitFor(async () => (await state()).profileAdaptive === false, "the Fast profile");
+  const fast = await state();
+  check("Fast profile: no cap, no limit, the user's own choice kept", fast.limitBps === null && fast.reason === "off" && fast.enabled && (await profiles()).effective.speedLimitBps === null, JSON.stringify(fast));
+  await click("[data-testid=nav-downloads]");
+  await waitFor(async () => (await attr(`${HUD} [data-testid=hud-level-fast]`, "aria-checked")) === "true", "the card to show Fast", 5000);
+  check("the card shows Fast with the levels greyed out", (await attr(`${HUD} [data-testid=hud-level-manual]`, "disabled")) !== null && (await text(`${HUD} [data-testid=hud-status]`))?.includes("Fast profile"));
+  await invoke("profile_action", { request: { kind: "select", id: "balanced" } });
+  await invoke("set_smart_throttle", { request: { enabled: false, auto: p0.base.adaptive } }); // as before
+  await click("[data-testid=nav-settings]");
   const bad = await invoke("profile_action", { request: { kind: "create", name: "Bad", settings: { maxConnections: 999 } } });
   check("an invalid profile is refused by the app", !!bad.err, JSON.stringify(bad));
   const sneaky = await invoke("profile_action", { request: { kind: "delete", id: "fast" } });
@@ -173,7 +195,8 @@ try {
   await click(`[data-testid=profile-del-${copy.id}]`);
   await click(`[data-testid=profile-del-${copy.id}]`);
   await waitFor(async () => (await profiles()).active === "default", "back to Default after deleting the active profile");
-  check("deleting the active profile falls back to Default", JSON.stringify((await profiles()).effective) === JSON.stringify(p0.base));
+  const afterDelete = await profiles();
+  check("deleting the active profile falls back to Default", JSON.stringify(afterDelete.effective) === JSON.stringify(p0.base), JSON.stringify({ now: afterDelete.effective, before: p0.base }));
   await click("[data-testid=nav-downloads]");
 
   const csp = (await page("window.__csp")).ok;

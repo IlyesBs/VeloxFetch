@@ -78,6 +78,10 @@ pub const DEFAULT_APPS: &[&str] = &[
     "Teams",
 ];
 const DEFAULT_SHARE: u8 = 25;
+/// Smart (automatic) picks how much downloads give way by itself: the Balanced level (a listed program's adaptive
+/// policy keeps 25 % of the line, other traffic 50 %, heavy traffic while the user is away 75 %). The user's level is
+/// for Manual.
+const SMART_SHARE: u8 = 25;
 const MAX_APPS: usize = 64;
 const MAX_APP_NAME: usize = 64;
 /// A listed program may also be a full path to its executable (one game among several with the same file name).
@@ -133,8 +137,9 @@ pub(super) struct SmartState {
     watch: GameWatch,
     /// The pause policy holds the queue (as last decided).
     hold: bool,
-    /// The previous measurement: when, the computer's received bytes, VeloxFetch's received bytes.
-    meter: Option<(Instant, u64, u64)>,
+    /// The previous measurement: when, the computer's received bytes, VeloxFetch's received bytes, and the bytes
+    /// waiting in VeloxFetch's own receive buffers (where the system says).
+    meter: Option<(Instant, u64, u64, Option<u64>)>,
     /// The last window's other traffic and VeloxFetch's speed (bytes/s).
     last_window: (f64, f64),
     /// What downloads were getting lately while nothing held them back (bytes/s; 0 = not known yet).
@@ -145,28 +150,35 @@ pub(super) struct SmartState {
 
 impl SmartState {
     /// The other traffic and VeloxFetch's own speed since the previous measurement (bytes/s), from the computer's
-    /// received bytes `nic` (`None`: no counters) and VeloxFetch's received bytes `mine`, counted at `now`.
-    fn measure(&mut self, now: Instant, nic: Option<u64>, mine: u64) -> (Option<f64>, Option<f64>) {
+    /// received bytes `nic` (`None`: no counters), VeloxFetch's received bytes `mine` and the bytes waiting in its
+    /// own receive buffers `queued` (`None`: unknown), counted at `now`.
+    fn measure(&mut self, now: Instant, nic: Option<u64>, mine: u64, queued: Option<u64>) -> (Option<f64>, Option<f64>) {
         let Some(nic) = nic else {
             self.meter = None;
             return (None, None);
         };
         match self.meter {
-            Some((at, _, _)) if now.duration_since(at) < METER_MIN => (Some(self.last_window.0), Some(self.last_window.1)),
-            Some((at, pn, pm)) if now.duration_since(at) <= METER_MAX && nic >= pn => {
+            Some((at, ..)) if now.duration_since(at) < METER_MIN => (Some(self.last_window.0), Some(self.last_window.1)),
+            Some((at, pn, pm, pq)) if now.duration_since(at) <= METER_MAX && nic >= pn => {
                 let secs = now.duration_since(at).as_secs_f64();
                 let mine_bps = mine.saturating_sub(pm) as f64 / secs;
+                // Bytes that arrived for VeloxFetch but wait in its buffers are VeloxFetch's too (they fill while
+                // downloads are held back, and empty when they speed up).
+                let buffered = match (pq, queued) {
+                    (Some(a), Some(b)) => (b as f64 - a as f64) / secs,
+                    _ => 0.0,
+                };
                 // Signed on purpose: while downloads are capped, the system takes data in ahead of VeloxFetch reading
                 // it, so one window shows a little more than VeloxFetch's share and the next a little less. Clipping
                 // each window at zero would only keep the "more" (see `Controller::step_with`).
-                let other = (nic - pn) as f64 / secs - mine_bps * HEADER_OVERHEAD;
-                self.meter = Some((now, nic, mine));
+                let other = (nic - pn) as f64 / secs - (mine_bps + buffered) * HEADER_OVERHEAD;
+                self.meter = Some((now, nic, mine, queued));
                 self.last_window = (other, mine_bps);
                 (Some(other), Some(mine_bps))
             }
             // The first measurement (or after a long gap, or counters that went back): nothing to compare yet.
             _ => {
-                self.meter = Some((now, nic, mine));
+                self.meter = Some((now, nic, mine, queued));
                 self.last_window = (0.0, 0.0);
                 (Some(0.0), None)
             }
@@ -201,9 +213,11 @@ impl SmartState {
         }
     }
 
-    /// Smart throttle is on: the user's switch, or a profile that asks for its automatic mode.
+    /// Smart throttle is on: the user's switch, or a profile that asks for its automatic mode; never while the
+    /// active profile wants full speed (Fast: downloads never give way, not even to a listed program), nor while
+    /// several networks at once is on (every network at full speed).
     pub(super) fn on(&self) -> bool {
-        !self.held_by_networks && (self.enabled || self.profile == Some(true))
+        !self.held_by_networks && self.profile != Some(false) && (self.enabled || self.profile == Some(true))
     }
 
     /// The automatic mode is on: the profile's choice where it makes one, the user's otherwise.
@@ -359,6 +373,12 @@ fn game_cap(policy: GamePolicy, reference: f64, share: u8, floor: u64, low: u64)
     }
 }
 
+/// Manual: the chosen level's share of the line (Aggressive 35 %, Balanced 50 %, Performance 75 %), never below
+/// the floor; `None` (full speed) until the line's speed is known, so the first download measures it.
+pub fn manual_cap(reference: f64, share: u8, floor: u64) -> Option<u64> {
+    (reference >= 1.0).then(|| ((reference * keep_while_active(share)) as u64).max(floor))
+}
+
 fn cap_with_floor(peak_bps: f64, share: u8, floor: u64) -> u64 {
     if peak_bps < 1.0 {
         return UNKNOWN_PEAK_LIMIT_BPS.max(floor);
@@ -387,6 +407,10 @@ pub enum Reason {
     Easing,
     /// Not enough information (no traffic counters): full speed.
     Unknown,
+    /// A short check: downloads slow down for a few seconds to see whether another program wants the line.
+    Checking,
+    /// Manual: the level the user chose (Aggressive, Balanced, Performance) applies all the time.
+    Manual,
 }
 
 impl Reason {
@@ -400,6 +424,8 @@ impl Reason {
             Reason::App => "app",
             Reason::Easing => "easing",
             Reason::Unknown => "unknown",
+            Reason::Checking => "checking",
+            Reason::Manual => "manual",
         }
     }
 }
@@ -424,6 +450,8 @@ pub const IDLE_AFTER: Duration = Duration::from_secs(120);
 /// Other traffic above this while the user is at the computer: they are using the internet (a page loading, a
 /// video, a call). Background chatter (a chat app, a sync client idling) stays below it.
 const ACTIVE_ON_BPS: f64 = 96.0 * 1024.0;
+/// The same while the user has not touched the keyboard or mouse for a while (watching a video, or away).
+const ACTIVE_AWAY_BPS: f64 = 256.0 * 1024.0;
 /// Of VeloxFetch's own speed, this share of "other traffic" may be measuring noise (counters read a moment
 /// apart, retransmissions, the system taking data in ahead of VeloxFetch reading it while it writes): it never counts
 /// as someone using the line. Measured on a real line: a window off by 3 to 8 % of the speed is common, and 3 % made
@@ -454,6 +482,58 @@ const RELEARN_AFTER: u8 = 3;
 const CALM: u32 = 4;
 /// Speeding up: this much more per reading, until full speed.
 const STEP_UP: f64 = 1.5;
+/// While slowed: the other program uses this share of the room downloads leave -> they leave more (by
+/// [`STEP_DOWN`], down to [`SMART_LEAST`] of the line); under [`GIVE_BACK`] of it -> back up (by [`STEP_BACK`]) toward
+/// the mode's share.
+const GIVE_MORE: f64 = 0.8;
+const GIVE_BACK: f64 = 0.4;
+const STEP_DOWN: f64 = 0.85;
+const STEP_BACK: f64 = 1.15;
+const SMART_LEAST: f64 = 0.2;
+
+// Checks. Downloads use many connections and a browser or a video player one or two, so at full speed the other
+// program gets almost nothing (measured on a real line: a 4K video and another download got 50-70 KB/s next to
+// VeloxFetch's 64 connections) and its traffic never shows. So now and then, while downloads run at full speed,
+// they slow down for a few seconds: a program that wants the line takes the room at once, and that shows.
+/// Readings at full speed before the first check (about 15 s).
+const PROBE_FIRST: u32 = 5;
+/// Readings between checks: from this (about 20 s) after a check that found someone...
+const PROBE_EVERY_MIN: u32 = 7;
+/// ...doubling after each check that found nobody, up to this (about 3 minutes).
+const PROBE_EVERY_MAX: u32 = 60;
+/// The user comes back to the computer after this long without input (to start a video, open a page): a check
+/// within [`PROBE_SOON`] readings, and the spacing starts over. Typing or moving the mouse all along does not.
+const PROBE_RETURN_AFTER: Duration = Duration::from_secs(20);
+const PROBE_SOON: u32 = 2;
+/// A check's readings. When downloads slow down, the system keeps taking data in for them until its buffers are
+/// full, which the counters show as other traffic for a while (measured on a real line: 0.7 MB/s still 6 s into a
+/// check with nobody else). So the first reading is skipped, and the check ends as soon as the other traffic (two
+/// readings averaged) drops below the threshold: nobody, the buffers were full. It finds someone only when the
+/// traffic stays above it for [`PROBE_MAX`] readings.
+const PROBE_SKIP: u8 = 1;
+const PROBE_MAX: u8 = 6;
+/// During a check downloads keep this share of their speed.
+const PROBE_KEEP: f64 = 0.5;
+/// Someone wants the line: other traffic grew by this share of the room the check made (and at least
+/// [`ACTIVE_ON_BPS`]).
+const PROBE_FILL: f64 = 0.3;
+/// Checks only run while downloads take at least this (below it the line has room for everyone).
+const PROBE_MIN_BPS: f64 = 4.0 * ACTIVE_ON_BPS;
+/// A slowdown found by a check that ends within this many readings was not real: checks keep their spacing.
+const PROBE_SHORT: u32 = 10;
+
+/// A check in progress.
+#[derive(Debug, Clone, Copy)]
+struct Probe {
+    /// Readings so far.
+    n: u8,
+    /// The check's cap and the room it makes (bytes/s).
+    cap: f64,
+    gap: f64,
+    /// Other traffic before the check (smoothed, at least 0) and the previous reading during it.
+    before: f64,
+    prev: Option<f64>,
+}
 
 /// The share of the connection downloads keep while the user uses the internet, from the chosen mode
 /// (Aggressive 10 % -> 35 %, Balanced 25 % -> 50 %, Conservative 50 % -> 75 %).
@@ -466,6 +546,8 @@ pub struct Controller {
     other: Option<f64>,
     /// The previous reading as measured (bytes/s, signed).
     prev_raw: Option<f64>,
+    /// The user's idle time at the previous reading.
+    prev_idle: Option<Duration>,
     active: bool,
     busy: bool,
     pending: u8,
@@ -477,6 +559,12 @@ pub struct Controller {
     cap: Option<f64>,
     /// Readings still to ignore after the cap was set or lowered (see [`SETTLE`]).
     settle: u8,
+    /// Readings at full speed until the next check (`None`: not counting yet), the current spacing, the check
+    /// running, and how long a slowdown a check found has lasted (`None`: the slowdown was not found by a check).
+    probe_in: Option<u32>,
+    probe_every: u32,
+    probe: Option<Probe>,
+    probe_found: Option<u32>,
 }
 
 impl Controller {
@@ -494,9 +582,8 @@ impl Controller {
     /// The cap while slowing: the share of `reference` the mode keeps (more while the user is away), never below
     /// the floor.
     fn target(&self, reference: f64, share: u8, floor: f64) -> f64 {
+        // The same whether the user touches the keyboard or not: someone watching a film does not, for long.
         let keep = keep_while_active(share);
-        // The user is away and something else downloads heavily (updates, a stream on another app): slow less.
-        let keep = if self.active { keep } else { keep + (1.0 - keep) / 2.0 };
         let known = if reference < 1.0 { UNKNOWN_PEAK_LIMIT_BPS as f64 / keep } else { reference };
         (known * keep).max(floor)
     }
@@ -520,6 +607,55 @@ impl Controller {
             *self = Controller::default();
             return (None, Reason::Unknown);
         };
+        let away = sig.idle.is_some_and(|i| i >= IDLE_AFTER);
+        let returned = matches!((self.prev_idle, sig.idle), (Some(before), Some(now)) if before >= PROBE_RETURN_AFTER && now < before);
+        self.prev_idle = sig.idle;
+        if returned {
+            self.probe_every = 0;
+            if self.probe_in.is_none_or(|n| n > PROBE_SOON) {
+                self.probe_in = Some(PROBE_SOON);
+            }
+        }
+        if let Some(mut p) = self.probe.take() {
+            p.n += 1;
+            let pair = p.prev.map(|q| (q + raw) / 2.0);
+            if p.n > PROBE_SKIP {
+                p.prev = Some(raw);
+            }
+            let grew = pair.map(|x| x - p.before);
+            let threshold = ACTIVE_ON_BPS.max(p.gap * PROBE_FILL);
+            let nobody = grew.is_some_and(|g| g < threshold);
+            if !nobody && p.n < PROBE_MAX {
+                self.probe = Some(p);
+                return (Some(p.cap as u64), Reason::Checking);
+            }
+            if let Some(grew) = grew.filter(|_| !nobody) {
+                // Someone took the room: slow down by the chosen mode now (confirmed, no wait), and hold it while they
+                // use the line, as for traffic seen directly.
+                self.active = true;
+                self.busy = false;
+                self.pending = CONFIRM;
+                self.calm = 0;
+                self.since_calm = None;
+                self.other = Some(p.before + grew);
+                self.prev_raw = None;
+                let target = self.target(reference, share, floor);
+                if target < p.cap {
+                    self.settle = SETTLE;
+                }
+                self.cap = Some(target);
+                self.probe_found = Some(0);
+                tracing::debug!(grew, gap = p.gap, "smart throttle: a check found another program using the line");
+                return (Some(target as u64), if away { Reason::Busy } else { Reason::Browsing });
+            }
+            // Nobody: back to full speed, and the next check a while later.
+            self.probe_every = spaced_out(self.probe_every);
+            self.probe_in = Some(self.probe_every);
+            self.cap = None;
+            self.prev_raw = None;
+            self.settle = 0;
+            return (None, idle_or_free(away));
+        }
         // Smoothed with its sign, so a window that showed a little more than the truth and the next one a little
         // less cancel out; how far below zero it may go is bounded, so real traffic shows within a reading or two.
         // The last two windows are averaged first: the "more" of one window and the "less" of the next meet there.
@@ -527,13 +663,12 @@ impl Controller {
             // Just slowed down: this reading is the system's buffers, not someone else. Kept as it is.
             self.settle -= 1;
             self.prev_raw = None;
-            let away = sig.idle.is_some_and(|i| i >= IDLE_AFTER);
-            let reason = if self.active {
-                Reason::Browsing
-            } else if self.busy {
+            let reason = if !(self.active || self.busy) {
+                idle_or_free(away)
+            } else if away {
                 Reason::Busy
             } else {
-                idle_or_free(away)
+                Reason::Browsing
             };
             return (self.cap.map(|c| c as u64), reason);
         }
@@ -547,12 +682,15 @@ impl Controller {
         .max(floor_other);
         self.other = Some(smoothed);
         let other = smoothed.max(0.0);
-        let away = sig.idle.is_some_and(|i| i >= IDLE_AFTER);
         let busy_on = BUSY_ON_BPS.max(peak * BUSY_ON_SHARE);
         let noise = if sig.paced { NOISE_SHARE_PACED } else { NOISE_SHARE };
         let active_on = ACTIVE_ON_BPS.max(sig.mine_bps.unwrap_or(0.0) * noise);
         let was_slowing = self.active || self.busy;
-        self.active = !away && other > if self.active { active_on * OFF_RATIO } else { active_on };
+        // Whether or not the user touches the keyboard: watching a video, nobody does for minutes (it took the user
+        // for away, and only heavy traffic counted then: a video next to full-speed downloads never did).
+        // Away, a little more is needed (a sync client idling in the background is not someone watching).
+        let active_on = if away { active_on.max(ACTIVE_AWAY_BPS) } else { active_on };
+        self.active = other > if self.active { active_on * OFF_RATIO } else { active_on };
         self.busy = other > if self.busy { busy_on * OFF_RATIO } else { busy_on };
         let wants_slow = self.active || self.busy;
         if wants_slow && !was_slowing {
@@ -561,14 +699,30 @@ impl Controller {
         self.since_calm = self.since_calm.map(|n| n.saturating_add(1));
 
         if wants_slow {
+            self.probe_in = None;
+            if let Some(n) = self.probe_found.as_mut() {
+                *n = n.saturating_add(1);
+            }
             self.calm = 0;
             self.pending = self.pending.saturating_add(1);
             let target = self.target(reference, share, floor);
             if self.pending >= CONFIRM && self.cap.is_none_or(|c| target < c) {
                 self.cap = Some(target);
                 self.settle = SETTLE;
+            } else if let (Some(c), true) = (self.cap, reference >= 1.0) {
+                // Slowed: follow what the other program really uses. It takes nearly all the room left (a film in
+                // high quality, a big update): more room, step by step, down to a fifth of the line. It uses much less:
+                // back toward the mode's share.
+                let room = (reference - c).max(0.0);
+                let least = (reference * SMART_LEAST).max(floor);
+                if other >= GIVE_MORE * room && c > least {
+                    self.cap = Some((c * STEP_DOWN).max(least));
+                    self.settle = SETTLE;
+                } else if other < GIVE_BACK * room && c < target {
+                    self.cap = Some((c * STEP_BACK).min(target));
+                }
             }
-            let reason = if self.active { Reason::Browsing } else { Reason::Busy };
+            let reason = if away { Reason::Busy } else { Reason::Browsing };
             return (self.cap.map(|c| c as u64), if self.cap.is_some() { reason } else { idle_or_free(away) });
         }
 
@@ -577,7 +731,10 @@ impl Controller {
             self.since_calm = Some(0);
         }
         self.calm = self.calm.saturating_add(1);
-        let Some(cap) = self.cap else { return (None, idle_or_free(away)) };
+        let Some(cap) = self.cap else { return self.full_speed(sig, other, floor, away) };
+        if let Some(n) = self.probe_found.as_mut() {
+            *n = n.saturating_add(1);
+        }
         let needed = if self.unsteady { CALM * 2 } else { CALM };
         if self.calm < needed {
             return (Some(cap as u64), Reason::Easing);
@@ -586,6 +743,14 @@ impl Controller {
         if reference < 1.0 || next >= reference * 0.95 {
             self.cap = None;
             self.unsteady = false;
+            // A slowdown a check found: a long one means people use the line (check again soon); a short one was
+            // a passing burst (keep the spacing). Either way the next check comes after the spacing.
+            match self.probe_found.take() {
+                Some(n) if n >= PROBE_SHORT => self.probe_every = PROBE_EVERY_MIN,
+                Some(_) => self.probe_every = spaced_out(self.probe_every),
+                None => {}
+            }
+            self.probe_in = Some(self.probe_every.max(PROBE_EVERY_MIN));
             (None, idle_or_free(away))
         } else {
             self.cap = Some(next);
@@ -596,6 +761,37 @@ impl Controller {
     /// The automatic cap is dropped (mode turned off, a listed program took over...).
     pub fn reset(&mut self) {
         *self = Controller::default();
+    }
+
+    /// Full speed and nothing seen: count down to the next check, and start it when it is due and downloads take
+    /// enough of the line for a check to tell anything.
+    fn full_speed(&mut self, sig: Signals, other: f64, floor: f64, away: bool) -> (Option<u64>, Reason) {
+        let mine = sig.mine_bps.unwrap_or(0.0);
+        if mine < PROBE_MIN_BPS {
+            return (None, idle_or_free(away));
+        }
+        let due = self.probe_in.get_or_insert(PROBE_FIRST);
+        *due = due.saturating_sub(1);
+        if *due > 0 {
+            return (None, idle_or_free(away));
+        }
+        let cap = (mine * PROBE_KEEP).max(floor);
+        if mine - cap < 2.0 * ACTIVE_ON_BPS {
+            return (None, idle_or_free(away)); // the reserved minimum leaves no room to check with
+        }
+        self.probe = Some(Probe { n: 0, cap, gap: mine - cap, before: other, prev: None });
+        self.probe_in = None;
+        self.cap = Some(cap);
+        (Some(cap as u64), Reason::Checking)
+    }
+}
+
+/// The spacing after a check that found nobody: about 20 s, then doubling up to about 2 minutes.
+fn spaced_out(every: u32) -> u32 {
+    if every < PROBE_EVERY_MIN {
+        PROBE_EVERY_MIN
+    } else {
+        (every * 2).min(PROBE_EVERY_MAX)
     }
 }
 
@@ -733,15 +929,16 @@ impl DownloadManager {
             if !s.on() || !s.automatic() {
                 s.ctl.reset();
             }
-            !s.on()
-                || req.auto == Some(false)
+            // Any change of level or setting applies now, not at the next scan (a program list alone waits for it).
+            req.enabled.is_some()
+                || req.auto.is_some()
                 || req.min_bps.is_some()
                 || req.share_percent.is_some()
                 || req.game_policy.is_some()
                 || req.game_limit_bps.is_some()
         };
         if release {
-            // Off (or a new mode / minimum): applied now, not at the next scan. Off means full speed at once.
+            // Fast (off) means full speed at once; Manual its level at once; Smart starts from full speed.
             let enabled = self.inner.smart.lock().unwrap().on();
             if !enabled {
                 self.smart_throttle_observe(Some(&[]));
@@ -766,7 +963,8 @@ impl DownloadManager {
         // Both counters at the same moment, so both rates cover the same window.
         let nic = self.inner.sysio.net_received_total();
         let mine = self.velox_received_total();
-        let (other_bps, mine_bps) = self.inner.smart.lock().unwrap().measure(Instant::now(), nic, mine);
+        let queued = sysio::own_tcp_queued();
+        let (other_bps, mine_bps) = self.inner.smart.lock().unwrap().measure(Instant::now(), nic, mine, queued);
         let paced = self.inner.limits.any_limit() || self.inner.active.lock().unwrap().values().any(|a| a.control.speed_limit().is_some());
         self.smart_throttle_observe_signals(running, Signals { other_bps, idle, mine_bps, paced });
     }
@@ -784,7 +982,8 @@ impl DownloadManager {
     /// Smart Throttle is slowing downloads right now (the queue lets Low-priority downloads wait meanwhile).
     pub(super) fn smart_is_limiting(&self) -> bool {
         let s = self.inner.smart.lock().unwrap();
-        s.on() && s.limit.is_some()
+        // Not Manual: its level holds all the time, and Low-priority downloads would never start.
+        s.on() && s.limit.is_some() && s.reason != Reason::Manual
     }
 
     fn velox_download_bps(&self) -> f64 {
@@ -799,7 +998,7 @@ impl DownloadManager {
         let (changed, limit, reason, save_peak) = {
             let mut s = self.inner.smart.lock().unwrap();
             s.scan_ok = running.is_some();
-            let found = if s.on() {
+            let found = if s.on() && s.automatic() {
                 let scan = running.map(|r| find_running(&s.apps, r).map(str::to_string));
                 s.watch.update(scan, Instant::now()).map(str::to_string)
             } else {
@@ -813,14 +1012,16 @@ impl DownloadManager {
             let (limit, reason) = if !s.on() {
                 s.ctl.reset();
                 (None, Reason::Off)
+            } else if !s.automatic() {
+                // Manual: the chosen level, all the time (full speed only until the line's speed is known).
+                s.ctl.reset();
+                (manual_cap(reference, share, floor), Reason::Manual)
             } else if found.is_some() {
                 // A listed program wins; the automatic cap starts over when it closes.
                 s.ctl.reset();
-                (Some(game_cap(s.policy, reference, share, floor, s.game_limit)), Reason::App)
-            } else if s.automatic() {
-                s.ctl.step_with(sig, peak, reference, share, floor)
+                (Some(game_cap(s.policy, reference, SMART_SHARE, floor, s.game_limit)), Reason::App)
             } else {
-                (None, if sig.idle.is_some_and(|i| i >= IDLE_AFTER) { Reason::FullIdle } else { Reason::FullFree })
+                s.ctl.step_with(sig, peak, reference, SMART_SHARE, floor)
             };
             if limit.is_some() {
                 s.relearn_in = RELEARN_AFTER;
@@ -871,11 +1072,20 @@ impl DownloadManager {
             let mut s = self.inner.smart.lock().unwrap();
             let reference = reference_speed(s.peak_bps, s.recent_bps);
             let (share, floor) = (s.share, s.floor);
+            if !s.on() {
+                s.reason = Reason::Off;
+            } else if !s.automatic() {
+                s.reason = Reason::Manual;
+            } else if matches!(s.reason, Reason::Manual | Reason::Off) {
+                s.reason = Reason::FullFree; // into Smart: it starts from full speed
+            }
             s.hold = s.reason == Reason::App && s.policy == GamePolicy::Pause;
             let limit = match s.reason {
-                Reason::App => Some(game_cap(s.policy, reference, share, floor, s.game_limit)),
+                Reason::Off => None,
+                Reason::Manual => manual_cap(reference, share, floor),
+                Reason::App => Some(game_cap(s.policy, reference, SMART_SHARE, floor, s.game_limit)),
                 // The automatic cap follows the new settings now, and keeps its state (no lift-then-slow).
-                _ if s.limit.is_some() && s.automatic() => s.ctl.retarget(reference, share, floor),
+                _ if s.limit.is_some() => s.ctl.retarget(reference, SMART_SHARE, floor),
                 _ => None,
             };
             s.limit = limit;
@@ -1019,7 +1229,9 @@ mod tests {
         let mut c = Controller::default();
         for off in [0.05, 0.08, 0.06, 0.08, 0.07, 0.05] {
             let s = Signals { other_bps: Some(3.0 * mb * off), idle: Some(Duration::ZERO), mine_bps: Some(3.0 * mb), paced: false };
-            assert_eq!(c.step(s, 3.0 * mb, 25, FLOOR_BPS).0, None, "{off}");
+            // (A check may start meanwhile: it only finds nobody.)
+            let why = c.step(s, 3.0 * mb, 25, FLOOR_BPS).1;
+            assert!(matches!(why, Reason::FullFree | Reason::Checking), "{off}: {why:?}");
         }
         let mut slowed = false;
         for _ in 0..4 {
@@ -1107,19 +1319,45 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_computer_gets_full_speed_and_heavy_background_traffic_is_slowed_less() {
+    fn an_idle_computer_gets_full_speed_and_a_video_watched_without_touching_anything_still_counts() {
         let mut c = Controller::default();
-        // Light traffic while the user is away (a sync client): not browsing, full speed, computer idle.
+        // Light traffic while the user is away (a sync client): not someone using the line, full speed.
         for _ in 0..4 {
             assert_eq!(c.step(sig(200.0 * KB, 600), PEAK, 25, FLOOR_BPS), (None, Reason::FullIdle));
         }
-        // Heavy traffic while away: slowed, but less than while browsing.
+        // A video while nobody touches the mouse for minutes: slowed by the mode, as when the user is active.
         let mut cap = None;
         for _ in 0..4 {
-            cap = c.step(sig(30_000_000.0, 600), PEAK, 25, FLOOR_BPS).0;
+            cap = c.step(sig(2_000_000.0, 600), PEAK, 25, FLOOR_BPS).0;
         }
-        assert_eq!(c.step(sig(30_000_000.0, 600), PEAK, 25, FLOOR_BPS).1, Reason::Busy);
-        assert_eq!(cap, Some((PEAK * 0.75) as u64));
+        assert_eq!(c.step(sig(2_000_000.0, 600), PEAK, 25, FLOOR_BPS).1, Reason::Busy);
+        assert_eq!(cap, Some((PEAK * 0.5) as u64));
+    }
+
+    #[test]
+    fn slowed_downloads_give_a_hungry_program_more_room_and_take_it_back_when_it_needs_less() {
+        // 3 MB/s line; a 4K film wants 2.5 MB/s. The mode's share (half) is not enough for it: more room, step by
+        // step, never below a fifth of the line.
+        let mb = 1024.0 * KB;
+        let line = 3.0 * mb;
+        let mut c = Controller::default();
+        let step = |c: &mut Controller, other: f64| {
+            c.step_with(Signals { other_bps: Some(other), idle: Some(Duration::ZERO), ..Default::default() }, line, line, 25, FLOOR_BPS)
+        };
+        let mut caps = Vec::new();
+        for _ in 0..40 {
+            // The film takes all the room it is given, up to 2.5 MB/s.
+            let room = line - c.cap.unwrap_or(line);
+            caps.push(step(&mut c, room.clamp(0.4 * mb, 2.5 * mb)).0.unwrap_or(0) as f64);
+        }
+        let last = *caps.last().unwrap();
+        assert!(last < 0.5 * line * 0.9, "more room than the mode's half: {caps:?}");
+        assert!(last >= line * SMART_LEAST - 1.0, "never below a fifth: {caps:?}");
+        // The film drops to 0.5 MB/s (paused, a lower quality): downloads take back up to the mode's share.
+        for _ in 0..30 {
+            step(&mut c, 0.5 * mb);
+        }
+        assert_eq!(c.cap, Some(line * 0.5), "back to the mode's share");
     }
 
     #[test]
@@ -1144,22 +1382,43 @@ mod tests {
         let t0 = Instant::now();
         const MB: u64 = 1024 * 1024;
         // First measurement: nothing to compare with, so nobody else is seen (never a stale reading).
-        assert_eq!(s.measure(t0, Some(1000 * MB), 500 * MB), (Some(0.0), None));
+        assert_eq!(s.measure(t0, Some(1000 * MB), 500 * MB, None), (Some(0.0), None));
         // 3 s later: the computer received 9.54 MB, VeloxFetch 9 MB (3 MB/s) -> the rest is packet headers, not traffic.
-        let (other, mine) = s.measure(t0 + Duration::from_secs(3), Some(1000 * MB + 9 * MB * 106 / 100), 509 * MB);
+        let (other, mine) = s.measure(t0 + Duration::from_secs(3), Some(1000 * MB + 9 * MB * 106 / 100), 509 * MB, None);
         assert!(other.unwrap().abs() < 1024.0, "headers are not someone else: {other:?}");
         assert!((mine.unwrap() - 3.0 * MB as f64).abs() < 1.0);
         // Then another program receives 1 MB/s on top.
         let (other, _) =
-            s.measure(t0 + Duration::from_secs(6), Some(1000 * MB + 9 * MB * 106 / 100 + 9 * MB * 106 / 100 + 3 * MB), 518 * MB);
+            s.measure(t0 + Duration::from_secs(6), Some(1000 * MB + 9 * MB * 106 / 100 + 9 * MB * 106 / 100 + 3 * MB), 518 * MB, None);
         assert!((other.unwrap() - MB as f64).abs() < 0.05 * MB as f64, "{other:?}");
         // Asked again right away: the last window's figures (a window this short would not be exact).
-        assert_eq!(s.measure(t0 + Duration::from_millis(6200), Some(u64::MAX / 2), 518 * MB).0, other);
+        assert_eq!(s.measure(t0 + Duration::from_millis(6200), Some(u64::MAX / 2), 518 * MB, None).0, other);
         // A long gap (the computer slept) or counters that went back start over.
-        assert_eq!(s.measure(t0 + Duration::from_secs(60), Some(2000 * MB), 600 * MB), (Some(0.0), None));
-        assert_eq!(s.measure(t0 + Duration::from_secs(63), Some(10 * MB), 601 * MB), (Some(0.0), None));
+        assert_eq!(s.measure(t0 + Duration::from_secs(60), Some(2000 * MB), 600 * MB, None), (Some(0.0), None));
+        assert_eq!(s.measure(t0 + Duration::from_secs(63), Some(10 * MB), 601 * MB, None), (Some(0.0), None));
         // No counters: unknown.
-        assert_eq!(s.measure(t0 + Duration::from_secs(66), None, 602 * MB), (None, None));
+        assert_eq!(s.measure(t0 + Duration::from_secs(66), None, 602 * MB, None), (None, None));
+    }
+
+    #[test]
+    fn bytes_waiting_in_velox_own_buffers_are_never_someone_else() {
+        // Downloads slowed to 1 MB/s on a 3 MB/s line: the system keeps taking data in for them until their
+        // buffers are full (2 MB/s here, for a few seconds), then they empty again when downloads speed up.
+        let mut s = SmartState::default();
+        let t0 = Instant::now();
+        const MB: u64 = 1024 * 1024;
+        let at = |n: u64| t0 + Duration::from_secs(3 * n);
+        s.measure(at(0), Some(0), 0, Some(0));
+        let (other, _) = s.measure(at(1), Some(9 * MB * 106 / 100), 3 * MB, Some(6 * MB));
+        assert!(other.unwrap().abs() < 0.02 * MB as f64, "filling buffers: {other:?}");
+        // Speeding up: 5 MB/s read for a moment, 3 MB/s arriving (the buffers empty).
+        let (other, _) = s.measure(at(2), Some(18 * MB * 106 / 100), 18 * MB, Some(0));
+        assert!(other.unwrap().abs() < 0.02 * MB as f64, "emptying buffers: {other:?}");
+        // Without the buffers' figure (other systems), the same window looks like 2 MB/s of other traffic.
+        let mut s = SmartState::default();
+        s.measure(at(0), Some(0), 0, None);
+        let (other, _) = s.measure(at(1), Some(9 * MB * 106 / 100), 3 * MB, Some(6 * MB));
+        assert!(other.unwrap() > 1.9 * MB as f64, "{other:?}");
     }
 
     #[test]
@@ -1170,12 +1429,12 @@ mod tests {
         let t0 = Instant::now();
         let mb = 1024.0 * 1024.0;
         let (mut nic, mut mine) = (0u64, 0u64);
-        s.measure(t0, Some(nic), mine);
+        s.measure(t0, Some(nic), mine, None);
         for (i, speed) in [3.0, 3.0, 0.5, 0.5, 2.0].iter().enumerate() {
             let got = (speed * mb * 3.0) as u64;
             mine += got;
             nic += (got as f64 * 1.05) as u64;
-            let (other, _) = s.measure(t0 + Duration::from_secs(3 * (i as u64 + 1)), Some(nic), mine);
+            let (other, _) = s.measure(t0 + Duration::from_secs(3 * (i as u64 + 1)), Some(nic), mine, None);
             assert!(other.unwrap() <= 0.0, "reading {i}: {other:?}");
         }
     }
@@ -1280,13 +1539,153 @@ mod tests {
         assert!(lifted, "the cap lifted");
     }
 
+    fn line(other_kb: f64, mine_mb: f64, idle_secs: u64) -> Signals {
+        Signals {
+            other_bps: Some(other_kb * KB),
+            idle: Some(Duration::from_secs(idle_secs)),
+            mine_bps: Some(mine_mb * 1024.0 * KB),
+            paced: false,
+        }
+    }
+
+    #[test]
+    fn a_check_finds_a_program_that_downloads_take_the_line_from() {
+        // 3 MB/s of downloads; a video next to them gets 60 KB/s (starved: it never shows as browsing).
+        let mb = 1024.0 * KB;
+        let mut c = Controller::default();
+        let mut reasons = Vec::new();
+        for _ in 0..PROBE_FIRST {
+            reasons.push(c.step_with(line(60.0, 3.0, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS));
+        }
+        assert!(reasons[..reasons.len() - 1].iter().all(|r| *r == (None, Reason::FullFree)), "{reasons:?}");
+        assert_eq!(*reasons.last().unwrap(), (Some((1.5 * mb) as u64), Reason::Checking), "the check: half the speed");
+        // The video takes the room for the whole check: slowed by the chosen mode, and held while it plays.
+        for _ in 1..PROBE_MAX {
+            assert_eq!(c.step_with(line(1400.0, 1.5, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS).1, Reason::Checking);
+        }
+        let (cap, why) = c.step_with(line(1300.0, 1.5, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        assert_eq!((cap, why), (Some((3.0 * mb * keep_while_active(25)) as u64), Reason::Browsing));
+        for _ in 0..30 {
+            let (cap, why) = c.step_with(line(1400.0, 1.5, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+            assert_eq!((cap.is_some(), why), (true, Reason::Browsing));
+        }
+        // A video while the user is away (no input for minutes): slowed the same.
+        let mut c = Controller::default();
+        let mut last = (None, Reason::Off);
+        for i in 0..PROBE_FIRST + u32::from(PROBE_MAX) {
+            let other = if i < PROBE_FIRST { 60.0 } else { 1400.0 };
+            last = c.step_with(line(other, 3.0, 600), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        }
+        assert_eq!(last, (Some((3.0 * mb * keep_while_active(25)) as u64), Reason::Busy));
+    }
+
+    #[test]
+    fn the_buffers_filling_during_a_check_are_not_someone_else() {
+        // Measured on a real line with nobody else: the check's first readings show the system's buffers filling
+        // (MB/s), fading as they fill up. The check ends there, at full speed again.
+        let mb = 1024.0 * KB;
+        let mut c = Controller::default();
+        for _ in 0..PROBE_FIRST {
+            c.step_with(line(0.0, 3.0, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        }
+        let mut last = (None, Reason::Off);
+        for other in [2300.0, 1200.0, 730.0, 150.0, 20.0, 0.0] {
+            last = c.step_with(line(other, 1.5, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+            if last.1 != Reason::Checking {
+                break;
+            }
+        }
+        assert_eq!(last, (None, Reason::FullFree));
+    }
+
+    #[test]
+    fn checks_that_find_nobody_cost_little_and_never_slow_downloads_for_good() {
+        let mb = 1024.0 * KB;
+        let mut c = Controller::default();
+        let mut checking = 0;
+        let mut starts = Vec::new();
+        let total = 600; // 30 minutes
+        for i in 0..total {
+            let (cap, why) = c.step_with(line(20.0, 3.0, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+            match why {
+                Reason::Checking => {
+                    if checking == 0 || starts.last().is_some_and(|s: &usize| i > s + 4) {
+                        starts.push(i);
+                    }
+                    checking += 1;
+                    assert_eq!(cap, Some((1.5 * mb) as u64));
+                }
+                Reason::FullFree => assert_eq!(cap, None),
+                other => panic!("slowed for nobody: {other:?}"),
+            }
+        }
+        let gaps: Vec<usize> = starts.windows(2).map(|w| w[1] - w[0]).collect();
+        assert!(gaps.windows(2).all(|g| g[1] >= g[0]), "spaced out more and more: {gaps:?}");
+        assert!(*gaps.last().unwrap() as u32 <= PROBE_EVERY_MAX + 5, "{gaps:?}");
+        // Half speed during the checks only: under 9 % of the time downloads ran (less and less), so under 5 % of
+        // the speed.
+        assert!((checking as f64) < total as f64 * 0.09, "{checking} readings checking out of {total}");
+        // Slow downloads (the line has room for everyone) and no counters: no checks at all.
+        let mut c = Controller::default();
+        for _ in 0..100 {
+            assert_eq!(c.step_with(line(20.0, 0.2, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS), (None, Reason::FullFree));
+        }
+        let mut c = Controller::default();
+        for _ in 0..100 {
+            let s = Signals { other_bps: None, mine_bps: Some(3.0 * mb), ..Default::default() };
+            assert_eq!(c.step_with(s, 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS), (None, Reason::Unknown));
+        }
+    }
+
+    #[test]
+    fn coming_back_to_the_computer_brings_a_check_soon() {
+        let mb = 1024.0 * KB;
+        let mut c = Controller::default();
+        // Long at full speed with nobody: checks far apart.
+        for i in 0..400u64 {
+            c.step_with(line(20.0, 3.0, i * 3), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        }
+        let (cap, why) = c.step_with(line(20.0, 3.0, 1300), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        assert!(cap.is_none() || why == Reason::Checking);
+        while c.step_with(line(20.0, 3.0, 1303), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS).1 == Reason::Checking {}
+        // The user clicks (starts a video): a check within a few seconds.
+        let mut n = 0;
+        while c.step_with(line(20.0, 3.0, 1), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS).1 != Reason::Checking {
+            n += 1;
+            assert!(n <= PROBE_SOON, "no check soon after the user came back");
+        }
+    }
+
+    #[test]
+    fn after_the_program_stops_downloads_take_the_line_back_and_checks_start_again() {
+        let mb = 1024.0 * KB;
+        let mut c = Controller::default();
+        for i in 0..PROBE_FIRST + u32::from(PROBE_MAX) {
+            c.step_with(line(if i < PROBE_FIRST { 60.0 } else { 1400.0 }, 3.0, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS);
+        }
+        for _ in 0..20 {
+            assert_eq!(c.step_with(line(1400.0, 1.5, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS).1, Reason::Browsing);
+        }
+        // The video ends: easing, then full speed, then a check again about 20 s later.
+        let mut seen = Vec::new();
+        for _ in 0..60 {
+            let why = c.step_with(line(10.0, 3.0, 0), 3.0 * mb, 3.0 * mb, 25, FLOOR_BPS).1;
+            if seen.last() != Some(&why) {
+                seen.push(why);
+            }
+        }
+        let from = seen.iter().position(|r| *r == Reason::Easing).expect("eased");
+        assert_eq!(&seen[from..from + 3], &[Reason::Easing, Reason::FullFree, Reason::Checking], "{seen:?}");
+    }
+
     #[test]
     fn measuring_noise_at_high_speed_is_not_browsing() {
         // 100 MB/s of VeloxFetch: 2 MB/s of "other" is within what the counters can be off by.
         let mut c = Controller::default();
         let noisy = Signals { other_bps: Some(2.0 * 1024.0 * 1024.0), idle: Some(Duration::ZERO), mine_bps: Some(PEAK), paced: false };
         for _ in 0..5 {
-            assert_eq!(c.step(noisy, PEAK, 25, FLOOR_BPS).0, None);
+            let why = c.step(noisy, PEAK, 25, FLOOR_BPS).1;
+            assert!(matches!(why, Reason::FullFree | Reason::Checking), "{why:?}");
         }
         // Light background traffic (a chat app) is not browsing either.
         let mut c = Controller::default();

@@ -1290,6 +1290,10 @@ dialog::backdrop {
 .mode-btn[aria-checked="true"] svg {
   color: var(--accent);
 }
+/* Manual's levels under the three levels: one short row, so the sidebar card keeps its status line in view. */
+.mode-btn.mode-btn-sm {
+  @apply h-[34px] flex-row gap-1;
+}
 .mode-btn:disabled {
   @apply pointer-events-none opacity-50;
 }

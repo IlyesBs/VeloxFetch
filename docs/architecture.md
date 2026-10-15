@@ -460,9 +460,13 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   detailed / compact view, sort) and a side column (`SidePanels.tsx`: network and disk charts, upcoming
   downloads, quick actions). Only real numbers are shown: the Network and Disk panels read system counters (see
   *Performance model*).
-* **Smart throttle** (`ThrottleHud.tsx`): a gradient radial gauge whose core is the on/off button (the arc shows the
-  share of the connection downloads may use right now), a switch, three modes (Aggressive / Balanced / Conservative)
-  and the live status line. `throttle.ts` polls the state every 3 s, keeps the speed / limit history for the graph in
+* **Smart throttle** (`ThrottleHud.tsx`): a gradient radial gauge whose core switches Fast <-> Smart (the arc shows
+  the share of the connection downloads may use right now), a switch, the three levels (Fast / Smart / Manual:
+  `THROTTLE_LEVELS`, `throttleLevel`, `LEVEL_REQUEST` over the existing `enabled` / `auto`), Manual's three modes
+  (Aggressive / Balanced / Performance, shown only in Manual) and the live status line. In the manager, Manual is a
+  fixed share of the learned line speed (`manual_cap`), Smart the automatic `Controller` with its checks (a short cap
+  at half speed to find a program that full-speed downloads starve) at Balanced's share (`SMART_SHARE`); on Linux the
+  measurement subtracts the bytes waiting in VeloxFetch's own receive buffers (`sysio::own_tcp_queued`). `throttle.ts` polls the state every 3 s, keeps the speed / limit history for the graph in
   Settings (`SmartThrottleSettings.tsx`, `BandwidthGraph`) and, while it is on, sets `html[data-throttle]`
   (`limiting` while downloads are slowed), which turns the accent amber everywhere.
 * **Task cards** (`DownloadCard.tsx`): the file's kind as a big thumbnail with its extension, name, size and

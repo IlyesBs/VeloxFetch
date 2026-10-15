@@ -810,7 +810,7 @@ async fn the_pause_gaming_policy_pauses_running_videos_and_resumes_them_after_th
     let e = env("game", None).await;
     e.m.set_smart_throttle(download_manager::SetSmartThrottle {
         enabled: Some(true),
-        auto: Some(false),
+        auto: Some(true),
         apps: Some(vec!["VeloxTestGame".into()]),
         game_policy: Some(download_manager::GamePolicy::Pause),
         ..Default::default()
