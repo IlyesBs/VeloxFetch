@@ -131,6 +131,57 @@ impl Counters {
 }
 
 /// Received and sent bytes over the real adapters, each counted once, and how many adapters were counted.
+/// Bytes that arrived for VeloxFetch's own TCP connections and wait in the system's receive buffers, not read yet
+/// (Linux: the `rx_queue` of this process's sockets in `/proc/net/tcp{,6}`; `None` elsewhere or when it cannot be
+/// read). The adapters count these bytes when they arrive, VeloxFetch when it reads them: while downloads are held
+/// back the buffers fill (up to several MB), which would look like another program's traffic. Smart throttle
+/// subtracts it.
+pub(super) fn own_tcp_queued() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut inodes = HashSet::new();
+        for e in std::fs::read_dir("/proc/self/fd").ok()?.flatten() {
+            if let Ok(t) = std::fs::read_link(e.path()) {
+                if let Some(n) = t.to_str().and_then(|t| t.strip_prefix("socket:[")).and_then(|t| t.strip_suffix(']')) {
+                    if let Ok(n) = n.parse::<u64>() {
+                        inodes.insert(n);
+                    }
+                }
+            }
+        }
+        let mut total = 0u64;
+        let mut read_any = false;
+        for table in ["/proc/self/net/tcp", "/proc/self/net/tcp6"] {
+            let Ok(text) = std::fs::read_to_string(table) else { continue };
+            read_any = true;
+            total = total.saturating_add(queued_in(&text, &inodes));
+        }
+        read_any.then_some(total)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// The receive queues of the sockets `inodes` in one `/proc/net/tcp` table (lines that do not parse are skipped).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn queued_in(table: &str, inodes: &HashSet<u64>) -> u64 {
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            let inode = f.get(9)?.parse::<u64>().ok()?;
+            if !inodes.contains(&inode) {
+                return None;
+            }
+            let rx = f.get(4)?.split(':').nth(1)?;
+            u64::from_str_radix(rx, 16).ok()
+        })
+        .fold(0u64, u64::saturating_add)
+}
+
 fn net_totals(nets: &Networks) -> (u64, u64, usize) {
     let (mut rx, mut tx) = (0u64, 0u64);
     let mut seen = HashSet::new();
@@ -161,6 +212,21 @@ fn strip_verbatim(p: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_receive_queue_of_our_own_sockets_is_added_up() {
+        let table = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 4301A8C0:A1B2 5DB8D822:01BB 01 00000000:00010000 00:00000000 00000000  1000        0 111 1 0 20 4 30 10 -1
+   1: 4301A8C0:A1B3 5DB8D822:01BB 01 00000000:00000400 00:00000000 00000000  1000        0 222 1 0 20 4 30 10 -1
+   2: 4301A8C0:A1B4 5DB8D822:0050 01 00000000:00100000 00:00000000 00000000  1000        0 333 1 0 20 4 30 10 -1
+   3: garbage
+";
+        let ours: HashSet<u64> = [111, 222].into();
+        assert_eq!(queued_in(table, &ours), 0x10000 + 0x400, "another program's socket (333) is not counted");
+        assert_eq!(queued_in("", &ours), 0);
+        #[cfg(target_os = "linux")]
+        assert!(own_tcp_queued().is_some(), "readable on Linux");
+    }
 
     #[test]
     fn verbatim_prefix_is_dropped() {

@@ -827,7 +827,12 @@ test("smart throttle: process and executable names only (paths only when listed)
   // program or per connection.
   const io = withoutTestModules(read("crates", "download-manager", "src", "manager", "sysio.rs"));
   assert.match(io, /pub\(super\) fn net_received_total\(&self\) -> Option<u64>/);
-  assert.ok(!/processes|ProcessRefreshKind|sockets|connections\(/.test(io), "no per-program or per-connection traffic");
+  assert.ok(!/processes|ProcessRefreshKind|sysinfo::.*Sockets|connections\(/.test(io), "no per-program or per-connection traffic");
+  // Linux: the bytes waiting in VeloxFetch's *own* receive buffers (Smart throttle's measurement). Only this process's
+  // sockets are summed (matched by their inodes from /proc/self/fd); other entries of the table are skipped, never kept.
+  assert.match(io, /read_dir\("\/proc\/self\/fd"\)/);
+  assert.match(io, /if !inodes\.contains\(&inode\) \{\s*return None;/);
+  assert.ok(!/\/proc\/\[0-9\]|\/proc\/\{|rem_address\s*=|local_address\s*=/.test(io), "no other process, no addresses kept");
   assert.match(core, /MIN_FLOOR_BPS: u64 = 32 \* 1024;/, "the reserved minimum can never be zero: downloads never stop");
 });
 

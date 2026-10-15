@@ -13,7 +13,7 @@ import { formatSpeed } from "./format";
 import type { Key } from "./i18n";
 import type { SetSmartThrottle, SmartThrottle } from "./types";
 
-/** The three modes: the share downloads keep during a game or a call (and, a little more, while browsing). */
+/** Manual's three levels: how much of the connection downloads keep, all the time (`keepWhileActive`). */
 export const THROTTLE_MODES: {
   name: Key;
   icon: "leaf" | "scale" | "rocket";
@@ -21,15 +21,42 @@ export const THROTTLE_MODES: {
 }[] = [
   { name: "hud.aggressive", icon: "leaf", share: 10 },
   { name: "hud.balanced", icon: "scale", share: 25 },
-  { name: "hud.conservative", icon: "rocket", share: 50 },
+  { name: "hud.performance", icon: "rocket", share: 50 },
 ];
+
+/** The three ways downloads use the connection: Fast (full speed, never slowed), Smart (slowed by itself while
+ * something else needs the line: a video, a game, a call, browsing) and Manual (the level the user picks, always). */
+export type ThrottleLevel = "fast" | "smart" | "manual";
+export const THROTTLE_LEVELS: { level: ThrottleLevel; icon: "bolt" | "activity" | "sliders" }[] = [
+  { level: "fast", icon: "bolt" },
+  { level: "smart", icon: "activity" },
+  { level: "manual", icon: "sliders" },
+];
+/** What choosing a level sends. */
+export const LEVEL_REQUEST: Record<ThrottleLevel, SetSmartThrottle> = {
+  fast: { enabled: false },
+  smart: { enabled: true, auto: true },
+  manual: { enabled: true, auto: false },
+};
+/** The level in force (an active Download Profile may set it: Fast, or Balanced's Smart). */
+export const throttleLevel = (s: SmartThrottle | null): ThrottleLevel =>
+  !throttleOn(s) ? "fast" : (s?.profileAdaptive ?? s?.auto) ? "smart" : "manual";
+/** Manual's level name for a share (a share set by hand elsewhere shows as a custom one). */
+export const levelName = (
+  t: (k: Key, v?: Record<string, string | number>) => string,
+  share: number,
+): string => {
+  const m = THROTTLE_MODES.find((x) => x.share === share);
+  return m ? t(m.name) : t("smart.modeCustom", { p: share });
+};
 
 /** What downloads keep while the user uses the internet, for a mode (mirrors `keep_while_active` in Rust). */
 export const keepWhileActive = (share: number) =>
   Math.round(Math.min(0.9, Math.max(0.25, share / 100 + 0.25)) * 100);
 
-/** Smart throttle is on: the user's switch, or the active Download Profile's automatic mode. */
-export const throttleOn = (s: SmartThrottle | null): boolean => !!s && (s.enabled || s.profileAdaptive === true);
+/** Smart throttle is on (Smart or Manual): the user's choice, or the active Download Profile's (Fast holds it off). */
+export const throttleOn = (s: SmartThrottle | null): boolean =>
+  !!s && s.profileAdaptive !== false && (s.enabled || s.profileAdaptive === true);
 
 /** The one-line explanation of what Smart throttle is doing now. */
 export function throttleStatus(
@@ -37,6 +64,7 @@ export function throttleStatus(
   s: SmartThrottle | null,
 ): string {
   if (!s) return t("hud.unavailable");
+  if (s.profileAdaptive === false) return t("thr.fastProfile");
   if (!throttleOn(s)) return t("thr.off");
   const speed = formatSpeed(s.limitBps ?? 0);
   switch (s.reason) {
@@ -54,6 +82,12 @@ export function throttleStatus(
       return t("thr.fullIdle");
     case "unknown":
       return t("thr.unknown");
+    case "checking":
+      return t("thr.checking", { speed });
+    case "manual":
+      return s.limitBps === null
+        ? t("thr.manualMeasuring", { name: levelName(t, s.sharePercent) })
+        : t("thr.manual", { name: levelName(t, s.sharePercent), speed });
     default:
       return t("thr.fullFree");
   }

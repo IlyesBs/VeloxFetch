@@ -31,7 +31,8 @@ pub struct ProfileSettings {
     /// Connections per download (1..=64; the engine still adapts below it and respects what the server allows).
     pub max_connections: Option<u32>,
     /// Smart throttle's automatic mode (give way while the internet is used, full speed when it is free).
-    /// `true` also turns Smart throttle on; `false` turns the automatic mode off (a gaming policy the user set stays).
+    /// `true` also turns Smart throttle on; `false` holds Smart throttle off entirely (full speed: downloads never
+    /// give way, not to browsing and not to a listed program).
     pub adaptive: Option<bool>,
 }
 
@@ -70,8 +71,13 @@ pub fn built_in(id: &str) -> Option<ProfileSettings> {
     Some(match id {
         // The user's settings, as they are.
         "default" => ProfileSettings::default(),
-        // Throughput first: room for many connections (still adaptive), no giving way to other traffic.
-        "fast" => ProfileSettings { max_connections: Some(FAST_CONNECTIONS), adaptive: Some(false), ..Default::default() },
+        // Full speed, always: room for many connections (still adaptive), no speed limit, never giving way.
+        "fast" => ProfileSettings {
+            speed_limit_bps: Some(0),
+            max_connections: Some(FAST_CONNECTIONS),
+            adaptive: Some(false),
+            ..Default::default()
+        },
         // Full speed while the line is free, give way while it is used (Smart throttle's automatic mode).
         "balanced" => ProfileSettings { adaptive: Some(true), ..Default::default() },
         // One download at a time, few connections each.
@@ -90,7 +96,7 @@ pub fn resolve(base: EffectiveSettings, p: ProfileSettings) -> EffectiveSettings
         },
         max_active: p.max_active.unwrap_or(base.max_active),
         max_connections: p.max_connections.unwrap_or(base.max_connections),
-        smart_on: base.smart_on || p.adaptive == Some(true),
+        smart_on: p.adaptive != Some(false) && (base.smart_on || p.adaptive == Some(true)),
         adaptive: p.adaptive.unwrap_or(base.adaptive),
     }
 }
@@ -349,16 +355,16 @@ mod tests {
     fn built_in_profiles_only_change_what_they_name() {
         let fast = resolve(BASE, built_in("fast").unwrap());
         assert_eq!((fast.max_connections, fast.adaptive), (FAST_CONNECTIONS, false));
-        assert_eq!((fast.speed_limit_bps, fast.max_active), (BASE.speed_limit_bps, BASE.max_active), "the user's limit and slots stay");
+        assert_eq!((fast.speed_limit_bps, fast.max_active), (None, BASE.max_active), "full speed: no limit; the user's slots stay");
         let balanced = resolve(BASE, built_in("balanced").unwrap());
         assert!(balanced.smart_on && balanced.adaptive, "Smart throttle's automatic mode");
         assert_eq!(balanced.max_connections, BASE.max_connections);
         let low = resolve(BASE, built_in("lowResource").unwrap());
         assert_eq!((low.max_active, low.max_connections), (LOW_ACTIVE, LOW_CONNECTIONS));
         assert_eq!(low.speed_limit_bps, BASE.speed_limit_bps);
-        // Fast turns the automatic mode off, never Smart throttle itself (a gaming policy the user set stays).
+        // Fast holds Smart throttle off entirely (full speed, never giving way), whatever the user's switches say.
         let on = EffectiveSettings { smart_on: true, adaptive: true, ..BASE };
-        assert_eq!((resolve(on, built_in("fast").unwrap()).smart_on, resolve(on, built_in("fast").unwrap()).adaptive), (true, false));
+        assert_eq!((resolve(on, built_in("fast").unwrap()).smart_on, resolve(on, built_in("fast").unwrap()).adaptive), (false, false));
         assert!(built_in("nope").is_none());
     }
 

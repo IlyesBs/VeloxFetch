@@ -21,7 +21,7 @@ Your own settings (Settings page, queue limits, Smart throttle switches) are nev
 | Profile | Speed limit | Downloads at once | Connections | Smart throttle |
 |---|---|---|---|---|
 | **Default** | yours | yours | yours | yours |
-| **Fast** | yours | yours | up to **64** (the maximum) | automatic mode **off** (never gives way to other traffic); a gaming policy you set stays |
+| **Fast** | **none** | yours | up to **64** (the maximum) | held **off** entirely: full speed, never gives way (not to browsing, videos or listed programs); your choice comes back with another profile |
 | **Balanced** | yours | yours | yours | automatic mode **on** (this also turns Smart throttle on): full speed while the line is free, gives way while you use it |
 | **Low resource** | yours | **1** | **4** | yours |
 

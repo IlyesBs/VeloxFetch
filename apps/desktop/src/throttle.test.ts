@@ -35,7 +35,7 @@ vi.mock("./hooks", () => ({
 
 vi.mock("./chrome", () => ({ syncFrameTheme: () => {} }));
 
-const { throttleStore, gaugeShare, throttleStatus } = await import("./throttle");
+const { throttleStore, gaugeShare, throttleStatus, throttleLevel, LEVEL_REQUEST } = await import("./throttle");
 const { paletteKey } = await import("./theme");
 
 const base: SmartThrottle = {
@@ -204,5 +204,23 @@ describe("Smart throttle state in the window", () => {
     server.sets[0]?.resolve();
     await tick();
     expect(server.state.gamePolicy).toBe("pause");
+  });
+
+  it("three levels: Fast (off, or the Fast profile), Smart (automatic) and Manual (the chosen level, always)", () => {
+    const t = (k: string, v?: Record<string, string | number>) => `${k}${v ? JSON.stringify(v) : ""}`;
+    const s = { ...base, enabled: true, auto: true } as SmartThrottle;
+    expect(throttleLevel({ ...s, enabled: false })).toBe("fast");
+    expect(throttleLevel(s)).toBe("smart");
+    expect(throttleLevel({ ...s, auto: false })).toBe("manual");
+    // The Fast profile holds everything off, whatever the user chose; Balanced's profile means Smart.
+    expect(throttleLevel({ ...s, auto: false, profileAdaptive: false })).toBe("fast");
+    expect(throttleStatus(t, { ...s, profileAdaptive: false })).toMatch(/^thr\.fastProfile/);
+    expect(throttleLevel({ ...s, enabled: false, auto: false, profileAdaptive: true })).toBe("smart");
+    // Manual: its level by name, and full speed until the connection's speed is known.
+    const manual = { ...s, auto: false, sharePercent: 50, reason: "manual" as const };
+    expect(throttleStatus(t, { ...manual, limitBps: 2_000_000 })).toMatch(/^thr\.manual\{"name":"hud\.performance"/);
+    expect(throttleStatus(t, { ...manual, limitBps: null })).toMatch(/^thr\.manualMeasuring/);
+    expect(LEVEL_REQUEST.fast).toEqual({ enabled: false });
+    expect(LEVEL_REQUEST.manual).toEqual({ enabled: true, auto: false });
   });
 });

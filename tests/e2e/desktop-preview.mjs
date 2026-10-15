@@ -159,20 +159,17 @@ try {
   // ======================================================================== smart throttle
   await click("[data-testid=nav-settings]");
   await page(`(() => { [...document.querySelectorAll("[data-testid=settings-nav] button")].find((b) => b.innerText.trim() === "Speed").click(); return true; })()`);
-  await waitFor(() => has("[data-testid=smart-enabled]"), "Settings > Speed > Smart throttle");
-  check("smart throttle is off by default", (await ev(`document.querySelector('[data-testid=smart-enabled]').checked`)) === false);
+  await waitFor(() => has("[data-testid=smart-level-fast]"), "Settings > Speed > Smart throttle");
+  check("Fast (full speed) by default", (await ev(`document.querySelector('[data-testid=smart-level-fast]').checked`)) === true);
   // The app itself is a running program: listing it makes the real scan find something.
   await page(`(() => { const el = document.querySelector('[data-testid=smart-apps]');
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(el, ["velox-desktop", "League of Legends", "Zoom"].join(String.fromCharCode(10)));
     el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
   await click("[data-testid=smart-save]");
   await waitFor(async () => JSON.stringify((await invoke("get_smart_throttle")).ok.apps) === '["velox-desktop","League of Legends","Zoom"]', "the list to be saved from the UI");
-  await page(`(() => { const el = document.querySelector('[data-testid=smart-mode]');
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, "10");
-    el.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-  await waitFor(async () => (await invoke("get_smart_throttle")).ok.sharePercent === 10, "the share to be saved");
-  check("the program list and the share are saved from the UI", true);
-  await click("[data-testid=smart-enabled]");
+  check("the program list is saved from the UI", true);
+  check("Manual's level is only chosen in Manual", (await ev(`document.querySelector('[data-testid=smart-mode]').disabled`)) === true);
+  await click("[data-testid=smart-level-smart]");
   await waitFor(async () => /velox-desktop is running/.test((await text("[data-testid=smart-status]")) ?? ""), "the scan to find the program", 15000);
   const st = (await invoke("get_smart_throttle")).ok;
   check("the real process scan finds the listed program and sets a limit", st.activeApp === "velox-desktop" && st.limitBps > 0 && st.scanOk, JSON.stringify(st));
@@ -182,7 +179,7 @@ try {
   await sleep(2500);
   const slow = (await dl(big.id)).downloaded;
   check("downloads are held back while it runs", slow < 12 * MB && slow > 0, `${slow} bytes in 2.5 s with a ${st.limitBps} B/s limit`);
-  await click("[data-testid=smart-enabled]");
+  await click("[data-testid=smart-level-fast]");
   await waitFor(async () => /Off/.test((await text("[data-testid=smart-status]")) ?? ""), "the status to say off");
   const t = Date.now();
   await waitFor(async () => (await dl(big.id)).status === "completed", "the rest at full speed", 20000);

@@ -155,7 +155,8 @@ Details: `docs/download-profiles.md`.
   Smart throttle's automatic mode. It holds only what it changes, and your own settings are never overwritten, so
   Default is your settings.
 - **Built-ins:**
-  - Fast: up to 64 connections (the most a download uses), still adaptive; no giving way.
+  - Fast: full speed: up to 64 connections (the most a download uses), still adaptive; no speed limit; Smart throttle
+    held off entirely (never gives way, not even to a listed program).
   - Balanced: Smart throttle automatic.
   - Low resource: 1 at once, 4 connections.
   - Plus up to 20 profiles of your own (create, duplicate, rename, edit, delete; built-ins protected).
@@ -289,10 +290,18 @@ Details: `docs/download-intelligence.md`.
 - **Refused, with a clear reason:** DRM-protected services (Netflix, Shahid…), encrypted streams and live streams.
 
 ### Smart throttle
-- **What it does:** downloads give way to what the user is doing and take the whole connection when it is free.
-  - **Automatic mode** (on by default once Smart throttle is on): when something else uses the internet while the
-    user is at the computer (browsing, a video), downloads slow down; heavy traffic while the user is away slows them
-    less; when the network is free or the computer idle (no input for 2 minutes), full speed.
+- **Three levels** (issue #46; the card and Settings): **Fast** (full speed, never slowed; the default), **Smart**
+  (automatic, below) and **Manual** (the level the user picks, all the time: Aggressive ~35 %, Balanced ~50 %,
+  Performance ~75 % of the line). The Fast download profile forces Fast.
+- **What Smart does:** downloads give way to what the user is doing and take the whole connection when it is free.
+  - **Automatic:** when something else uses the internet (browsing, a video, even watched without touching the mouse),
+    downloads slow down to half of the line, and leave more (down to a fifth) while the other program takes all the
+    room; when the network is free or the computer idle, full speed.
+  - **Checks:** with up to 64 connections, downloads starve a video player (a real 4K YouTube video got 0.18 MB/s), so
+    its traffic hardly shows. Now and then (~20 s, spacing out to ~3 min while nobody is found, soon after the user
+    comes back) downloads slow to half for ~9 s: a program that takes the room is found ("Checking whether another
+    app needs the connection"). On Linux the bytes waiting in VeloxFetch's own receive buffers are subtracted, so a
+    buffer filling up is never "someone else".
   - **Listed programs:** while a game or call app runs (LoL, Valorant, CS2, Zoom, Teams…), the gaming policy applies:
     *give way by the mode* (default: a share of the speed), *a low speed limit*, or *pause* (running downloads pause,
     none starts; only those resume when it closes, the user's own pauses stay). Detected at once, lifted after two
@@ -308,23 +317,20 @@ Details: `docs/download-intelligence.md`.
   or minimum moves the cap at once without lifting it first. Downloads never go below the reserved minimum, so they
   never stop. On a real line: a competing download is seen within ~3 s, downloads drop to half (Balanced), and full
   speed is back ~25 s after it stops.
-- **Settings:** on / off, Automatic, the mode, "Downloads always keep at least" (default 256 KB/s), and the maximum
-  download speed (the global speed limit).
-- **Modes:**
-
-  | Mode | While browsing | During a game or a call |
-  |---|---|---|
-  | Aggressive | ~35 % | 10 % |
-  | Balanced | ~50 % | 25 % |
-  | Conservative | ~75 % | 50 % |
+- **Settings:** the level (Fast / Smart / Manual), Manual's level, "Downloads always keep at least" (default
+  256 KB/s), and the maximum download speed (the global speed limit).
+- **Manual's levels:** Aggressive ~35 %, Balanced ~50 %, Performance ~75 % of the line, all the time. Smart keeps
+  ~50 % for other traffic and 25 % during a listed game or call (gaming policy "give way").
 
 - **Shows what it does:** a status line ("Full speed — nothing else is using the connection", "Reducing speed —
   active browsing detected", "Bandwidth optimized — speeding back up"…) on the dashboard card, in Settings and in the
   status bar (one shared state: they always agree), the gauge ("25% now": the share of their usual speed downloads
   keep), and a graph of the download speed with the current limit (Settings > Speed > Smart throttle).
-- **Clicks:** a switch or a mode changes on screen at once; quick clicks end where the last one says, never
-  flicking back; choosing a mode while it is off turns it on in that mode.
-- **Default and look:** off by default. While it is on, the accent colour turns amber.
+- **Clicks:** a switch, a level or a mode changes on screen at once; quick clicks end where the last one says, never
+  flicking back; choosing one of Manual's levels switches to Manual.
+- **Real line:** Smart found a real 4K YouTube video in 36 s and gave it 1.49 MB/s (from 0.18), full speed 29 s after
+  it stopped, never slowed for nobody (`tests/e2e/real-throttle.mjs`).
+- **Default and look:** Fast by default. While it is on, the accent colour turns amber.
 - **Privacy:** only program *names*, the computer's *total* traffic and the *time since the last input* are read;
   nothing is stored or sent.
 
@@ -848,6 +854,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-15 | `fix_smart_throttle_probe` | Fix | Issue #46: Smart throttle never saw a 4K YouTube video next to a download (64 connections starve it: 0.18 MB/s), counted someone watching without touching the mouse as away, and its modes changed nothing. Three levels: Fast (full speed), Smart (automatic: short checks at half speed find a starved program; a video counts without input; more room for a hungry program), Manual (Aggressive / Balanced / Performance all the time). Linux: VeloxFetch's own receive-buffer bytes subtracted from the measurement. The Fast profile holds Smart throttle off and lifts the speed limit. Real line: video found in 36 s, 0.18 -> 1.49 MB/s, full speed 29 s after. | `docs/smart-throttle-and-preview.md` |
 | 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |
 | 2026-10-13 | `docs_public_readme` | Docs | The public README rewritten for users (what VeloxFetch does for them, no technical detail). macOS is never promised before it is built: `<!-- mac -->` lines and `{{PLATFORMS}}` names follow the packages a release has (`render`); `publish-kit.mjs page` makes the public page alone. Pushed to `IlyesBs/VeloxFetch-releases` for Windows and Linux. Test +1. | `docs/publishing.md` |
 | 2026-10-13 | `release_publish_kit` | Release | `scripts/publish-release.sh`: the production release in one command (preflight: one version, a trusted update key outside the project, nothing uncommitted; the full gate; the app carries the key and is a release build; every system's packages staged, each checked against its own checksums; signed and verified update manifest; GPG optional; a draft on GitHub optional). Releases move to the public repository `IlyesBs/VeloxFetch-releases` (feed, release page, manifest addresses; the source stays private). `docs/publish/`: the public README, the release text, texts for download sites in English / French / Arabic, 11 screenshots of 1.0.0 taken by `publish-screenshots.mjs` through a local proxy. Tests: `tests/release/publish-kit.test.mjs` (the whole script with a throwaway key typed at a pseudo-terminal), policy tests. | `docs/publishing.md` |

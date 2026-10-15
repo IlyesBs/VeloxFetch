@@ -723,3 +723,18 @@ Mutation check: dropping `--draft`, the terminal check, or the full gate from th
 Found by the whole-script test under load (3 failures in 5 runs while `cargo test` compiled): `update-key.mjs` showed
 its passphrase question before turning echo off, so a passphrase typed at that instant was echoed. Echo now goes off
 first; 8 runs of 8 under the same load pass.
+
+## Smart throttle: three levels and checks (issue #46, October 2026)
+
+| Test | Checks |
+|---|---|
+| `download-manager` `smart_throttle` (+7) | a check finds a program that full-speed downloads starve, and slows by Smart's share (also with no input for minutes); the system's buffers filling during a check are nobody; checks cost under 9 % of the time at half speed and space out to ~3 min; coming back to the computer brings a check within 2 readings; after the program stops, full speed then checks again; a hungry program gets more room down to a fifth of the line, and the room comes back; a video watched without input counts, a background sync does not; bytes waiting in VeloxFetch's own buffers are never someone else |
+| `download-manager` `sysio` (+1) | the receive queues of this process's own sockets are added up, another program's are not |
+| `download-manager` `profiles` | Fast holds Smart throttle off entirely and lifts the global limit |
+| `tests/integration/tests/profiles.rs::fast_is_full_speed_and_never_gives_way_not_even_to_a_listed_program` | with the Fast profile a listed program and the user's limit change nothing; Default brings both back |
+| `tests/integration/tests/smart_preview.rs` | Manual: its level holds whatever is going on (full speed until the line's speed is known); flipping Manual's levels while a download runs never stops it |
+| `apps/desktop/src/throttle.test.ts` (+1) | the level in force (Fast, the Fast profile, Smart, Balanced's profile, Manual), Manual's status by name, measuring first |
+| `tests/e2e/desktop-throttle.mjs` | the card's three levels, Manual's levels only in Manual, names that fit; the gauge's core to Smart; Settings' radio cards; the Fast profile greys the levels out and says so |
+| `tests/e2e/desktop-preview.mjs` | Fast by default; Smart from Settings finds the listed program; back to Fast |
+| `tests/e2e/real-throttle.mjs` (by hand, real line, needs `yt-dlp` and `curl`) | Fast, Smart and Manual with a real 4K YouTube video and a listed program next to a real full-speed download (results in `docs/smart-throttle-and-preview.md`) |
+
