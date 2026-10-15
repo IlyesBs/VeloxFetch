@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use download_manager::profiles::{ProfileAction, ProfileSettings, DEFAULT_ID, FAST_CONNECTIONS, LOW_ACTIVE, LOW_CONNECTIONS};
-use download_manager::{DownloadDto, DownloadManager, ManagerConfig, NewDownload, SetQueueConfig, SetSpeedLimit, SpeedTarget};
+use download_manager::{
+    DownloadDto, DownloadManager, ManagerConfig, NewDownload, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SpeedTarget,
+};
 use downloader_core::DownloadStatus;
 use velox_integration_tests::{random_data, serve};
 
@@ -187,6 +189,29 @@ async fn balanced_uses_smart_throttle_without_touching_the_users_switches() {
     m.set_speed_limit(SetSpeedLimit { target: SpeedTarget::Download { id: d.id }, bytes_per_sec: Some(300_000) }).await.unwrap();
     select(&m, "fast").await;
     assert_eq!(m.get_download(d.id).await.unwrap().speed_limit, Some(300_000));
+}
+
+#[tokio::test]
+async fn fast_is_full_speed_and_never_gives_way_not_even_to_a_listed_program() {
+    wipe("fastfull");
+    let m = open("fastfull").await;
+    m.set_speed_limit(SetSpeedLimit { target: SpeedTarget::Global, bytes_per_sec: Some(400_000) }).await.unwrap();
+    m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), apps: Some(vec!["game".into()]), ..Default::default() }).await.unwrap();
+    let game = vec!["game".to_string()];
+    m.smart_throttle_observe(Some(&game));
+    assert!(m.smart_throttle().limit_bps.is_some(), "the user's setup: the game slows downloads");
+    select(&m, "fast").await;
+    m.smart_throttle_observe(Some(&game));
+    let s = m.smart_throttle();
+    assert!(!m.smart_throttle_enabled() && s.limit_bps.is_none() && s.reason == "off", "Fast: no cap at all: {s:?}");
+    assert!(s.enabled, "the user's own switch is kept");
+    assert_eq!(m.get_profiles().effective.speed_limit_bps, None, "Fast: no speed limit either");
+    // Back to Default: everything the user set applies again.
+    select(&m, DEFAULT_ID).await;
+    m.smart_throttle_observe(Some(&game));
+    assert!(m.smart_throttle().limit_bps.is_some());
+    assert_eq!(m.get_profiles().effective.speed_limit_bps, Some(400_000));
+    m.shutdown().await;
 }
 
 #[tokio::test]

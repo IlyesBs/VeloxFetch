@@ -341,7 +341,7 @@ async fn while_smart_throttle_slows_downloads_low_priority_ones_wait_and_running
     let srv = serve(random_data(4 * MB, 13)).await;
     let (r, _e) = rig("giving-way", 3).await;
     let call = vec!["VeloxTestCall".to_string()];
-    r.m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), auto: Some(false), apps: Some(call.clone()), ..Default::default() })
+    r.m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), auto: Some(true), apps: Some(call.clone()), ..Default::default() })
         .await
         .unwrap();
     let running =

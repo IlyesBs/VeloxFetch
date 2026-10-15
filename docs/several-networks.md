@@ -103,7 +103,8 @@ finished on the others.
   open.
 * A download's details: "Networks: Wi-Fi 6.0 MB · Ethernet 6.0 MB" (what came through each, over every attempt, by
   plain name); the copied report says "Wi-Fi [wlx…] 6.0 MB" (the system's name in brackets, for support).
-* Smart throttle (sidebar card and Settings): greyed out, "Off while several networks at once is on".
+* Smart throttle (sidebar card and Settings): greyed out, "Off while several networks at once is on" (since the
+  three levels of issue #46: the Fast / Smart / Manual buttons, Manual's levels, the switch and the Settings radios).
 * **The indicator and the live card (issue #44).** While it is on, the dashboard's Total speed card and the status bar
   say "2 networks" (how many networks downloads are spread over; orange "1 network" when fewer than two are chosen,
   orange "Not spread" when a VPN or a proxy carries everything; the tooltip lists each network's speed). The dashboard's side column starts with

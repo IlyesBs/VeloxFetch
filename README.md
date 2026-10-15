@@ -96,8 +96,11 @@ when the site or the network fails part-way (Retry continues from what is alread
 (speed, active, network) and land in the History. Videos protected with DRM (Netflix, Shahid, STC tv...) cannot be
 downloaded, and VeloxFetch says so.
 
-Smart throttle (Settings > Speed) lets downloads give way while you browse, watch or play (automatic mode, or while a
-listed game / call runs: give way, a low speed limit or pause, lifted when it closes) and gives them the whole connection when the network or the computer is idle, smoothly and never
+Smart throttle (Settings > Speed, and the dashboard card) has three levels. **Fast**: full speed, never slowed.
+**Smart**: downloads give way by themselves to a video, a game or a call, or browsing (a short check now and then finds
+a video that full-speed downloads would starve; a listed game / call: give way, a low speed limit or pause, lifted when
+it closes). **Manual**: the level you pick (Aggressive, Balanced, Performance), all the time. Smart gives downloads the
+whole connection when the network or the computer is idle, smoothly and never
 below the reserved minimum; a status line and a speed graph show what it does. Under a cap a download keeps only the
 connections it needs and reads in small, even steps, so the line sees no bursts (what a game needs), and it never
 stops when a cap starts, changes or lifts. The details of a video or audio download

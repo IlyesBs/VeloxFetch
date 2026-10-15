@@ -179,13 +179,20 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    the browser: within ~6 s the status says "Reducing speed — active browsing detected" and the graph's dashed limit line
    appears; stop: a few seconds later "Bandwidth optimized — speeding back up", then "Full speed — network idle". Leave the
    computer alone for 2+ minutes: "Full speed — computer idle". The speed never drops below "Downloads always keep at least".
-   Aggressive / Balanced / Conservative keep about 35 / 50 / 75 % of the download's speed while browsing.
+   Manual's Aggressive / Balanced / Performance keep about 35 / 50 / 75 % of the line, all the time.
+3b. Three levels (issue #46, once per OS, on a real line): start a large download, then play a 4K YouTube video.
+   **Fast**: the video struggles (low quality / buffering), the download keeps full speed. **Smart**: within about a
+   minute the status says "Checking whether another app needs the connection", then "Reducing speed"; the video plays
+   in high quality; without touching the mouse for 3+ minutes it stays so; stop the video: full speed again within
+   ~30 s. With nothing else running, the status shows a short check now and then and goes back to full speed.
+   **Manual**: Aggressive / Balanced / Performance each cap the download at once and keep it. Choose the **Fast**
+   download profile: the card shows Fast with the levels greyed out, "Fast profile · full speed, never slows down".
 4. Steadiness (the October 2026 fixes): with Smart throttle on and nothing else using the network, a large download stays
    at full speed ("Full speed — nothing else is using the connection"), it is not slowed at start. Start a second download
    in the browser: within ~6 s the speed visibly drops to about half; stop it: full speed again within about 30 s, the
-   status never sticks on "browsing". While capped, click Aggressive / Balanced / Conservative and the switch quickly
+   status never sticks on "browsing". In Manual, click Aggressive / Balanced / Performance and the switch quickly
    several times: the download never shows 0 B/s, the switch never flicks back, the gauge's centre stays in the middle and
-   "Conservative" is written in full. Choosing a mode while it is off turns it on.
+   every name is written in full. Choosing one of Manual's levels from another level switches to Manual.
 4b. Gaming policy (once per OS): Settings > Speed > Smart throttle > "While a listed program runs".
    * *Pause downloads*: with two large downloads running, pause one yourself, then start the listed program: within ~3 s
      the other pauses (its progress stays), the card says "… is running · downloads paused until it closes", the Queue

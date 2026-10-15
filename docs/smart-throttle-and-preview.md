@@ -139,16 +139,19 @@ for 50 s with nobody else: never slowed. Tests: see `docs/testing.md` > "Steady 
 |---|---|
 | Smoothing | the last two (signed) readings are averaged, then each reading moves the smoothed traffic half way (`SMOOTHING` 0.5); it may go below zero by at most max(96 KB/s, 10 % of VeloxFetch's speed) |
 | Noise | of VeloxFetch's own speed, 10 % (30 % while a limit paces downloads: `paced`) never counts as someone else (3 % until October 2026: a window 5–8 % off at full speed, common on a real line, slowed downloads for nobody right after turning it on) |
-| Using the internet | the user is not away (idle < 2 min, or unknown) and other traffic > max(96 KB/s, noise) (off below half) -> **browsing** |
+| Using the internet | other traffic > max(96 KB/s, noise) (off below half), 256 KB/s while the user has not touched anything for 2 min (a video is watched without input: it used to need 512 KB/s then, and a starved 4K video never reached it) -> **browsing** (user active) or **busy** (no input) |
 | Network busy | other traffic > max(512 KB/s, 15 % of the best speed) (off below half) -> **busy** |
-| Slow down | after 3 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; keep = mode share + 25 % (Aggressive 35 %, Balanced 50 %, Conservative 75 %); busy while away keeps half of the rest more |
+| Slow down | after 3 readings in a row (`CONFIRM`): cap = reference x keep, never below the minimum; Smart's keep is Balanced's 50 % (`SMART_SHARE`), whether or not the user touches anything |
+| Give more, give back | while slowed, the other program uses >= 80 % of the room left: cap x0.85 (down to a fifth of the line, `SMART_LEAST`); it uses < 40 % of it: x1.15 back toward the 50 % |
+| Checks | see "Checks" below: at full speed, now and then, downloads slow to half for a few seconds to see whether a starved program takes the room |
 | Settle | the 2 readings after the cap was set or lowered (`SETTLE`) change nothing: the system still takes in what was on its way to VeloxFetch's connections faster than the new cap reads it, which the counters show as someone else |
 | Relearn | the reference and the best speed are learned again only 3 observations after a cap lifted (`RELEARN_AFTER`): the speed is still climbing back, and the buffered burst looked like a faster line |
 | Speed up | after a calm (`CALM` 4 readings, 8 when the network got busy again soon after calming = unsteady): x1.5 per reading, full speed above 95 % of the reference |
 | New mode / minimum | the cap follows at once (`retarget`), the controller keeps its state |
 | No counters | full speed, the controller starts over (`unknown`) |
 
-Status codes (`SmartThrottleDto.reason`): `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`;
+Status codes (`SmartThrottleDto.reason`): `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`,
+`checking` (a check), `manual` (Manual's level);
 the UI turns them into the status line (`throttle.ts`, `thr.*` texts). The best speed and the reference
 (`SmartThrottleDto.referenceBps`) are learned only while nothing caps downloads (the reference also not while the
 controller is about to slow down). Idle time per OS: Windows `GetLastInputInfo`, macOS `CGEventSourceSecondsSinceLastEventType`, Linux
@@ -330,14 +333,90 @@ policy tests "live preview: ..." and "smart throttle: ...".
 
 ## Download Profiles and Smart throttle (October 2026)
 
-A Download Profile may set Smart throttle's automatic mode (`SmartState::profile`):
+A Download Profile may set Smart throttle's level (`SmartState::profile`):
 
-* `Some(true)` (Balanced) turns it on;
-* `Some(false)` (Fast) turns the automatic mode off but leaves Smart throttle itself, and a gaming policy, as you
-  set them;
+* `Some(true)` (Balanced) turns Smart on;
+* `Some(false)` (Fast) holds Smart throttle off entirely: full speed, never giving way, not even to a listed program
+  (issue #46: "Fast" must mean full speed). Fast also lifts the global speed limit (`speed_limit_bps: Some(0)`).
+  Your own choice is kept and comes back with another profile;
 * `None` leaves everything as you set it.
 
-What is in force: `on() = enabled || profile == Some(true)`, `automatic() = profile.unwrap_or(auto)`. Every place
+What is in force: `on() = profile != Some(false) && (enabled || profile == Some(true))`,
+`automatic() = profile.unwrap_or(auto)`. Every place
 that used `enabled` / `auto` for behaviour now uses them. The DTO keeps `enabled` / `auto` as your switches and adds
 `profileAdaptive`. A profile change is applied at once (`smart_profile_changed`). See `docs/download-profiles.md`.
 
+## Three levels, checks, and a real YouTube video (issue #46, October 2026)
+
+> v2.0.0 (`port_smart_throttle_v2`): the same fix, with its texts in all 8 languages. Several networks at once still
+> holds Smart throttle off (`SmartState::on()`: `!held_by_networks && profile != Some(false) && ...`; `throttleOn` in
+> the UI likewise): meanwhile the three level buttons, Manual's levels, the switch and the Settings radios are greyed
+> out with "Off while several networks at once is on".
+
+The report: "watching YouTube in 4K, I start a download and turn Smart throttle on, switch between its options:
+nothing changes, only the colours". Measured on the real line (3.4 MB/s) before the fix:
+
+* **Automatic mode never saw the video.** VeloxFetch uses up to 64 connections, a player one or two, so next to a
+  full-speed download a real 4K YouTube stream got 0.18 MB/s, a single-connection player 0.05 MB/s (stalling).
+  Smart throttle measures the *other* traffic: there was almost none to see, so it said "Full speed — nothing else
+  is using the connection" (the user's screenshot).
+* **Watching counted as away.** No input for 2 minutes made the user "away", and then only heavy traffic (512 KB/s,
+  or 15 % of the line) counted.
+* **The modes changed nothing** while nothing was detected (they only scale a cap), and with automatic mode off only
+  listed programs counted.
+
+### Three levels
+
+| Level | `enabled` / `auto` | What downloads do |
+|---|---|---|
+| **Fast** | off | full speed, never slowed (also what the Fast profile forces) |
+| **Smart** | on / on | give way by themselves: to a video, a game or call (listed programs, gaming policy), browsing; full speed when the line is free. The level is chosen by the app (Balanced's), not by the user |
+| **Manual** | on / off | the user's level all the time, whatever runs: Aggressive keeps ~35 % of the line, Balanced ~50 %, Performance ~75 % (`manual_cap`: a share of the learned line speed; full speed until it is known, so the first download measures it). Listed programs are Smart's |
+
+The card shows Fast / Smart / Manual, and Manual's three levels only in Manual; Settings shows the same choice as
+three radio cards. The gauge's core switches Fast <-> Smart. Low-priority downloads wait only for Smart's caps
+(`smart_is_limiting` ignores Manual, which never ends). Any change of level or setting applies at once.
+
+### Checks
+
+At full speed in Smart, while downloads take at least 384 KB/s: about 15 s after downloads start, then every ~20 s,
+doubling while checks find nobody up to ~3 min, and within 2 readings when the user comes back to the computer after
+20 s without input (to start a video):
+
+1. downloads are capped at half of their speed (`Reason::Checking`, "Checking whether another app needs the
+   connection");
+2. the first reading is skipped; then the other traffic (two readings averaged) is compared with before the check;
+3. it drops below max(96 KB/s, 30 % of the room the check made): **nobody**, full speed again at once (usually the
+   3rd reading, ~9 s);
+4. it stays above for 6 readings (~18 s): **someone** wanted the line: slowed by Smart's share at once (no further
+   confirmation), held while they use it, as for traffic seen directly. A slowdown found by a check that ends within
+   10 readings was a passing burst: checks keep their spacing.
+
+Cost with nobody else: under 9 % of the time at half speed (under 5 % of the speed), less and less.
+
+### The measurement on Linux
+
+When downloads are held back, the system keeps taking data in for them until their receive buffers are full: 1-8 MB
+here, at line speed, for 5-20 s. The adapters count those bytes when they arrive, VeloxFetch when it reads them, so
+they looked like another program's traffic (a check with nobody else saw 0.7-1.5 MB/s of "other", and after a video
+stopped downloads stayed slowed for up to 70 s). On Linux, `sysio::own_tcp_queued` adds up the receive queues of
+VeloxFetch's own sockets (`/proc/self/fd` inodes matched in `/proc/self/net/tcp{,6}`) and the measurement subtracts
+their change: `other = Δadapters - (Δread + Δqueued) x 1.06`. Windows and macOS have no cheap equivalent: there the
+settle readings, the averaged pairs and the check's "stays above" rule absorb it (`queued` is `None`).
+
+### Real results (3.4 MB/s line, `tests/e2e/real-throttle.mjs`)
+
+| Case | Result |
+|---|---|
+| Fast, a 4K YouTube video next to a full-speed download | the video gets 0.18 MB/s, downloads never slowed |
+| Smart, the same video | found by a check in 36 s; the video 1.49 MB/s (8x), downloads 1.02 MB/s under a 1.03 MB/s cap; then more room as the video took all it was given (cap 0.63 MB/s) |
+| The video stops | full speed again 29 s later |
+| Nobody else, 90 s | two checks, both "nobody" after ~12 s; never slowed |
+| A listed program (curl) | slowed within 15 s (cap 0.76 MB/s, the program 1.76 MB/s), lifted when it closed |
+| Manual | Aggressive 1.07, Balanced 1.53, Performance 2.29 MB/s caps, applied at once, downloads at 1.0 MB/s under Aggressive; kept |
+
+Tests: `smart_throttle.rs` unit tests (checks find a starved program, buffers filling are nobody, cost, the user
+coming back, giving more room and back, the away threshold, the buffers' figure), `sysio.rs` (the queue table),
+`smart_preview.rs` (Manual), `profiles.rs` (`fast_is_full_speed_and_never_gives_way_not_even_to_a_listed_program`),
+`throttle.test.ts` (levels and status), `desktop-throttle.mjs` / `desktop-preview.mjs` (the three levels in the UI,
+the Fast profile) and the real-line `real-throttle.mjs`.

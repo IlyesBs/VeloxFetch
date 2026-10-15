@@ -205,7 +205,7 @@ export interface SmartThrottle {
   heldByNetworks: boolean;
 }
 
-export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
+export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
 
 export interface SetSmartThrottle {
   enabled?: boolean;

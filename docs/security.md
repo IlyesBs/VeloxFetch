@@ -541,6 +541,13 @@ actions, show / open a file, keeping the computer awake, notifications, the `vel
 * Measured from totals only (October 2026): the computer's received-bytes counter (`SysIo::net_received_total`, read on
   the watcher's blocking thread) and VeloxFetch's own received bytes, over the same window. Still no per-program, per-site
   or per-connection traffic (the policy test checks `sysio.rs`); nothing new is stored or sent.
+* Linux, issue #46: also the bytes waiting in VeloxFetch's **own** receive buffers (`own_tcp_queued`): this process's
+  socket inodes (`/proc/self/fd`) matched in `/proc/self/net/tcp{,6}`, their `rx_queue` summed. Other entries of the
+  table are skipped as they are read: no address, port or other program is looked at, kept or logged (policy test).
+  Read-only, bounded (one pass over two small tables every 3 s), and any failure means "unknown" (the old
+  measurement).
+* Checks (issue #46): Smart slows its own downloads to half for a few seconds now and then; it never touches another
+  program. The Fast level and the Fast profile mean no throttle at all.
 
 ## Download Doctor
 
