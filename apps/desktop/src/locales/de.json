@@ -390,6 +390,7 @@
   "multi.received": "{size} empfangen",
   "multi.leaveOut": "Haken entfernen, um ein Netzwerk auszulassen (z. B. ein Handy mit begrenztem Datenvolumen).",
   "multi.smartHeld": "Aus, solange mehrere Netzwerke gleichzeitig genutzt werden: jedes Netzwerk läuft mit voller Geschwindigkeit.",
+  "thr.heldByNetworks": "Aus · mehrere Netzwerke",
   "multi.kind.wifi": "WLAN",
   "multi.kind.ethernet": "Ethernet",
   "multi.kind.usbEthernet": "USB-Ethernet",

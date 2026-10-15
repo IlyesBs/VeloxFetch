@@ -390,6 +390,7 @@
   "multi.received": "{size} received",
   "multi.leaveOut": "Untick a network to leave it out (a phone with a data limit, for example).",
   "multi.smartHeld": "Off while several networks at once is on: every network runs at full speed.",
+  "thr.heldByNetworks": "Off · several networks at once",
   "multi.kind.wifi": "Wi-Fi",
   "multi.kind.ethernet": "Ethernet",
   "multi.kind.usbEthernet": "USB Ethernet",

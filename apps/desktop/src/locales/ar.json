@@ -390,6 +390,7 @@
   "multi.received": "تم استلام {size}",
   "multi.leaveOut": "ألغِ تحديد شبكة لاستبعادها (هاتف بباقة بيانات محدودة مثلًا).",
   "multi.smartHeld": "متوقف ما دام استخدام عدة شبكات في وقت واحد مفعّلًا: كل شبكة تعمل بأقصى سرعتها.",
+  "thr.heldByNetworks": "متوقف · عدة شبكات في وقت واحد",
   "multi.kind.wifi": "واي فاي",
   "multi.kind.ethernet": "إيثرنت",
   "multi.kind.usbEthernet": "إيثرنت USB",

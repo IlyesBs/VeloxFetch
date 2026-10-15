@@ -63,6 +63,9 @@ try {
   await waitFor(async () => (await toasts()).includes("Several networks at once: on"), "the toast");
   await waitFor(() => ev(`document.querySelectorAll('[data-testid=multinet-state][data-state=ready]').length === 2`), "both ready", 8000);
   check("on: both networks are ready", true);
+  await waitFor(async () => (await text("[data-testid=hud-status]"))?.includes("several networks at once"), "the sidebar's Smart throttle line", 5000);
+  check("on: the sidebar says Smart throttle is off because of several networks", true);
+  check("on: Smart throttle's level buttons are greyed out", await ev(`[...document.querySelectorAll('[data-testid^=hud-level-]')].every((b) => b.disabled)`));
 
   // ============================================================ the indicator and the live card (issue #44)
   await click("[data-testid=nav-downloads]");
@@ -112,11 +115,13 @@ try {
     await waitFor(async () => (await ev("document.documentElement.lang")) === lang, `the ${lang} interface`);
     await click("[data-testid=nav-downloads]");
     await waitFor(() => has("[data-testid=panel-networks]"), "the card");
-    const ok = (await fits("[data-testid=panel-networks]")) && (await fits("[data-testid=tile-speed]")) && (await inside("[data-testid=multinet-indicator]", "[data-testid=tile-speed]")) && (await fits("[data-testid=statusbar]"));
+    // The sidebar's Smart throttle line ("Off · several networks at once") stays one line.
+    const oneLine = await ev(`(() => { const e = document.querySelector('[data-testid=hud-status]'); const r = document.createRange(); r.selectNodeContents(e); return r.getClientRects().length === 1 || e.getBoundingClientRect().height < parseFloat(getComputedStyle(e).fontSize) * 2; })()`);
+    const ok = oneLine && (await fits("[data-testid=panel-networks]")) && (await fits("[data-testid=tile-speed]")) && (await inside("[data-testid=multinet-indicator]", "[data-testid=tile-speed]")) && (await fits("[data-testid=statusbar]"));
     const english = lang !== "en" && /Networks in use|Total of all networks|\bnetworks\b/.test(`${await text("[data-testid=panel-networks]")} ${await text("[data-testid=multinet-indicator]")}`);
     if (!ok || english) badLangs.push(`${lang}${ok ? "" : " overflows"}${english ? " English" : ""}`);
   }
-  check("every language: the card and the indicator fit and are translated", badLangs.length === 0, badLangs.join(", "));
+  check("every language: the card, the indicator and the Smart throttle line fit and are translated", badLangs.length === 0, badLangs.join(", "));
   await openNetwork();
 
   const d = (await invoke("create_download", { request: { url: `${srv.base}/files/spread.bin` } })).ok;
@@ -178,6 +183,7 @@ try {
   await click("[data-testid=nav-downloads]");
   await waitFor(async () => !(await has("[data-testid=panel-networks]")) && !(await has("[data-testid=multinet-indicator]")) && !(await has("[data-testid=status-multinet]")), "the indicator and card gone", 8000);
   check("off: no indicator, no card", true);
+  check("off: the sidebar's Smart throttle line is the usual one again", !(await text("[data-testid=hud-status]"))?.includes("several networks at once") && (await ev(`[...document.querySelectorAll('[data-testid^=hud-level-]')].every((b) => !b.disabled)`)));
 
   const errs = await ev("window.__errs");
   check("no JavaScript errors", errs.length === 0, errs.join(" | "));

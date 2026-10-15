@@ -489,7 +489,7 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
    list and comes back "In use" within seconds of being plugged back. The same for the Wi-Fi (turn it off) and a
    phone (unplug it). (Linux: `multinet_real.rs` `switching_...` does this with `nmcli`.)
 3b. The networks are named by what they are ("Ethernet", "Wi-Fi", "Phone (USB)", "USB Ethernet"), never by the
-   system's identifier. Smart throttle (sidebar and Settings) is greyed out, "Off while several networks at once is
+   system's identifier. Smart throttle (sidebar and Settings) is greyed out, its line says "Off · several networks at once", its tooltip "Off while several networks at once is
    on", and back as it was once several networks is turned off.
 4. Untick one network: "Choose at least two networks"; the next download uses the usual route only.
 5. Turn a VPN on (full tunnel): Settings says a VPN carries the traffic; a download is not spread (only the VPN's

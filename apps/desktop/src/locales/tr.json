@@ -390,6 +390,7 @@
   "multi.received": "{size} alındı",
   "multi.leaveOut": "Bir ağı dışarıda bırakmak için işaretini kaldırın (örneğin veri sınırı olan bir telefon).",
   "multi.smartHeld": "Aynı anda birden çok ağ açıkken kapalı: her ağ tam hızda çalışır.",
+  "thr.heldByNetworks": "Kapalı · aynı anda birden çok ağ",
   "multi.kind.wifi": "Wi-Fi",
   "multi.kind.ethernet": "Ethernet",
   "multi.kind.usbEthernet": "USB Ethernet",

@@ -390,6 +390,7 @@
   "multi.received": "Получено: {size}",
   "multi.leaveOut": "Снимите отметку, чтобы не использовать сеть (например, телефон с ограниченным трафиком).",
   "multi.smartHeld": "Выключено, пока включены несколько сетей сразу: каждая сеть работает на полной скорости.",
+  "thr.heldByNetworks": "Выкл. · несколько сетей сразу",
   "multi.kind.wifi": "Wi-Fi",
   "multi.kind.ethernet": "Ethernet",
   "multi.kind.usbEthernet": "USB Ethernet",

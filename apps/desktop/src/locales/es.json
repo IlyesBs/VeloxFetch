@@ -390,6 +390,7 @@
   "multi.received": "{size} recibidos",
   "multi.leaveOut": "Desmarca una red para dejarla fuera (un teléfono con datos limitados, por ejemplo).",
   "multi.smartHeld": "Desactivado mientras se usan varias redes a la vez: cada red va a toda velocidad.",
+  "thr.heldByNetworks": "Desactivado · varias redes a la vez",
   "multi.kind.wifi": "Wi-Fi",
   "multi.kind.ethernet": "Ethernet",
   "multi.kind.usbEthernet": "Ethernet USB",
