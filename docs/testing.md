@@ -495,9 +495,9 @@ See `docs/resume-integrity.md` §8. Tests:
   "Switching"). Plain names: `system-integration` `adapters` (5), `networks.test.ts` (2);
 * **Several networks: indicator and live card (October 2026, `feat_multinet_indicator`, issue #44):** `multinet` unit
   test for `Speeds` (per network, usual route, windows, smoothing, a network gone, 0 when nothing runs),
-  `networks.test.ts` (+2), `desktop-multinet.mjs` 21 → 34 checks (indicator, status bar, card, each network's speed
+  `networks.test.ts` (+2), `desktop-multinet.mjs` 21 → 37 checks (with the Smart throttle line and level buttons while it is on, `fix_smart_held_status`) (indicator, status bar, card, each network's speed
   and connections, total = sum ≈ download speed, no address, fits, 0 after, gone when off; 3 runs in a row green),
-  `real-multinet.mjs` 15 → 20 checks on the real cable + USB Wi-Fi (each network's card speed against `/proc/net/dev`
+  `real-multinet.mjs` 15 → 21 checks on the real cable + USB Wi-Fi (each network's card speed against `/proc/net/dev`
   for that adapter every 3 s, within 35 % on most readings; it matched within a few percent; 3 runs green);
 * **Never lose a download (October 2026, `feat_never_lose_download`):** see `docs/never-lose-a-download.md` §6:
   `manager/recovery.rs` (3 unit), `explain.rs` (+1), `tests/integration/tests/recovery.rs` (7: tried until it

@@ -103,8 +103,9 @@ finished on the others.
   open.
 * A download's details: "Networks: Wi-Fi 6.0 MB · Ethernet 6.0 MB" (what came through each, over every attempt, by
   plain name); the copied report says "Wi-Fi [wlx…] 6.0 MB" (the system's name in brackets, for support).
-* Smart throttle (sidebar card and Settings): greyed out, "Off while several networks at once is on" (since the
-  three levels of issue #46: the Fast / Smart / Manual buttons, Manual's levels, the switch and the Settings radios).
+* Smart throttle (sidebar card and Settings): greyed out (the Fast / Smart / Manual buttons, Manual's levels, the
+  switch, the Settings radios), and its status line, under the gauge and in Settings, says "Off · several networks at once"
+  (one line; the controls' tooltip has the whole sentence) instead of a plain "off" (`throttleStatus`).
 * **The indicator and the live card (issue #44).** While it is on, the dashboard's Total speed card and the status bar
   say "2 networks" (how many networks downloads are spread over; orange "1 network" when fewer than two are chosen,
   orange "Not spread" when a VPN or a proxy carries everything; the tooltip lists each network's speed). The dashboard's side column starts with
@@ -194,13 +195,13 @@ finished on the others.
   one network, a proxy and a VPN-like route spread nothing, and the choice is saved; bad choices are refused; Smart
   throttle is held off while it is on (the user's switch kept, cannot be turned on meanwhile, held after a restart,
   back when it is turned off).
-* `tests/e2e/desktop-multinet.mjs` (34 checks, real app): the panel lists the networks by name (no address), the
+* `tests/e2e/desktop-multinet.mjs` (37 checks, real app): the panel lists the networks by name (no address), the
   switch, the indicator ("2 networks" on the Total speed card and the status bar) and the "Networks in use" card with
   both networks, while a 96 MB download runs each network's own speed and connections, the total is the sum and
   matches what downloads receive (within 35 %), no address in the card, the card fits its column, every speed back to
   0 once nothing runs; a 12 MB download through both networks (server side), intact, "In use" and what each received,
   the details line, the report, leaving one out ("choose at least two", the indicator says "1 network"; nothing spread), refused input, off (no
-  indicator, no card); in all 8 languages the card and the indicator fit and are translated. Screenshots `docs/screenshots/multi-network-dark.png`, `docs/screenshots/multi-network-card.png`.
+  indicator, no card, the sidebar's Smart throttle line back to its usual one); with it on, the sidebar's Smart throttle line says why it is off and its level buttons are greyed out; in all 8 languages the card and the indicator fit and are translated. Screenshots `docs/screenshots/multi-network-dark.png`, `docs/screenshots/multi-network-card.png`.
 * Live speeds: `download-manager` `multinet` unit test `each_network_speed_and_the_usual_route_add_up_to_what_downloads_receive`
   (per network and usual route, windows, smoothing, a network gone or restarted, 0 at once when nothing runs, the
   rest of an ended transfer shown as 0); `networks.test.ts` (+2: the count, the bars).
@@ -211,7 +212,7 @@ finished on the others.
   listed by plain name and one "usual", Smart throttle held off with its switch greyed out at once, a 145 MB download
   through every network, whole, Settings shows them in use, Smart throttle back when it is turned off; the indicator
   and the card while it runs, each network's live speed against the system's counters for that adapter every 3 s,
-  the total always the sum: 20 checks);
+  the total always the sum, the sidebar saying why Smart throttle is off: 21 checks);
   `switching_between_real_networks_when_one_goes_or_comes_back` (each network disconnected and connected again with
   `nmcli` during a 4 GB download: never stops, never fails, nothing through a disconnected network by the app's
   count, each one used again) and `show_one_network_going_and_coming_back` (`VELOX_TEST_UNPLUG=<device>`).

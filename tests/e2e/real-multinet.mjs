@@ -56,6 +56,7 @@ try {
   check("Smart throttle cannot be turned on meanwhile", !!(await invoke("set_smart_throttle", { request: { enabled: true } })).err);
   await waitFor(() => ev(`document.querySelector('[data-testid=hud-switch]')?.disabled === true`), "the sidebar's switch greyed out", 2000).catch(() => null);
   check("the sidebar's Smart throttle switch is greyed out at once", await ev(`document.querySelector('[data-testid=hud-switch]')?.disabled === true`));
+  check("the sidebar says why Smart throttle is off", (await text("[data-testid=hud-status]"))?.includes("several networks at once"), await text("[data-testid=hud-status]"));
 
   const before = counters();
   const t = Date.now();

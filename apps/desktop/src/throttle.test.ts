@@ -231,5 +231,10 @@ describe("several networks at once", () => {
     expect(throttleOn({ ...base, enabled: true })).toBe(true);
     expect(throttleOn({ ...base, enabled: true, heldByNetworks: true })).toBe(false);
     expect(throttleOn({ ...base, profileAdaptive: true, heldByNetworks: true })).toBe(false);
+    // The line under the gauge and in Settings says why it is off (not just "off").
+    const t = (k: string) => k;
+    expect(throttleStatus(t, { ...base, enabled: true, heldByNetworks: true })).toBe("thr.heldByNetworks");
+    expect(throttleStatus(t, { ...base, enabled: true, profileAdaptive: false, heldByNetworks: true })).toBe("thr.heldByNetworks");
+    expect(throttleStatus(t, { ...base, enabled: false })).toBe("thr.off");
   });
 });

@@ -65,6 +65,9 @@ export function throttleStatus(
   s: SmartThrottle | null,
 ): string {
   if (!s) return t("hud.unavailable");
+  // Held off by several networks at once: say so, not just "off" (the controls are greyed out meanwhile; their
+  // tooltip has the whole sentence). One short line, like the other states.
+  if (s.heldByNetworks) return t("thr.heldByNetworks");
   if (s.profileAdaptive === false) return t("thr.fastProfile");
   if (!throttleOn(s)) return t("thr.off");
   const speed = formatSpeed(s.limitBps ?? 0);
