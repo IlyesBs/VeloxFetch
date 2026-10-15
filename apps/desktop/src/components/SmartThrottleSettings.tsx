@@ -5,7 +5,10 @@ import { formatSpeed } from "../format";
 import { useT } from "../i18n";
 import {
   keepWhileActive,
+  LEVEL_REQUEST,
+  THROTTLE_LEVELS,
   THROTTLE_MODES,
+  throttleLevel,
   throttleOn,
   throttleStatus,
   throttleStore,
@@ -152,8 +155,9 @@ export function SmartThrottleSettings() {
     .map((a) => a.trim())
     .filter(Boolean);
   const edited = !!s && list.join("\n") !== s.apps.join("\n");
-  // The user's own switch (the checkbox) and what is in force (a Download Profile may turn the automatic mode on).
-  const userOn = !!s?.enabled;
+  // The level in force (a Download Profile may set it: Fast, or Balanced's Smart).
+  const level = throttleLevel(s);
+  const byProfile = s?.profileAdaptive != null;
   const on = throttleOn(s);
   const slowed = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
@@ -174,21 +178,31 @@ export function SmartThrottleSettings() {
 
   return (
     <Panel title={t("smart.title")} hint={t("smart.hint")}>
-      <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-        <input
-          type="checkbox"
-          data-testid="smart-enabled"
-          checked={userOn}
-          disabled={!s}
-          onChange={(e) =>
-            save(
-              { enabled: e.target.checked },
-              e.target.checked ? t("smart.on") : t("smart.off"),
-            )
-          }
-        />
-        {t("smart.enable")}
-      </label>
+      <fieldset>
+        <legend className="label mb-1.5">{t("smart.level")}</legend>
+        <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" data-testid="smart-levels">
+          {THROTTLE_LEVELS.map((l) => (
+            <label
+              key={l.level}
+              className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-[13px] ${level === l.level ? "border-accent" : "border-line"} ${!s || byProfile ? "cursor-not-allowed opacity-60" : ""}`}
+            >
+              <input
+                type="radio"
+                name="smart-level"
+                className="mt-0.5"
+                data-testid={`smart-level-${l.level}`}
+                checked={level === l.level}
+                disabled={!s || byProfile}
+                onChange={() => save(LEVEL_REQUEST[l.level], t("hud.modeSet", { name: t(`lvl.${l.level}`) }))}
+              />
+              <span>
+                <span className="font-medium">{t(`lvl.${l.level}`)}</span>
+                <span className="mt-0.5 block text-xs text-dim">{t(`lvl.${l.level}Hint`)}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       {s?.profileAdaptive != null && (
         <p className="mt-1 text-[11px] text-accent" data-testid="smart-profile-note">
           {t(s.profileAdaptive ? "prof.smartAutoOn" : "prof.smartAutoOff")}
@@ -211,21 +225,7 @@ export function SmartThrottleSettings() {
         capLabel={t("smart.graphCap")}
       />
 
-      <div className="mt-4 space-y-1">
-        <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            data-testid="smart-auto"
-            checked={s?.auto ?? true}
-            disabled={!s}
-            onChange={(e) =>
-              save({ auto: e.target.checked }, t("smart.updated"))
-            }
-          />
-          {t("smart.auto")}
-        </label>
-        <p className="ms-6 text-xs text-dim">{t("smart.autoHint")}</p>
-      </div>
+      {level === "smart" && <p className="mt-3 text-xs text-dim">{t("smart.autoHint")}</p>}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <label className="space-y-1">
@@ -234,7 +234,7 @@ export function SmartThrottleSettings() {
             data-testid="smart-mode"
             className="input h-9"
             value={share}
-            disabled={!s}
+            disabled={!s || level !== "manual"}
             onChange={(e) =>
               save({ sharePercent: Number(e.target.value) }, t("smart.updated"))
             }
@@ -246,7 +246,6 @@ export function SmartThrottleSettings() {
                 title={t("hud.modeTip", {
                   name: t(m.name),
                   k: keepWhileActive(m.share),
-                  p: m.share,
                 })}
               >
                 {t(m.name)}

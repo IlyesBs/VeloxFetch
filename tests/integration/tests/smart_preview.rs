@@ -189,12 +189,18 @@ async fn automatic_mode_gives_way_to_browsing_and_takes_the_line_back_when_it_is
     wait_status(&m, d.id, DownloadStatus::Completed, 15).await;
     assert_eq!(std::fs::read(m.get_download(d.id).await.unwrap().destination).unwrap(), *data);
 
-    // Automatic mode off: browsing is ignored again (listed programs still count).
+    // Manual: the chosen level holds all the time, whatever is going on (browsing or not). The line's speed is not
+    // known here (the download above ran slowed), so full speed until a download measures it (see
+    // `changing_modes_while_capped_never_stops_a_running_download` for the level applied).
     m.set_smart_throttle(SetSmartThrottle { auto: Some(false), ..Default::default() }).await.unwrap();
+    let manual = m.smart_throttle();
+    assert_eq!((manual.reason.as_str(), manual.limit_bps), ("manual", None), "{manual:?}");
     for _ in 0..3 {
         m.smart_throttle_observe_signals(Some(&[]), browsing());
+        assert_eq!(m.smart_throttle().limit_bps, manual.limit_bps);
     }
-    assert!(m.smart_throttle().limit_bps.is_none());
+    m.smart_throttle_observe_signals(Some(&[]), quiet(0));
+    assert_eq!((m.smart_throttle().reason.as_str(), m.smart_throttle().limit_bps), ("manual", manual.limit_bps));
 
     // A higher reserved minimum is kept, and survives a restart.
     m.set_smart_throttle(SetSmartThrottle { auto: Some(true), min_bps: Some(3 * 1024 * 1024), ..Default::default() }).await.unwrap();
@@ -247,15 +253,9 @@ async fn changing_modes_while_capped_never_stops_a_running_download() {
     // bytes keep coming every half second, never a pause and then a burst.
     let b = base("modes");
     let m = manager(&b).await;
-    m.set_smart_throttle(SetSmartThrottle {
-        enabled: Some(true),
-        auto: Some(false),
-        apps: Some(names(&["VeloxTestGame"])),
-        share_percent: Some(25),
-        ..Default::default()
-    })
-    .await
-    .unwrap();
+    m.set_smart_throttle(SetSmartThrottle { enabled: Some(true), auto: Some(true), share_percent: Some(25), ..Default::default() })
+        .await
+        .unwrap();
     let srv = serve(random_data(96 * MB, 21)).await;
     *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(20);
     let d = m.create_download(NewDownload { url: srv.url("/modes.bin"), ..Default::default() }).await.unwrap();
@@ -265,7 +265,8 @@ async fn changing_modes_while_capped_never_stops_a_running_download() {
         m.smart_throttle_observe(Some(&[]));
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+    // Manual, then the user flips through the levels.
+    m.set_smart_throttle(SetSmartThrottle { auto: Some(false), ..Default::default() }).await.unwrap();
     assert!(m.smart_throttle().limit_bps.is_some());
     let mut samples = vec![(Instant::now(), m.get_download(d.id).await.unwrap().downloaded)];
     for share in [50u8, 10, 25, 50, 25, 10, 50] {
@@ -273,7 +274,7 @@ async fn changing_modes_while_capped_never_stops_a_running_download() {
         let t = Instant::now();
         while t.elapsed() < Duration::from_millis(1500) {
             tokio::time::sleep(Duration::from_millis(100)).await;
-            m.smart_throttle_observe(Some(&names(&["VeloxTestGame"])));
+            m.smart_throttle_observe(Some(&[]));
             samples.push((Instant::now(), m.get_download(d.id).await.unwrap().downloaded));
         }
     }
@@ -305,7 +306,7 @@ async fn wait_for(what: &str, secs: u64, mut ok: impl AsyncFnMut() -> bool) {
 async fn gaming(m: &DownloadManager, policy: GamePolicy) {
     m.set_smart_throttle(SetSmartThrottle {
         enabled: Some(true),
-        auto: Some(false),
+        auto: Some(true),
         apps: Some(names(&["VeloxTestGame", "OtherTestGame"])),
         game_policy: Some(policy),
         game_limit_bps: Some(256 * 1024),

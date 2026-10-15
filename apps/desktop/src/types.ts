@@ -190,7 +190,7 @@ export interface SmartThrottle {
   profileAdaptive: boolean | null;
 }
 
-export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown";
+export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
 
 export interface SetSmartThrottle {
   enabled?: boolean;

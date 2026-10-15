@@ -50,7 +50,7 @@ try {
   console.log(`app: ${APP}\nserver: ${srv.base}\n`);
   await h.launch();
   await waitFor(() => q("[data-testid=throttle-hud]"), "the interface");
-  await invoke("set_smart_throttle", { request: { enabled: true, auto: false, apps: [GAME] } });
+  await invoke("set_smart_throttle", { request: { enabled: true, auto: true, apps: [GAME] } });
 
   // ---- Settings: the policy and the low speed ------------------------------------------------------------------
   await click("[data-testid=nav-settings]");
