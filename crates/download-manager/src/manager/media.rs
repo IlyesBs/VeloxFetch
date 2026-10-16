@@ -715,8 +715,8 @@ impl DownloadManager {
                     let now = Instant::now();
                     if let Some(before) = last_bytes {
                         let delta = bytes.saturating_sub(before);
-                        // Bytes received since the app started (the dashboard's network card).
-                        self.inner.session_bytes.fetch_add(delta, Ordering::Relaxed);
+                        // Bytes received (the dashboard's network usage, saved per day).
+                        self.count_received(delta);
                         let inst = delta as f64 / now.duration_since(last_at).as_secs_f64().max(1e-3);
                         speed = if speed == 0.0 { inst } else { 0.7 * speed + 0.3 * inst };
                     }

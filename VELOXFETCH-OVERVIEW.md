@@ -380,7 +380,7 @@ Details: `docs/download-intelligence.md`.
 
   | Page | Content |
   |---|---|
-  | **Downloads** | The dashboard: link bar, 6 stat cards, tabbed task cards, side column with live Network ↓↑ / Disk write-read, upcoming downloads, quick actions |
+  | **Downloads** | The dashboard: link bar, 6 stat cards (Network usage: everything ever received, today and this month, kept across restarts, updates and reinstalls: `docs/network-usage.md`), tabbed task cards, side column with live Network ↓↑ / Disk write-read, upcoming downloads, quick actions |
   | **Active** | Running and waiting work: live speed, connections in use, time left, Pause all / Resume all |
   | **Queue** | The queue page |
   | **Completed** | Finished files: search, kind filter, open / folder / remove / delete |
@@ -636,6 +636,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Download Intelligence | nothing: each check lives in memory only and is dropped when the dialog is answered or closed |
 | Download Doctor | the last diagnosis of each download, inside its saved diagnostics (SQLite `diagnostics` table, JSON); a copy in memory for the list |
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
+| Network usage | same file: bytes received per local day in the `network_usage` table (numbers only) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
@@ -840,6 +841,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | The 1.0.0 release gate and the owner's release steps | `docs/release-candidate.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
+| Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -854,6 +856,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-16 | `fix_network_usage_history` | Fix | Issue #45: the dashboard's Network usage went back to 0 after a restart, an update, a reinstall or deleting the downloads (it counted only since launch). Every byte received is now saved per local day (schema v8, `network_usage`; every 5 s and on close); the card shows the total ever, today and this month; deleting downloads or clearing the history keeps it. Tests: persistence, unit, integration (restart on the next day of the next month), e2e +4. | `docs/network-usage.md` |
 | 2026-10-15 | `fix_smart_throttle_probe` | Fix | Issue #46: Smart throttle never saw a 4K YouTube video next to a download (64 connections starve it: 0.18 MB/s), counted someone watching without touching the mouse as away, and its modes changed nothing. Three levels: Fast (full speed), Smart (automatic: short checks at half speed find a starved program; a video counts without input; more room for a hungry program), Manual (Aggressive / Balanced / Performance all the time). Linux: VeloxFetch's own receive-buffer bytes subtracted from the measurement. The Fast profile holds Smart throttle off and lifts the speed limit. Real line: video found in 36 s, 0.18 -> 1.49 MB/s, full speed 29 s after. | `docs/smart-throttle-and-preview.md` |
 | 2026-10-13 | `fix_resume_weak_etag` | Fix | Resume without starting over on servers that give a weak `ETag` or none (nginx with compression, Apache, many CDNs): those downloads always started from 0. Now a strong `ETag` still proves the version; otherwise up to four 64 KiB samples of the saved bytes are compared with the server's (`downloader_core::resume`, shared with Use a new link). Any contradiction starts over; a server that cannot be asked keeps every saved byte. Timeline reason in 3 languages. Tests: 5 unit, 7 integration (fail on the old code). | `docs/resume-integrity.md` |
 | 2026-10-13 | `docs_public_readme` | Docs | The public README rewritten for users (what VeloxFetch does for them, no technical detail). macOS is never promised before it is built: `<!-- mac -->` lines and `{{PLATFORMS}}` names follow the packages a release has (`render`); `publish-kit.mjs page` makes the public page alone. Pushed to `IlyesBs/VeloxFetch-releases` for Windows and Linux. Test +1. | `docs/publishing.md` |
