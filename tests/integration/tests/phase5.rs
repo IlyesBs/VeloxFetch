@@ -262,3 +262,49 @@ async fn history_lists_completed_downloads_newest_first() {
     assert_eq!(m.list_history(2).await.unwrap().len(), 2);
     assert_eq!(m.list_history(0).await.unwrap().len(), 1, "limit is clamped to at least 1");
 }
+
+#[tokio::test]
+async fn network_usage_is_kept_after_deleting_downloads_clearing_history_and_restarting() {
+    // Issue #45: the dashboard's network usage went back to 0 after an update, a reinstall or deleting the downloads.
+    use download_manager::Clock;
+    let srv = serve(random_data(2 * MB, 9)).await;
+    let (db, root) = paths("usage");
+    let at = |s: &'static str| {
+        Clock(std::sync::Arc::new(move || scheduler::chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").unwrap()))
+    };
+    let open = |clock: Clock| {
+        let mut c = ManagerConfig::new(db.clone(), root.clone());
+        c.clock = clock;
+        c.download.min_segment_size = 64 * 1024;
+        DownloadManager::new(c)
+    };
+    let m = open(at("2026-10-31 23:50")).await.unwrap();
+    let d = m.create_download(dl(&srv, "/a.bin")).await.unwrap();
+    wait_status(&m, d.id, DownloadStatus::Completed).await;
+    let mm = m.get_metrics().await.unwrap();
+    assert!(mm.network_total >= 2 * MB as u64 && mm.network_today == mm.network_total && mm.network_month == mm.network_total, "{mm:?}");
+    m.delete_download(d.id, true).await.unwrap();
+    m.forget_history(None).await.unwrap();
+    assert_eq!(m.get_metrics().await.unwrap().network_total, mm.network_total, "deleting downloads and the history keeps it");
+    m.shutdown().await;
+    drop(m);
+
+    // Opened again (an update or a reinstall keeps the database), on the next day of the next month.
+    let m = open(at("2026-11-01 00:10")).await.unwrap();
+    let again = m.get_metrics().await.unwrap();
+    assert_eq!(
+        (again.network_total, again.network_today, again.network_month, again.session_downloaded),
+        (mm.network_total, 0, 0, 0),
+        "{again:?}"
+    );
+    let d = m.create_download(dl(&srv, "/b.bin")).await.unwrap();
+    wait_status(&m, d.id, DownloadStatus::Completed).await;
+    let now = m.get_metrics().await.unwrap();
+    assert!(
+        now.network_total >= mm.network_total + 2 * MB as u64
+            && now.network_today >= 2 * MB as u64
+            && now.network_month == now.network_today,
+        "{now:?}"
+    );
+    m.shutdown().await;
+}

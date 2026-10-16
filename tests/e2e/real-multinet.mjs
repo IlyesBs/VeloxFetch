@@ -97,6 +97,8 @@ try {
   console.log(`${secs.toFixed(1)} s, ${(SIZE / secs / 1e6).toFixed(2)} MB/s; app per network: ${JSON.stringify(diag.networks)}; system: ${JSON.stringify(used)}`);
   check("every network carried part of the file (app)", names.every((n) => diag.networks.find((x) => x.name === n)?.bytes > 1e6), JSON.stringify(diag.networks));
   if (process.platform === "linux") check("every network carried part of the file (system counters)", names.every((n) => used[n] > 1e6), JSON.stringify(used));
+  const usage = (await invoke("get_metrics")).ok;
+  check("Network usage counts what came through every network (issue #45)", usage.networkTotal >= SIZE * 0.99 && usage.networkTotal <= SIZE * 1.03 && usage.networkToday === usage.networkTotal, `${usage.networkTotal} for ${SIZE}`);
   await click("[data-testid=nav-settings]");
   await waitFor(() => has("[data-testid=multinet-list]"), "the networks list", 15000);
   await waitFor(() => ev(`document.querySelectorAll('[data-testid=multinet-state][data-state=working]').length >= 2`), "networks shown in use", 10000);

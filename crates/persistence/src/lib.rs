@@ -57,8 +57,18 @@ ALTER TABLE segments  ADD COLUMN hash       TEXT;
 ALTER TABLE downloads ADD COLUMN part_stamp TEXT;
 ";
 
+/// v8: network usage (issue #45): bytes VeloxFetch received from the network, per local day (`YYYY-MM-DD`). Never
+/// tied to a download: deleting downloads or clearing the history keeps it; an update or a reinstall keeps the
+/// database, so it keeps counting.
+const SCHEMA_V8: &str = "
+CREATE TABLE network_usage (
+    day   TEXT    PRIMARY KEY,
+    bytes INTEGER NOT NULL
+);
+";
+
 /// Applied in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7];
+const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8];
 const SCHEMA_VERSION: i32 = MIGRATIONS.len() as i32;
 
 const SCHEMA_V1: &str = "
@@ -385,6 +395,41 @@ impl SqliteStore {
             .and_then(|v| v.trim().parse().ok())
             .unwrap_or(0);
         Ok(n.max(0).saturating_add(forgotten.max(0)) as u64)
+    }
+
+    /// Add `bytes` received from the network on `day` (`YYYY-MM-DD`, local time) to the network usage.
+    pub fn add_network_usage(&self, day: &str, bytes: u64) -> Result<()> {
+        if bytes == 0 {
+            return Ok(());
+        }
+        failpoint::hit_io("store.write").map_err(|e| DownloadError::Store(e.to_string()))?;
+        let bytes = i64::try_from(bytes).unwrap_or(i64::MAX);
+        self.conn()
+            .execute(
+                "INSERT INTO network_usage(day, bytes) VALUES(?1, ?2)
+                 ON CONFLICT(day) DO UPDATE SET bytes = CASE WHEN bytes > 9223372036854775807 - excluded.bytes
+                     THEN 9223372036854775807 ELSE bytes + excluded.bytes END",
+                params![day, bytes],
+            )
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Network usage: everything ever counted, on `day` (`YYYY-MM-DD`) and in `month` (`YYYY-MM`).
+    pub fn network_usage(&self, day: &str, month: &str) -> Result<NetworkUsage> {
+        let conn = self.conn();
+        // TOTAL (a float) never fails on overflow as SUM does; a u64 cast saturates.
+        let one = |sql: &str, arg: Option<&str>| -> Result<u64> {
+            let n: f64 = match arg {
+                Some(a) => conn.query_row(sql, [a], |r| r.get(0)),
+                None => conn.query_row(sql, [], |r| r.get(0)),
+            }
+            .map_err(db_err)?;
+            Ok(n.max(0.0) as u64)
+        };
+        let sum =
+            |filter: &str, arg: &str| one(&format!("SELECT TOTAL(bytes) FROM network_usage {filter}"), (!arg.is_empty()).then_some(arg));
+        Ok(NetworkUsage { total: sum("", "")?, today: sum("WHERE day = ?1", day)?, month: sum("WHERE substr(day, 1, 7) = ?1", month)? })
     }
 
     /// Save the diagnostics of a download (JSON, secrets already removed by the caller). A download that no
@@ -761,6 +806,14 @@ impl DownloadStore for SqliteStore {
 /// Settings key: bytes of completed downloads whose history lines were removed (kept in the lifetime total).
 const FORGOTTEN_BYTES_KEY: &str = "stats.forgotten_bytes";
 
+/// Bytes received from the network, as saved ([`SqliteStore::network_usage`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NetworkUsage {
+    pub total: u64,
+    pub today: u64,
+    pub month: u64,
+}
+
 fn history_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
     Ok(HistoryEntry {
         id: r.get(0)?,
@@ -924,6 +977,34 @@ mod tests {
         let mut counts = s.status_counts().unwrap();
         counts.sort();
         assert_eq!(counts, vec![("downloading".to_string(), 1), ("paused".to_string(), 1)]);
+    }
+
+    #[test]
+    fn network_usage_is_kept_by_day_and_outlives_downloads_and_history() {
+        let d = tmp("usage");
+        let db = d.join("v.db");
+        {
+            let s = SqliteStore::open(&db).unwrap();
+            s.add_network_usage("2026-09-30", 500).unwrap();
+            s.add_network_usage("2026-10-14", 1000).unwrap();
+            s.add_network_usage("2026-10-15", 200).unwrap();
+            s.add_network_usage("2026-10-15", 300).unwrap();
+            s.add_network_usage("2026-10-15", 0).unwrap();
+            // Downloads and the history go: the usage stays.
+            let id = s.save(&rec(d.join("f"))).unwrap();
+            s.complete(id).unwrap();
+            s.delete(id).unwrap();
+            s.forget_history(None).unwrap();
+        }
+        // The app closed and opened again (an update, a reinstall that keeps the data): still there.
+        let s = SqliteStore::open(&db).unwrap();
+        assert_eq!(s.network_usage("2026-10-15", "2026-10").unwrap(), NetworkUsage { total: 2000, today: 500, month: 1500 });
+        assert_eq!(s.network_usage("2026-11-01", "2026-11").unwrap(), NetworkUsage { total: 2000, today: 0, month: 0 });
+        // Never wraps around.
+        s.add_network_usage("2026-10-16", u64::MAX).unwrap();
+        s.add_network_usage("2026-10-16", u64::MAX).unwrap();
+        let u = s.network_usage("2026-10-16", "2026-10").unwrap();
+        assert!(u.today >= i64::MAX as u64 / 2 && u.total >= u.today, "{u:?}");
     }
 
     #[test]

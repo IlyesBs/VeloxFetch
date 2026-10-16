@@ -520,6 +520,16 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. The same with the network unplugged at resume: it fails ("Retry" offered) and still shows about 30 %; plug the
    network back in, Retry: it continues from there.
 
+## AN. Network usage kept (issue #45; once per OS and installation kind)
+1. Download a few files. The dashboard's **Network usage** card shows a total and two rows, "Today" and "This
+   month", whose numbers are never cut (also in a small window and in every language); hovering it shows what was
+   received since launch.
+2. Delete every download (with and without the files) and clear the History: the card does not change.
+3. Quit VeloxFetch and open it again, then install an update or reinstall the same version over it: the total is the
+   same, and grows again with the next download.
+4. The next day, "Today" starts again from 0 while the total and the month keep their bytes (the month from 0 on the
+   1st).
+
 ## AL. Publishing a release (owner, once per release)
 1. `bash scripts/publish-release.sh --key <drive>/update-signing-key.json --merge <Windows release> --merge <macOS
    release>`: it builds, runs the full gate, asks the passphrase once, and ends with "Ready".

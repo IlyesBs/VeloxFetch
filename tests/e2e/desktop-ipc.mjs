@@ -186,6 +186,8 @@ try {
   srv.delayMs = 15;
   const last = (await invoke("create_download", { request: { url: `${base}/shutdown.bin` } })).ok;
   await waitFor(async () => ((await invoke("get_download", { id: last.id })).ok?.downloaded ?? 0) > 1_000_000, "bytes flowing");
+  const usedBefore = (await invoke("get_metrics")).ok;
+  check("network usage counts what was received (ever, today, this month)", usedBefore.networkTotal > 1_000_000 && usedBefore.networkToday > 1_000_000 && usedBefore.networkMonth >= usedBefore.networkToday && usedBefore.networkTotal >= usedBefore.networkMonth, JSON.stringify(usedBefore));
   const gone = h.exited();
   // Close the window the way a user would; the app must pause + persist before exiting.
   await h.closeWindow();
@@ -207,6 +209,18 @@ try {
     "resume after restart produces a byte-exact file",
     crypto.createHash("sha256").update(fs.readFileSync(path.join(root, "shutdown.bin"))).digest("hex") === FILE_SHA,
   );
+
+  // ---- network usage survives the restart, deleting every download and clearing the history (issue #45) --------
+  const usedAfter = (await invoke("get_metrics")).ok;
+  check("after restart the network usage is kept (and keeps counting)", usedAfter.networkTotal > usedBefore.networkTotal && usedAfter.sessionDownloaded < usedAfter.networkTotal, JSON.stringify([usedBefore.networkTotal, usedAfter]));
+  for (const d of (await invoke("list_downloads", { filter: {} })).ok) await invoke("delete_download", { id: d.id, deleteFile: false });
+  await invoke("forget_history", { id: null });
+  const usedEmpty = (await invoke("get_metrics")).ok;
+  check("deleting every download and clearing the history keeps the network usage", usedEmpty.networkTotal === usedAfter.networkTotal && usedEmpty.completed === 0, JSON.stringify(usedEmpty));
+  await waitFor(async () => !!(await page(`document.querySelector('[data-testid=network-total]')?.innerText`)).ok, "the network usage tile", 10000);
+  const tile = (await page(`document.querySelector('[data-testid=tile-network]').innerText`)).ok;
+  const fmt = (n) => { let v = n, i = 0; while (v >= 1024 && i < 4) { v /= 1024; i++; } return `${i === 0 ? Math.round(v) : v.toFixed(v >= 100 ? 0 : 1)} ${["B", "KB", "MB", "GB", "TB"][i]}`; };
+  check("the dashboard tile shows the kept total, today and this month", tile.includes(fmt(usedEmpty.networkTotal)) && /Today\n/.test(tile) && /This month\n/.test(tile) && (await page(`document.querySelector('[data-testid=network-today]').innerText`)).ok === fmt(usedEmpty.networkToday) && (await page(`document.querySelector('[data-testid=network-month]').innerText`)).ok === fmt(usedEmpty.networkMonth), JSON.stringify(tile));
 } catch (e) {
   console.error("\nE2E ABORTED:", e);
   fail();
