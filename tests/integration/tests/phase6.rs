@@ -480,8 +480,13 @@ async fn schedule_stop_pauses_running_downloads_and_the_next_window_resumes_them
 
     clock.set(at(3, 7, 0)); // "Stop at 07:00"
     wait_status(&m, d.id, DownloadStatus::Paused).await;
-    let s = qs(&m).await;
-    assert!(!s.gate_open && s.held == 1);
+    // The download is saved as paused a moment before the queue writes it down as one of its own (both under the
+    // queue's lock, so nothing can let it go in between): wait for that, do not read it at once.
+    until("the queue to hold it", 10, || async {
+        let s = qs(&m).await;
+        !s.gate_open && s.held == 1
+    })
+    .await;
     let kept = m.get_download(d.id).await.unwrap().downloaded;
     assert!(kept > 0 && kept < data.len() as u64);
     stays(&m, d.id, DownloadStatus::Paused, 500).await;
