@@ -772,6 +772,14 @@ and that nothing is pushed out of the status bar.
 On v2.0.0 it also found the Video tools status in Settings (German, Russian, 900 px) running past the panel: it now
 wraps within about half the row.
 
+## A flaky queue test (October 2026)
+
+`phase6` `schedule_stop_pauses_running_downloads_and_the_next_window_resumes_them` failed about 1 run in 10 (3 of 30).
+When the queue pauses a running download, the engine saves it as paused a moment before the queue writes it down as
+one of its own (`held`); both happen under the queue's lock, so nothing can let it go in between, but the test read
+the count in that moment. It now waits for the count (bounded), as does `smart_preview`'s game pause test, which had
+the same read. 0 failures in 60 and 15 runs. No app code changed.
+
 ## Network usage kept (issue #45, October 2026)
 
 | Test | Checks |

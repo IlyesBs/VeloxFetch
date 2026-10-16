@@ -333,10 +333,12 @@ async fn pause_policy_pauses_downloads_during_a_game_and_resumes_only_those_it_p
 
     // The game starts: running downloads pause (progress kept), nothing new starts.
     m.smart_throttle_observe(Some(&names(&["VeloxTestGame.exe"])));
+    // Saved as paused a moment before the queue writes them down as its own: wait for both.
     wait_for("the queue to hold", 20, async || {
         m.get_queue_state().await.unwrap().game_hold
             && m.get_download(a.id).await.unwrap().status == DownloadStatus::Paused
             && m.get_download(mine.id).await.unwrap().status == DownloadStatus::Paused
+            && m.get_queue_state().await.unwrap().held == 2
     })
     .await;
     let q = m.get_queue_state().await.unwrap();
