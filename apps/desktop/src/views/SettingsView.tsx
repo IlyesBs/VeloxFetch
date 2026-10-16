@@ -99,11 +99,13 @@ export function SettingsView() {
   };
 
   return (
-    <div className="grid gap-6 md:grid-cols-[11rem_1fr]">
-      <nav aria-label={t("sec.nav")} className="md:sticky md:top-0 md:self-start" data-testid="settings-nav">
+    // One column below 768 px: `grid-cols-1` (a track that may shrink) and a nav that may shrink, so the tabs scroll
+    // sideways inside their row instead of widening the page (each tab was the width of all of them together).
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-[11rem_1fr]">
+      <nav aria-label={t("sec.nav")} className="min-w-0 md:sticky md:top-0 md:self-start" data-testid="settings-nav">
         <div className="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
           {SECTIONS.map((s) => (
-            <button key={s.id} className="nav-link shrink-0 md:shrink" aria-current={current === s.id} onClick={() => jump(s.id)}>
+            <button key={s.id} className="nav-link w-auto shrink-0 md:w-full md:shrink" aria-current={current === s.id} onClick={() => jump(s.id)}>
               <Icon name={s.icon} size={15} />
               {t(s.label)}
             </button>
