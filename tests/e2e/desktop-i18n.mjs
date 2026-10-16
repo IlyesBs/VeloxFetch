@@ -121,6 +121,45 @@ try {
   }
   await click("[data-testid=nav-settings]");
   await click("[data-testid=settings-lang-en]");
+
+  // Narrow windows, every language: no page is wider than the window (below 768 px the Settings tabs used to grow to
+  // the width of all of them together and push Settings sideways), the tabs scroll inside their own row, and nothing
+  // is pushed out of the status bar.
+  for (const lang of ["en", "fr", "ar"]) {
+    await click("[data-testid=nav-settings]");
+    await click(`[data-testid=settings-lang-${lang}]`);
+    await waitFor(async () => (await ev("document.documentElement.lang")) === lang, `the ${lang} interface`);
+    const wide = [];
+    for (const [width, height] of [[900, 640], [760, 560], [640, 480]]) {
+      await h.cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      for (const p of ["downloads", "queue", "history", "settings"]) {
+        await click(`[data-testid=nav-${p}]`);
+        await sleep(300);
+        const bad = await ev(`(() => { const out = []; const m = document.querySelector('[data-testid=main]');
+          // Elements against the page's box (not its scroll width: right to left, the Linux web view counts its
+          // scrollbar once more there, a known quirk the page's padding already covers). Tabs scroll in their row.
+          const box = m.getBoundingClientRect(), row = document.querySelector('[data-testid=settings-nav] > div');
+          // Inside a row made to scroll sideways (tab bars) or a clipping box, parts out of view are by design: that
+          // row itself is checked.
+          const clipped = (e) => { for (let p = e.parentElement; p && p !== m; p = p.parentElement) if (getComputedStyle(p).overflowX !== 'visible') return true; return false; };
+          const sticking = [...m.querySelectorAll('*')].filter((e) => e.offsetParent && !(row && row.contains(e)) && !clipped(e) && getComputedStyle(e).position !== 'fixed')
+            .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && (r.right > box.right + 1 || r.left < box.left - 1); });
+          const outer = sticking.filter((e) => !sticking.some((o) => o !== e && o.contains(e)));
+          for (const e of outer.slice(0, 3)) out.push('sticks out: ' + (e.getAttribute('data-testid') || e.tagName + '.' + String(e.className).slice(0, 40)) + ' ' + Math.round(e.getBoundingClientRect().left) + '-' + Math.round(e.getBoundingClientRect().right) + ' of ' + Math.round(box.left) + '-' + Math.round(box.right));
+          const nav = document.querySelector('[data-testid=settings-nav]');
+          if (nav) { const r = nav.getBoundingClientRect(); if (r.right > window.innerWidth + 1 || r.left < -1) out.push('tabs row ' + Math.round(r.left) + '-' + Math.round(r.right));
+            for (const b of nav.querySelectorAll('button')) if (b.getBoundingClientRect().width > 320) { out.push('tab ' + Math.round(b.getBoundingClientRect().width) + ' px'); break; } }
+          for (const e of document.querySelector('[data-testid=statusbar]').children) { const r = e.getBoundingClientRect();
+            if (e.offsetParent && (r.right > window.innerWidth + 1 || r.left < -1)) out.push('status bar: ' + (e.innerText || e.className)); }
+          return out; })()`);
+        if (bad.length) wide.push(`${width} ${p}: ${bad.join(", ")}`);
+      }
+    }
+    await h.cdp.send("Emulation.clearDeviceMetricsOverride");
+    check(`${lang}: no page is wider than a narrow window, the Settings tabs scroll in their row, the status bar fits`, wide.length === 0, wide.join(" | "));
+  }
+  await click("[data-testid=nav-settings]");
+  await click("[data-testid=settings-lang-en]");
 } catch (e) {
   check(`unexpected error: ${e.message}`, false);
 } finally {
