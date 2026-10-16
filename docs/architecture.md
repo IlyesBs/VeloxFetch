@@ -430,7 +430,7 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   (`views/CompletedView.tsx`: finished files with search, kinds, open / show in folder / remove / delete from disk, which
   always asks first through `components/DeleteConfirm.tsx`).
 * **Dashboard** (`views/DownloadsView.tsx`): the link bar (paste button; the Add Download split button holds
-  Several / Video / Options), six stat cards (`BentoCards.tsx`), the tabbed list (tabs with counts, search,
+  Several / Video / Options), six stat cards (`BentoCards.tsx`; Network usage reads the kept per-day counts: `manager/usage.rs`, `docs/network-usage.md`), the tabbed list (tabs with counts, search,
   detailed / compact view, sort) and a side column (`SidePanels.tsx`: network and disk charts, upcoming
   downloads, quick actions). Only real numbers are shown: the Network and Disk panels read system counters (see
   *Performance model*).
@@ -512,7 +512,7 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 
 ## State and versioning
 
-`PRAGMA user_version` tracks schema migrations (currently v7: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places, v7 segment hashes and the `.part` stamp). A database from a newer build is
+`PRAGMA user_version` tracks schema migrations (currently v8: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places, v7 segment hashes and the `.part` stamp, v8 network usage per day). A database from a newer build is
 refused rather than corrupted.
 
 ## Download Profiles

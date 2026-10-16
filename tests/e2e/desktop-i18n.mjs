@@ -80,6 +80,23 @@ try {
       await click(`[data-testid=nav-${p}]`);
       await look(p);
     }
+    await click("[data-testid=nav-downloads]");
+    // Network usage (issue #45): "Today" / "This month" and the longest numbers fit the card at every window size.
+    const tight = [];
+    for (const [width, height] of [[1360, 860], [1100, 760], [900, 640], [760, 560], [640, 480]]) {
+      await h.cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      await sleep(250);
+      const bad = await ev(`(() => { const rows = [...document.querySelectorAll('[data-testid=network-period] > div')];
+        if (rows.length !== 2) return ['rows: ' + rows.length];
+        for (const dd of document.querySelectorAll('[data-testid=network-period] dd')) dd.textContent = '1023.9 MB';
+        const out = [];
+        for (const r of rows) { const dt = r.querySelector('dt'), dd = r.querySelector('dd');
+          if (dt.scrollWidth > dt.clientWidth + 1 || r.scrollWidth > r.clientWidth + 1 || dd.getBoundingClientRect().right > r.getBoundingClientRect().right + 1 || dd.getBoundingClientRect().left < r.getBoundingClientRect().left - 1) out.push(dt.textContent + ' ' + r.clientWidth); }
+        return out; })()`);
+      if (bad.length) tight.push(`${width}: ${bad.join(", ")}`);
+    }
+    await h.cdp.send("Emulation.clearDeviceMetricsOverride");
+    check(`${lang}: the Network usage card's today and month fit at every window size`, tight.length === 0, tight.join(" | "));
     // A failed download's details page (its error, the Doctor, the diagnostics).
     await click("[data-testid=nav-downloads]");
     await click(`[data-testid=download-${failed.id}]`);

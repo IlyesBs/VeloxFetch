@@ -770,3 +770,11 @@ Full rules: `docs/new-link-recovery.md` §6.
   tags. The owner checks the draft and publishes it.
 * **The pictures** come from the real app through a local proxy and example names: no address of the computer, no
   real site, no personal file.
+
+## Network usage (issue #45, October 2026)
+
+* The dashboard's network usage is kept in the database as one number of bytes per local day (`network_usage`,
+  schema v8): no link, host, file name or address, nothing sent. It belongs to no download, so deleting downloads or
+  the history keeps it (by design: it is how much the user's line was used).
+* Overflow-safe (saturating adds, `TOTAL` sums); saved off the async threads every 5 s and on close; a failed save
+  never blocks a download and keeps its bytes for the next one.

@@ -32,6 +32,7 @@ mod storage;
 mod sysio;
 mod tools;
 mod update;
+mod usage;
 
 pub use media::is_stream_link;
 use pending::PendingList;
@@ -118,6 +119,8 @@ struct Inner {
     events: broadcast::Sender<ManagerEvent>,
     /// Bytes received from the network since start (sum of per-download progress).
     session_bytes: AtomicU64,
+    /// Network usage, saved per day (`usage.rs`).
+    usage: usage::Usage,
     /// Ticks still to send after the last download stopped, so the UI settles on zeros.
     idle_ticks: AtomicU8,
     stats: Mutex<Stats>,
@@ -284,6 +287,7 @@ impl DownloadManager {
             finishing: Mutex::new(HashMap::new()),
             events,
             session_bytes: AtomicU64::new(0),
+            usage: Default::default(),
             idle_ticks: AtomicU8::new(0),
             stats: Mutex::new(Stats { dirty: true, ..Default::default() }),
             disk: Mutex::new(DiskStats::default()),
@@ -813,6 +817,8 @@ impl DownloadManager {
             let _ = tokio::time::timeout(Duration::from_secs(15), done.wait_for(|d| *d)).await;
         }
         self.stop_media().await;
+        // What the last seconds received (the downloads just paused, the videos just stopped).
+        self.save_usage(true).await;
     }
 
     // ---------------------------------------------------------------- internals
@@ -844,7 +850,7 @@ impl DownloadManager {
         let tracker = self.inner.trackers.lock().unwrap().remove(&id);
         let (last, peak) = tracker.map_or((0, 0), |t| (t.last_received, t.peak));
         if let Some(a) = &ended {
-            self.inner.session_bytes.fetch_add(a.progress.received().saturating_sub(last), Ordering::Relaxed);
+            self.count_received(a.progress.received().saturating_sub(last));
         }
         self.note_end(id, ended.as_ref().map(|a| &a.progress), peak, &res).await;
         self.update_keep_awake(); // the computer may sleep again as soon as nothing downloads
@@ -1023,7 +1029,7 @@ impl DownloadManager {
                 let dt = now.duration_since(t.last_at).as_secs_f64().max(1e-3);
                 let delta = snap.downloaded.saturating_sub(t.last_bytes);
                 let received = progress.received();
-                self.inner.session_bytes.fetch_add(received.saturating_sub(t.last_received), Ordering::Relaxed);
+                self.count_received(received.saturating_sub(t.last_received));
                 t.last_received = received;
                 let inst = delta as f64 / dt;
                 let cap = [own_limit, shared_cap].into_iter().flatten().min();
@@ -1097,6 +1103,8 @@ impl DownloadManager {
                 st.dirty = false;
             }
         }
+        self.save_usage(false).await;
+        let usage = self.network_usage_now();
         let reading = self.refresh_disk_in_background();
         let unknown = self.inner.disk.lock().unwrap().total.is_none();
         if let (true, true, Some(reading)) = (wait_for_disk, unknown, reading) {
@@ -1122,6 +1130,9 @@ impl DownloadManager {
             completed: count("completed"),
             total_downloaded: history_total + in_flight + media_held,
             session_downloaded: self.inner.session_bytes.load(Ordering::Relaxed),
+            network_total: usage.total,
+            network_today: usage.today,
+            network_month: usage.month,
             disk_free: disk.free,
             disk_total: disk.total,
             folder_bytes: disk.folder,

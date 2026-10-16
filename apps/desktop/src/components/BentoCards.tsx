@@ -141,11 +141,21 @@ export function BentoCards() {
           label={t("stat.network")}
           tone="violet"
           testId="tile-network"
-          value={<Amount text={formatBytes(m.sessionDownloaded)} />}
+          value={<Amount text={formatBytes(m.networkTotal)} testId="network-total" />}
           below={
-            <div className="spark-violet mt-auto">
-              <Sparkline values={history} label={t("bento.networkSub")} className="-mx-1 h-9 pt-2" />
-            </div>
+            <dl className="mt-auto space-y-0.5 pt-2 text-[12.5px] leading-[17px]" data-testid="network-period" title={t("bento.networkTip", { session: formatBytes(m.sessionDownloaded) })}>
+              {([
+                ["today", t("bento.networkToday"), m.networkToday],
+                ["month", t("bento.networkMonth"), m.networkMonth],
+              ] as const).map(([k, label, bytes]) => (
+                <div key={k} className="flex min-w-0 items-baseline justify-between gap-2">
+                  <dt className="min-w-0 truncate text-dim">{label}</dt>
+                  <dd className="num ltr shrink-0 whitespace-nowrap text-fg/85" data-testid={`network-${k}`}>
+                    {formatBytes(bytes)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           }
         />
         <Stat

@@ -299,6 +299,10 @@ export interface Metrics {
   completed: number;
   totalDownloaded: number;
   sessionDownloaded: number;
+  /** Network usage, kept across restarts, updates and reinstalls: ever, today, this month (issue #45). */
+  networkTotal: number;
+  networkToday: number;
+  networkMonth: number;
   diskFree: number | null;
   diskTotal: number | null;
   folderBytes: number | null;
