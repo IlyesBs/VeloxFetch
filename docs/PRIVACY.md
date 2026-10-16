@@ -50,3 +50,10 @@ When it is on, VeloxFetch looks at the **names** of the programs running on your
 the system shows and the file name of the program; its folder only if you listed a program by its full path), to slow or pause downloads while a game or a call
 from your list runs. Only the names are read (not what the programs do), they are compared with your list and
 forgotten; nothing is stored or sent anywhere.
+
+## The publisher's checksum (desktop app, on by default; Settings > Folders > File integrity)
+
+When a file downloads from an `https` link, VeloxFetch also asks **the same site** for the checksum list it may publish
+next to the file (`SHA256SUMS` and similar names), to check the file before it is finished. These few small requests go
+only to the site you are already downloading from, carry no cookie, sign-in or other personal data, and nothing about
+them is stored but the list's name and the checksum. Turn it off in Settings > Folders > File integrity.

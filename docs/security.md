@@ -801,3 +801,17 @@ Full rules: `docs/new-link-recovery.md` §6.
   the history keeps it (by design: it is how much the user's line was used).
 * Overflow-safe (saturating adds, `TOTAL` sums); saved off the async threads every 5 s and on close; a failed save
   never blocks a download and keeps its bytes for the next one.
+
+## The publisher's checksum (feature #6, October 2026)
+
+* The checksum list next to a file (`SHA256SUMS`, `<file>.sha256`…) is asked for over `https` only, on the file's own
+  host and port (a redirect elsewhere is ignored), through the protected client of every download, with **no cookie,
+  sign-in, referrer or custom header**, and never with the link's query (signatures, tokens). Fixed names only, at
+  most 1 MiB and 5 s each, 10 s in all; a folder's shared lists are asked once for all its files (a batch never floods
+  a site); nothing but the list's name and the digest is stored (in memory: 16 folders, 8 MiB at most).
+* It proves the transfer (a file damaged or cut short is never kept), not the publisher: the list comes from the same
+  site, so the interface says "matches the publisher's checksum", never "safe". Signatures are not checked or claimed.
+* Ambiguity never guesses (a name with two digests, md5 / sha1, a near name): no check, the file finishes as before.
+  The user's own checksum always wins. Plain http next to the local test servers only with the debug-only
+  `VELOX_PUBLISHER_HTTP` switch (release builds never read it).
+* Two new commands, `get_publisher_check` / `set_publisher_check` (a boolean), main window only.

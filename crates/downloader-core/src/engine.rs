@@ -14,7 +14,7 @@ use crate::adaptive::{AdaptiveConfig, AdaptiveController, AdaptiveGate, GatePerm
 use crate::disk::{self, PumpParams};
 use crate::error::{DownloadError, Result};
 use crate::filename::{choose_filename, sanitize_filename, web_page_instead_of_file};
-use crate::integrity::{self, Checksum};
+use crate::integrity::{self, Checksum, PublisherLookup};
 use crate::limiter::{RateLimits, Throttle, TokenBucket};
 use crate::planner;
 use crate::retry::{self, RetryPolicy};
@@ -111,6 +111,8 @@ pub struct DownloadOutcome {
     /// Continued from saved segments (false = started fresh, including a restart after the remote changed).
     pub resumed: bool,
     pub checksum_verified: bool,
+    /// Verified with the publisher's checksum: the list's name (`SHA256SUMS`).
+    pub publisher_list: Option<String>,
     pub info: ResourceInfo,
 }
 
@@ -145,6 +147,10 @@ pub enum RunEventKind {
     /// its completed segments were hashed again before being trusted. `invalid` ones were emptied and are
     /// downloaded again; `unhashed` ones (saved by an older version) could not be checked.
     Reverified { checked: usize, invalid: usize, unhashed: usize, invalid_bytes: u64 },
+    /// The file is being checked against a checksum: the publisher's (`publisher`: the list's name) or the user's.
+    Verifying { publisher: Option<String> },
+    /// The file matched that checksum.
+    Verified { publisher: Option<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -443,9 +449,34 @@ pub struct DownloadControl {
     priority: Arc<AtomicU8>,
     /// Preview mode: fetch the start and the very end first (players need both), then in order.
     preview: Arc<std::sync::atomic::AtomicBool>,
+    /// The publisher's checksum, looked up while the file downloads (see [`set_publisher`](Self::set_publisher)).
+    publisher: Arc<Mutex<Option<tokio::sync::watch::Receiver<PublisherLookup>>>>,
 }
 
 const NO_PRIORITY: u8 = u8::MAX;
+
+/// How long a finished transfer waits for the publisher's checksum still being looked up (the lookup itself is
+/// bounded by the caller; this only guards against one that never answers).
+pub const PUBLISHER_WAIT: Duration = Duration::from_secs(20);
+
+/// The publisher's checksum for this run, once its lookup answered: `Err` when the download was paused or cancelled
+/// meanwhile.
+async fn publisher_checksum(control: &DownloadControl, cancel: &CancellationToken) -> std::result::Result<Option<(Checksum, String)>, ()> {
+    let Some(mut rx) = control.publisher() else { return Ok(None) };
+    let answer = async {
+        match tokio::time::timeout(PUBLISHER_WAIT, rx.wait_for(|l| *l != PublisherLookup::Looking)).await {
+            Ok(Ok(l)) => match &*l {
+                PublisherLookup::Found { checksum, list } => Some((checksum.clone(), list.clone())),
+                _ => None,
+            },
+            _ => None,
+        }
+    };
+    tokio::select! {
+        _ = cancel.cancelled() => Err(()),
+        found = answer => Ok(found),
+    }
+}
 
 impl Default for DownloadControl {
     fn default() -> Self {
@@ -455,6 +486,7 @@ impl Default for DownloadControl {
             limiter: TokenBucket::new(None),
             priority: Arc::new(AtomicU8::new(NO_PRIORITY)),
             preview: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            publisher: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -498,6 +530,17 @@ impl DownloadControl {
 
     pub fn preview(&self) -> bool {
         self.preview.load(Ordering::Relaxed)
+    }
+
+    /// The publisher's checksum is being looked up (by the caller, while the file downloads): before finishing a
+    /// download that has no checksum of its own, the engine waits for the answer (at most [`PUBLISHER_WAIT`]) and
+    /// checks the file against what was found.
+    pub fn set_publisher(&self, lookup: tokio::sync::watch::Receiver<PublisherLookup>) {
+        *self.publisher.lock().unwrap() = Some(lookup);
+    }
+
+    fn publisher(&self) -> Option<tokio::sync::watch::Receiver<PublisherLookup>> {
+        self.publisher.lock().unwrap().clone()
     }
 
     /// Record a priority change for a running download so checkpoints keep it.
@@ -1059,6 +1102,7 @@ impl Downloader {
                     server: None,
                     request_headers: Vec::new(),
                     part_stamp: None,
+                    checksum_source: None,
                 };
                 (self.plan_fresh(rec, &info).await?, false)
             }
@@ -1072,6 +1116,13 @@ impl Downloader {
         self.confine(&rec.destination)?;
         let expected_checksum = match (&req.expected_checksum, &rec.checksum) {
             (Some(c), _) => Some(c.clone()),
+            // The publisher's checksum of an earlier run (downloaded again): looked up again, the file may have
+            // a new version now.
+            (None, Some(_)) if rec.checksum_source.is_some() => {
+                rec.checksum = None;
+                rec.checksum_source = None;
+                None
+            }
             (None, Some(s)) => Some(Checksum::parse(s).map_err(DownloadError::InvalidRequest)?),
             _ => None,
         };
@@ -1197,12 +1248,45 @@ impl Downloader {
             _name_claim = Some(claim);
         }
         self.persist(&mut rec).await?;
-        let verified = self.finalize(&part, &rec, size, expected_checksum.as_ref()).await;
+        // No checksum of its own: the publisher's, when one was found next to the file (feature #6).
+        let mut publisher_list = None;
+        let expected_checksum = match expected_checksum {
+            Some(c) => Some(c),
+            None => match publisher_checksum(&control, &cancel).await {
+                Ok(Some((c, list))) => {
+                    publisher_list = Some(list);
+                    Some(c)
+                }
+                Ok(None) => None,
+                Err(()) => {
+                    rec.status = DownloadStatus::Downloading;
+                    return Err(self.on_stop(&control, &mut rec).await);
+                }
+            },
+        };
+        if expected_checksum.is_some() {
+            progress.note(RunEventKind::Verifying { publisher: publisher_list.clone() });
+        }
+        let verified = match self.finalize(&part, &rec, size, expected_checksum.as_ref()).await {
+            Err(DownloadError::ChecksumMismatch { expected, actual }) if publisher_list.is_some() => Err(DownloadError::ChecksumMismatch {
+                expected: format!("the publisher's checksum in {} ({expected})", publisher_list.as_deref().unwrap_or_default()),
+                actual,
+            }),
+            other => other,
+        };
         if let Err(e) = verified {
             rec.status = DownloadStatus::Failed;
             rec.last_error = Some(e.to_string());
             let _ = self.persist(&mut rec).await;
             return Err(e);
+        }
+        if expected_checksum.is_some() {
+            progress.note(RunEventKind::Verified { publisher: publisher_list.clone() });
+        }
+        if let (Some(c), Some(list)) = (&expected_checksum, &publisher_list) {
+            // Kept with the download and its history line: proven by the publisher's list.
+            rec.checksum = Some(c.to_string());
+            rec.checksum_source = Some(format!("publisher:{list}"));
         }
         rec.status = DownloadStatus::Completed;
         rec.request_headers.clear(); // done: the cookies are of no further use
@@ -1221,6 +1305,7 @@ impl Downloader {
             parallel,
             resumed,
             checksum_verified: expected_checksum.is_some(),
+            publisher_list,
             info,
         })
     }
@@ -2442,6 +2527,47 @@ mod capped_tests {
 #[cfg(test)]
 mod event_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_publishers_checksum_is_waited_for_but_a_pause_wins() {
+        let ck = Checksum::parse(&format!("sha256:{}", "a".repeat(64))).unwrap();
+        // No lookup: nothing to wait for.
+        let c = DownloadControl::new();
+        assert_eq!(publisher_checksum(&c, c.token()).await, Ok(None));
+        // Found while waiting.
+        let (tx, rx) = tokio::sync::watch::channel(PublisherLookup::Looking);
+        c.set_publisher(rx);
+        let later = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            tx.send(PublisherLookup::Found {
+                checksum: Checksum::parse(&format!("sha256:{}", "a".repeat(64))).unwrap(),
+                list: "SHA256SUMS".into(),
+            })
+            .unwrap();
+        });
+        assert_eq!(publisher_checksum(&c, c.token()).await, Ok(Some((ck, "SHA256SUMS".to_string()))));
+        later.await.unwrap();
+        // Nothing found.
+        let c = DownloadControl::new();
+        let (tx, rx) = tokio::sync::watch::channel(PublisherLookup::Looking);
+        c.set_publisher(rx);
+        tx.send(PublisherLookup::None).unwrap();
+        assert_eq!(publisher_checksum(&c, c.token()).await, Ok(None));
+        // Paused while still looking: stops at once.
+        let c = DownloadControl::new();
+        let (_tx, rx) = tokio::sync::watch::channel(PublisherLookup::Looking);
+        c.set_publisher(rx);
+        c.pause();
+        let t = Instant::now();
+        assert_eq!(publisher_checksum(&c, c.token()).await, Err(()));
+        assert!(t.elapsed() < Duration::from_secs(1));
+        // The lookup went away without answering: no checksum, no wait.
+        let c = DownloadControl::new();
+        let (tx, rx) = tokio::sync::watch::channel(PublisherLookup::Looking);
+        c.set_publisher(rx);
+        drop(tx);
+        assert_eq!(publisher_checksum(&c, c.token()).await, Ok(None));
+    }
 
     #[test]
     fn a_flood_of_retries_never_pushes_out_the_runs_milestones() {

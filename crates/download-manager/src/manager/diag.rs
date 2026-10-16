@@ -158,6 +158,10 @@ fn describe(kind: &RunEventKind) -> (&'static str, String) {
                 human_bytes(*invalid_bytes)
             ),
         ),
+        RunEventKind::Verifying { publisher: Some(list) } => ("info", format!("Checking the file against the publisher's checksum ({list})")),
+        RunEventKind::Verifying { publisher: None } => ("info", "Checking the file against the checksum you gave".to_string()),
+        RunEventKind::Verified { publisher: Some(list) } => ("info", format!("The file matches the publisher's checksum ({list})")),
+        RunEventKind::Verified { publisher: None } => ("info", "The file matches the checksum you gave".to_string()),
     }
 }
 

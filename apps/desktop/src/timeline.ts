@@ -92,6 +92,10 @@ const RULES: Rule[] = [
   [/^New transfer over one connection$/, () => t("tl.plannedOne")],
   [/^The name was taken meanwhile: saved as (.+)$/, (m) => t("tl.renamed", { name: m[1]! })],
   [/^The server is preparing the file \(it answers when it is ready\): waiting for it$/, () => t("tl.waiting")],
+  [/^Checking the file against the publisher's checksum \((.+)\)$/, (m) => t("tl.verifyingPublisher", { list: m[1]! })],
+  [/^Checking the file against the checksum you gave$/, () => t("tl.verifyingYou")],
+  [/^The file matches the publisher's checksum \((.+)\)$/, (m) => t("tl.verifiedPublisher", { list: m[1]! })],
+  [/^The file matches the checksum you gave$/, () => t("tl.verifiedYou")],
   [
     /^The saved part changed since it was last saved \(a crash or an outside change\): (\d+) finished parts checked again, all intact(?:; (\d+) older parts could not be checked)?$/,
     (m) => t("tl.reverifiedOk", { n: m[1]! }) + (m[2] ? ` ${t("tl.reverifiedOld", { n: m[2] })}` : ""),

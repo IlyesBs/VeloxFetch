@@ -57,6 +57,19 @@ export interface Download {
   fileMissing?: boolean;
   /** Failed because of the network or a server's passing trouble: tried again on its own. */
   autoRetry?: AutoRetry | null;
+  /** Integrity check (feature #6): the checksum the file is (or was) checked against. */
+  verify?: Verify | null;
+}
+
+/** A file's integrity check: the publisher's checksum list found next to it on the site, or the user's own. */
+export interface Verify {
+  /** looking: the publisher's list is being looked for; ready: checked before it is finished; verified: it matched. */
+  state: "looking" | "ready" | "verified";
+  by: "publisher" | "you" | null;
+  /** "SHA-256" / "SHA-512". */
+  algo: string | null;
+  /** The publisher's list's name ("SHA256SUMS"), never its address. */
+  list: string | null;
 }
 
 /** When a failed download is tried again on its own (crates/download-manager/src/manager/recovery.rs). */
@@ -273,6 +286,8 @@ export interface HistoryEntry {
   kind: FileKind;
   /** The file is still where it was saved. */
   exists: boolean;
+  /** Proven by a checksum (feature #6). */
+  verify?: Verify | null;
 }
 
 /** A saved file to show or open: a download of the list or a history line (by id, never by path). */
@@ -597,6 +612,8 @@ export interface Analysis {
   /** Most serious first. */
   findings: Finding[];
   errorCode: string | null;
+  /** The publisher's checksum list was found next to the file: it will be checked against it (feature #6). */
+  publisherChecksum?: { list: string; algo: string } | null;
 }
 
 /** Batch downloads (a list of links, or a pattern like https://host/file_[001-100].zip). */

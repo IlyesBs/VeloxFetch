@@ -16,6 +16,7 @@ import { canOpen, kindLabel } from "./FileIcon";
 import { DeleteConfirm } from "./DeleteConfirm";
 import { SignInDialog } from "./SignInDialog";
 import { ThreadMatrix } from "./ThreadMatrix";
+import { VerifyBadge } from "./VerifyBadge";
 
 /** The one primary button a download offers in its current state. `round`: the card's circular style. */
 export function PrimaryAction({ d, compact = false, round = false, onSignIn }: { d: Download; compact?: boolean; round?: boolean; onSignIn?: () => void }) {
@@ -216,6 +217,7 @@ export const DownloadCard = memo(function DownloadCard({ id, onOpen, density = "
               </span>
             )}
             {!running && !done && <StatusChip status={d.status} />}
+            <VerifyBadge verify={d.verify} />
             {d.status === "queued" && <span>{t(d.idle ? "card.notStarted" : "card.waitingSlot")}</span>}
             <span className="num ltr">
               {formatBytes(done ? (d.totalSize ?? d.downloaded) : d.downloaded)}

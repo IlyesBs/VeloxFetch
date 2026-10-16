@@ -520,7 +520,7 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. The same with the network unplugged at resume: it fails ("Retry" offered) and still shows about 30 %; plug the
    network back in, Retry: it continues from there.
 
-## AN. Network usage kept (issue #45; once per OS and installation kind)
+## AQ. Network usage kept (issue #45; once per OS and installation kind)
 1. Download a few files. The dashboard's **Network usage** card shows a total and two rows, "Today" and "This
    month", whose numbers are never cut (also in a small window and in every language); hovering it shows what was
    received since launch.
@@ -529,6 +529,15 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
    same, and grows again with the next download.
 4. The next day, "Today" starts again from 0 while the total and the month keep their bytes (the month from 0 on the
    1st).
+
+## AP. The publisher's checksum (feature #6; once per OS)
+1. Add `https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.tar.xz` and press Check link: the Integrity row says
+   "Publisher's checksum found (sha256sums.asc, SHA-256)". Download it: the card says "Will be verified", then a green
+   "Verified"; Completed and History too; the details page's Integrity card names the list and shows the digest.
+2. A Debian image from `https://mirrors.edge.kernel.org/debian-cd/current/amd64/iso-cd/`: verified with SHA512SUMS.
+3. A file with no list next to it (any ordinary site): finished as before, the details say "Not verified".
+4. Settings › Folders › File integrity off: the next download is not looked at; on again.
+5. In every language and at the smallest window (640×480) the badges fit (only the shield in a tight row).
 
 ## AL. Publishing a release (owner, once per release)
 1. `bash scripts/publish-release.sh --key <drive>/update-signing-key.json --merge <Windows release> --merge <macOS

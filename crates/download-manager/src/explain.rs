@@ -118,6 +118,13 @@ fn classify(raw: &str) -> (String, Option<Needs>, String) {
             "web_page",
         );
     }
+    if lower.contains("checksum mismatch") && lower.contains("publisher's checksum") {
+        return say(
+            "The file arrived damaged: it does not match the checksum its publisher lists next to it, so it was not kept. Retry downloads it again.",
+            None,
+            "publisher_checksum_mismatch",
+        );
+    }
     if lower.contains("checksum mismatch") {
         return say("The file is not the one expected: its checksum does not match, so it was not kept.", None, "checksum_mismatch");
     }
@@ -213,6 +220,10 @@ mod tests {
         assert_eq!(error_code("request failed: error sending request for url (https://x.test/)"), "connection");
         assert_eq!(error_code("the server stopped sending"), "timeout");
         assert_eq!(error_code("checksum mismatch: expected a, got b"), "checksum_mismatch");
+        assert_eq!(
+            error_code("checksum mismatch: expected the publisher's checksum in SHA256SUMS (sha256:aa), got sha256:bb"),
+            "publisher_checksum_mismatch"
+        );
         assert_eq!(
             error_code("the file changed on the server during the download: Content-Range total Some(5), expected 4"),
             "source_changed"

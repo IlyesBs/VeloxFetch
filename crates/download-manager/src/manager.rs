@@ -27,6 +27,7 @@ pub(crate) use recovery::{DELAYS as RECOVERY_DELAYS, MAX_TRIES as RECOVERY_MAX_T
 mod pending;
 mod preview;
 mod profiles;
+mod publisher;
 mod queue;
 mod queues;
 mod relink;
@@ -124,6 +125,8 @@ struct Inner {
     session_bytes: AtomicU64,
     /// Network usage, saved per day (`usage.rs`).
     usage: usage::Usage,
+    /// The publisher's checksum lookups (`publisher.rs`).
+    publisher: publisher::Lookups,
     /// Ticks still to send after the last download stopped, so the UI settles on zeros.
     idle_ticks: AtomicU8,
     stats: Mutex<Stats>,
@@ -296,6 +299,7 @@ impl DownloadManager {
             events,
             session_bytes: AtomicU64::new(0),
             usage: Default::default(),
+            publisher: Default::default(),
             idle_ticks: AtomicU8::new(0),
             stats: Mutex::new(Stats { dirty: true, ..Default::default() }),
             disk: Mutex::new(DiskStats::default()),
@@ -453,6 +457,7 @@ impl DownloadManager {
             server: None,
             request_headers,
             part_stamp: None,
+            checksum_source: None,
         };
         let id = self.save(&rec).await?;
         self.place_new(id, req.queue_id, start_at).await;
@@ -527,6 +532,7 @@ impl DownloadManager {
             return Err(e);
         }
         self.policy_for_new_run(id, rec.priority);
+        self.look_for_publisher_checksum(id, &rec, &control, &progress);
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Updated { download: dto.clone() });
         self.note_start(id, previous).await;
@@ -815,6 +821,7 @@ impl DownloadManager {
                 size: h.size,
                 outcome: h.outcome,
                 finished_at: h.finished_at,
+                verify: h.verified.as_deref().map(|v| VerifyDto::from_source("verified", None, (v != "user").then_some(v))),
             })
             .collect())
     }
@@ -871,6 +878,7 @@ impl DownloadManager {
             ended
         };
         let tracker = self.inner.trackers.lock().unwrap().remove(&id);
+        self.forget_publisher_lookup(id);
         let (last, peak) = tracker.map_or((0, 0), |t| (t.last_received, t.peak));
         if let Some(a) = &ended {
             self.count_received(a.progress.received().saturating_sub(last));
@@ -1002,6 +1010,28 @@ impl DownloadManager {
             // A link counts as present (never followed); only an absent path is "missing".
             file_missing: rec.status == DownloadStatus::Completed && std::fs::symlink_metadata(&rec.destination).is_err(),
             auto_retry,
+            verify: self.verify_of(rec, running),
+        }
+    }
+
+    /// What the card says about the file's integrity (feature #6).
+    fn verify_of(&self, rec: &DownloadRecord, running: bool) -> Option<VerifyDto> {
+        let own = || VerifyDto::from_source("ready", rec.checksum.as_deref(), None);
+        match rec.status {
+            DownloadStatus::Completed => {
+                rec.checksum.as_ref().map(|c| VerifyDto::from_source("verified", Some(c), rec.checksum_source.as_deref()))
+            }
+            _ if rec.checksum.is_some() && rec.checksum_source.is_none() => Some(own()),
+            _ if running => match self.publisher_lookup_of(rec.id.unwrap_or_default())? {
+                downloader_core::PublisherLookup::Looking => {
+                    Some(VerifyDto { state: "looking".into(), by: Some("publisher".into()), algo: None, list: None })
+                }
+                downloader_core::PublisherLookup::Found { checksum, list } => {
+                    Some(VerifyDto::from_source("ready", Some(&checksum.to_string()), Some(&format!("publisher:{list}"))))
+                }
+                downloader_core::PublisherLookup::None => None,
+            },
+            _ => None,
         }
     }
 

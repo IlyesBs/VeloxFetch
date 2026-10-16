@@ -537,6 +537,7 @@ fn db(args: &Args) {
         server: None,
         request_headers: Vec::new(),
         part_stamp: None,
+        checksum_source: None,
     };
     rec.id = Some(store.save(&rec).unwrap());
     let mut times = Vec::with_capacity(saves);

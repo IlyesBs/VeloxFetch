@@ -167,6 +167,35 @@ pub struct DownloadDto {
     pub file_missing: bool,
     /// Failed because of the network or a server's passing trouble: it is tried again on its own (`recovery.rs`).
     pub auto_retry: Option<AutoRetryDto>,
+    /// Integrity (feature #6): the checksum it is (or was) checked against, and by whom. `None`: no checksum.
+    pub verify: Option<VerifyDto>,
+}
+
+/// A download's integrity check, for its card, the Completed list and the details page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyDto {
+    /// `looking` (the publisher's list is being looked for), `ready` (a checksum is known: the file is checked
+    /// before it is finished) or `verified` (finished, and it matched).
+    pub state: String,
+    /// `publisher` (the list next to the file on the site) or `you` (a checksum given when it was added).
+    pub by: Option<String>,
+    /// `SHA-256` / `SHA-512`.
+    pub algo: Option<String>,
+    /// The publisher's list's name (`SHA256SUMS`), never its address.
+    pub list: Option<String>,
+}
+
+impl VerifyDto {
+    /// From a stored checksum (`sha256:<hex>`) and where it came from (`None` the user, `publisher:<list>`).
+    pub fn from_source(state: &str, checksum: Option<&str>, source: Option<&str>) -> Self {
+        let algo = checksum
+            .and_then(|c| c.split_once(':'))
+            .map(|(a, _)| if a.eq_ignore_ascii_case("sha512") { "SHA-512" } else { "SHA-256" }.to_string());
+        let list = source.and_then(|s| s.strip_prefix("publisher:")).map(str::to_string);
+        let by = Some(if source.is_some_and(|s| s.starts_with("publisher")) { "publisher" } else { "you" }.to_string());
+        Self { state: state.to_string(), by, algo, list }
+    }
 }
 
 /// When a failed download is tried again on its own.
@@ -230,6 +259,8 @@ pub struct HistoryDto {
     pub kind: downloader_core::FileKind,
     /// The file is still where it was saved.
     pub exists: bool,
+    /// Proven by a checksum (feature #6): `None` when it was not.
+    pub verify: Option<VerifyDto>,
 }
 
 /// A saved file to show in its folder or open: a download of the list, or a line of the history.
@@ -1355,6 +1386,9 @@ pub struct ManagerConfig {
     /// Tests only: these networks instead of the computer's for "several networks at once" (`multinet.rs`; the
     /// first is the main one).
     pub test_networks: Option<Vec<http_client::RouteSpec>>,
+    /// Tests only: the publisher's checksum is looked for next to plain `http` links too (the test servers are
+    /// local, plain http). Never set by a release build: there, `https` links only.
+    pub publisher_over_http: bool,
 }
 
 impl ManagerConfig {
@@ -1385,6 +1419,7 @@ impl ManagerConfig {
             recovery_delays: crate::manager::RECOVERY_DELAYS.to_vec(),
             recovery_max_tries: crate::manager::RECOVERY_MAX_TRIES,
             test_networks: None,
+            publisher_over_http: false,
         }
     }
 }

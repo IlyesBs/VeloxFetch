@@ -25,7 +25,7 @@ pub use engine::{
 pub use error::{DownloadError, Result};
 pub use filetype::{classify as classify_file, FileKind};
 pub use http_client::{BasicAuth, ClientConfig, ResourceInfo};
-pub use integrity::{Checksum, HashAlgo};
+pub use integrity::{find_in_list, Checksum, HashAlgo, PublisherLookup};
 pub use limiter::{RateLimits, Throttle, TokenBucket};
 pub use retry::{classify, ErrorClass, RetryPolicy};
 pub use scheduler::{Priority, SlotGuard, SlotScheduler};

@@ -1202,6 +1202,7 @@ dependencies = [
  "http-client",
  "media-engine",
  "path-safety",
+ "percent-encoding",
  "persistence",
  "scheduler",
  "secrets",

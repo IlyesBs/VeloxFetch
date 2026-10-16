@@ -18,6 +18,7 @@ import { SpeedSettings } from "../components/SpeedSettings";
 import { StorageSettings } from "../components/StorageSettings";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { VideoToolsSettings } from "../components/VideoToolsSettings";
+import { IntegritySettings } from "../components/IntegritySettings";
 
 const THEMES: { pref: ThemePref; label: Key; icon: IconName }[] = [
   { pref: "system", label: "theme.system", icon: "gauge" },
@@ -148,6 +149,7 @@ export function SettingsView() {
 
         <Group id="set-folders">
           <StorageSettings />
+          <IntegritySettings />
         </Group>
 
         <Group id="set-speed">

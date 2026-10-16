@@ -85,6 +85,13 @@ manifest, a README with screenshots). The app updates from there. Details: `docs
 - **Crash-safe:** the progress is saved every 500 ms, in a safe order. After a crash or a power cut, the
   download continues from the bytes that really reached the disk.
 - **Integrity:** an optional SHA-256 / SHA-512 checksum is checked at the end.
+- **The publisher's checksum** (feature #6, `docs/publisher-checksum.md`): the checksum list a site publishes next to
+  its file (`SHA256SUMS`, `SHA512SUMS`, `sha256sums.asc`, `<file>.sha256`…) is found by itself while the file
+  downloads, and the file is checked against it before it is finished; one that does not match is never kept ("arrived
+  damaged", Retry). The Add dialog says it beforehand ("Publisher's checksum found"), the card says "Will be verified"
+  then a green "Verified", as do Completed, the History and the details page's Integrity card. https only, the same
+  site, no cookie or sign-in sent; it proves the file arrived whole, not that the site is honest. On by default
+  (Settings › Folders › File integrity).
 - **Speed limits:** global, per kind of file (video, ISO…) and per download, all changeable while running.
 - **Clear errors:** each failure gets a plain sentence plus "what you can do" (sign in, free space, choose a folder).
 - **Download Doctor** (details in `docs/download-doctor.md`): when a download fails, the detail view says:
@@ -650,6 +657,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Download Intelligence | nothing: each check lives in memory only and is dropped when the dialog is answered or closed |
 | Download Doctor | the last diagnosis of each download, inside its saved diagnostics (SQLite `diagnostics` table, JSON); a copy in memory for the list |
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
+| The publisher's checksum | same file: the checksum and its source with the download (`checksum_source`), how each finished file was proven in the history (`verified`); answers of the last 10 minutes in memory only |
 | Network usage | same file: bytes received per local day in the `network_usage` table (numbers only) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
@@ -859,6 +867,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
+| The publisher's checksum (SHA256SUMS found next to the file) | `docs/publisher-checksum.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -873,6 +882,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-16 | `feat_publisher_checksum` | Feature | #6 of the feature list: the publisher's checksum. The list a site publishes next to its file (SHA256SUMS, SHA512SUMS, sha256sums.asc, `<file>.sha256`…) is found while the file downloads (a handful of small requests at once, https, same site, no cookie or sign-in, 10 s at most) and the file is checked against it before it is finished; a damaged one is never kept. Shown in the Add dialog, on the card (Will be verified / Verified), in Completed, the History and the details page (Integrity card); Settings › Folders › File integrity (on by default). Schema v9 (v2.0.0). 8 languages. Real: the Linux kernel (sha256sums.asc) and a Debian image (SHA512SUMS) verified. | `docs/publisher-checksum.md` |
 | 2026-10-16 | `port_network_usage_v2` (from `main`, `fix_network_usage_history`) | Fix | Issue #45, brought to v2.0.0 (texts in all 8 languages): the dashboard's Network usage went back to 0 after a restart, an update, a reinstall or deleting the downloads (it counted only since launch). Every byte received is now saved per local day (schema v8, `network_usage`; every 5 s and on close); the card shows the total ever, today and this month; deleting downloads or clearing the history keeps it. Tests: persistence, unit, integration (restart on the next day of the next month), e2e +4. | `docs/network-usage.md` |
 | 2026-10-15 | `fix_smart_held_status` | Fix | While several networks at once holds Smart throttle off, its status line (under the sidebar's gauge, in Settings, the status bar's tooltip) said only "Off · downloads use full speed" — the reason was in a tooltip. It now says "Off · several networks at once" (`throttleStatus`, key `thr.heldByNetworks`, one line like the other states; the controls' tooltip keeps the whole sentence), in all 8 languages. Tests: `throttle.test.ts` (+3 expectations), `desktop-multinet.mjs` 34 → 37 (the line and the greyed level buttons while on, back after), `real-multinet.mjs` 20 → 21. | `docs/several-networks.md` |
 | 2026-10-15 | `port_smart_throttle_v2` (from `main`, `fix_smart_throttle_probe`) | Fix | Issue #46, brought to v2.0.0 (texts in all 8 languages; several networks at once still holds it off, and the level buttons and radios are greyed out meanwhile): Smart throttle never saw a 4K YouTube video next to a download (64 connections starve it: 0.18 MB/s), counted someone watching without touching the mouse as away, and its modes changed nothing. Three levels: Fast (full speed), Smart (automatic: short checks at half speed find a starved program; a video counts without input; more room for a hungry program), Manual (Aggressive / Balanced / Performance all the time). Linux: VeloxFetch's own receive-buffer bytes subtracted from the measurement. The Fast profile holds Smart throttle off and lifts the speed limit. Real line: video found in 36 s, 0.18 -> 1.49 MB/s, full speed 29 s after. | `docs/smart-throttle-and-preview.md` |

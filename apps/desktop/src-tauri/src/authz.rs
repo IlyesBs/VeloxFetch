@@ -68,6 +68,8 @@ pub enum Command {
     SetNetwork,
     GetMultiNetwork,
     SetMultiNetwork,
+    GetPublisherCheck,
+    SetPublisherCheck,
     SetDownloadCredentials,
     ShowInFolder,
     OpenFile,
@@ -106,7 +108,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 90] = [
+    pub const ALL: [Command; 92] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -163,6 +165,8 @@ impl Command {
         Command::SetNetwork,
         Command::GetMultiNetwork,
         Command::SetMultiNetwork,
+        Command::GetPublisherCheck,
+        Command::SetPublisherCheck,
         Command::SetDownloadCredentials,
         Command::ShowInFolder,
         Command::OpenFile,
@@ -258,6 +262,8 @@ impl Command {
             Command::SetNetwork => "set_network",
             Command::GetMultiNetwork => "get_multi_network",
             Command::SetMultiNetwork => "set_multi_network",
+            Command::GetPublisherCheck => "get_publisher_check",
+            Command::SetPublisherCheck => "set_publisher_check",
             Command::SetDownloadCredentials => "set_download_credentials",
             Command::ShowInFolder => "show_in_folder",
             Command::OpenFile => "open_file",
@@ -413,6 +419,8 @@ mod tests {
             Command::SetNetwork,
             Command::GetMultiNetwork,
             Command::SetMultiNetwork,
+            Command::GetPublisherCheck,
+            Command::SetPublisherCheck,
             Command::SetDownloadCredentials,
             Command::ShowInFolder,
             Command::OpenFile,

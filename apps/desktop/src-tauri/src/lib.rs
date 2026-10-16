@@ -273,6 +273,8 @@ command!(get_network, GetNetwork, () -> NetworkDto, |m| async { Ok::<_, download
 command!(set_network, SetNetwork, (request: SetNetwork) -> NetworkDto, |m| m.set_network(request));
 command!(get_multi_network, GetMultiNetwork, () -> MultiNetworkDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_multi_network().await) });
 command!(set_multi_network, SetMultiNetwork, (request: SetMultiNetwork) -> MultiNetworkDto, |m| m.set_multi_network(request));
+command!(get_publisher_check, GetPublisherCheck, () -> bool, |m| async { Ok::<_, download_manager::ManagerError>(m.publisher_check()) });
+command!(set_publisher_check, SetPublisherCheck, (enabled: bool) -> bool, |m| m.set_publisher_check(enabled));
 command!(get_speed_limits, GetSpeedLimits, () -> SpeedLimitsDto, |m| async { Ok::<_, download_manager::ManagerError>(m.speed_limits()) });
 command!(
     set_download_credentials,
@@ -564,6 +566,10 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
             .collect();
         cfg.client.spread_any_link = true;
         cfg.test_networks = Some(nets);
+    }
+    // The publisher's checksum next to plain http links (the test servers are local, plain http). Debug builds only.
+    if dev_only("VELOX_PUBLISHER_HTTP").is_some() {
+        cfg.publisher_over_http = true;
     }
     if let Some(secs) = std::env::var("VELOX_POWER_GRACE_SECS").ok().and_then(|v| v.parse::<u64>().ok()) {
         cfg.power_grace = std::time::Duration::from_secs(secs);
@@ -1055,6 +1061,8 @@ pub fn run() {
             set_network,
             get_multi_network,
             set_multi_network,
+            get_publisher_check,
+            set_publisher_check,
             set_download_credentials,
             show_in_folder,
             open_file,
