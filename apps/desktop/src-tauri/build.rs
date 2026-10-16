@@ -61,6 +61,8 @@ const COMMANDS: &[&str] = &[
     "set_network",
     "get_multi_network",
     "set_multi_network",
+    "get_publisher_check",
+    "set_publisher_check",
     "set_download_credentials",
     "show_in_folder",
     "open_file",

@@ -67,6 +67,8 @@
     "allow-set-network",
     "allow-get-multi-network",
     "allow-set-multi-network",
+    "allow-get-publisher-check",
+    "allow-set-publisher-check",
     "allow-set-download-credentials",
     "allow-show-in-folder",
     "allow-open-file",

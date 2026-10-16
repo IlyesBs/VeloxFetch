@@ -729,6 +729,44 @@ test("Download Intelligence: main window only, a link only, read-only, one quick
   assert.match(pending, /task\.abort\(\); \/\/ answered/);
 });
 
+test("the publisher's checksum: main window only, https next to the file, no cookie or sign-in, bounded, never called safe", () => {
+  const lookup = withoutTestModules(read("crates", "download-manager", "src", "manager", "publisher.rs"));
+  const lists = withoutTestModules(read("crates", "downloader-core", "src", "integrity.rs"));
+  const app = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  // The switch is the main window's only.
+  for (const c of ["get_publisher_check", "set_publisher_check"]) {
+    assert.match(read("apps", "desktop", "src-tauri", "build.rs"), new RegExp(`"${c}"`));
+    assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), new RegExp(`"allow-${c.replaceAll("_", "-")}"`));
+    for (const other of ["download-window.json", "settings-window.json"]) {
+      assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes(c.replaceAll("_", "-")), `${c} not in ${other}`);
+    }
+  }
+  // https only; plain http only through the debug-only test switch (a release never reads it).
+  assert.match(lookup, /url\.scheme\(\) == "https" \|\| over_http && url\.scheme\(\) == "http"/);
+  assert.match(read("crates", "download-manager", "src", "api.rs"), /publisher_over_http: false,/);
+  assert.match(app, /if dev_only\("VELOX_PUBLISHER_HTTP"\)\.is_some\(\) \{\s*cfg\.publisher_over_http = true;/);
+  assert.equal((app.match(/publisher_over_http/g) ?? []).length, 1, "set in one place only");
+  // The lists: the protected client, a plain GET (no cookie, sign-in, referrer or header), the same host, never the
+  // link's query, bounded in size and time.
+  assert.match(lookup, /self\.media_client\(\)\.get\(url\)/);
+  const code = lookup.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  assert.ok(!/get_with|RequestExtras|cookie|authorization|referer|header\(/i.test(code.replace(/headers\(\)\.get\("content-type"\)/, "")), "nothing private goes with a list");
+  assert.match(lookup, /folder\.set_query\(None\);/);
+  assert.match(lookup, /resp\.url\(\)\.host_str\(\) != url\.host_str\(\)/);
+  assert.match(lookup, /const MAX_LIST: usize = 1024 \* 1024;/);
+  assert.match(lookup, /tokio::time::timeout\(LOOKUP_BUDGET, self\.ask_lists\(url\)\)/);
+  assert.match(lookup, /tokio::time::timeout\(LIST_TIMEOUT, read\)/);
+  assert.match(lists, /take\(MAX_LIST_LINES\)/);
+  // Nothing is written but the setting; the list's address is never logged or kept.
+  assert.ok(!/OpenOptions|File::create|fs::write|remove_file|rename\(|create_dir/.test(lookup), "the lookup writes no file");
+  assert.ok(!/tracing::[a-z]+!\([^;]*url/.test(lookup), "no address in the log");
+  // Never "safe": the interface says what it proves.
+  const en = JSON.parse(read("apps", "desktop", "src", "locales", "en.json"));
+  const texts = Object.entries(en).filter(([k]) => k.startsWith("verify.")).map(([, v]) => v);
+  assert.ok(texts.length > 10 && texts.every((t) => !/\bsafe\b/i.test(t)), "never called safe");
+  assert.match(en["verify.setLimit"], /not that the site can be trusted/);
+});
+
 test("Download Doctor: diagnoses only, never retries or writes by itself, no error text or secret kept", () => {
   const rules = withoutTestModules(read("crates", "download-manager", "src", "doctor.rs"));
   const glue = withoutTestModules(read("crates", "download-manager", "src", "manager", "doctor.rs"));

@@ -132,6 +132,9 @@ export const api = {
   checkDuplicate: (url: string, checksum?: string) => call<DuplicateMatch | null>("check_duplicate", { request: { url, ...(checksum && { checksum }) } }),
   getClipboardWatch: () => call<ClipboardState>("get_clipboard_watch"),
   setClipboardWatch: (enabled: boolean) => call<ClipboardState>("set_clipboard_watch", { enabled }),
+  /** Look for the publisher's checksum next to each file and check the file against it (default on). */
+  getPublisherCheck: () => call<boolean>("get_publisher_check"),
+  setPublisherCheck: (enabled: boolean) => call<boolean>("set_publisher_check", { enabled }),
   analyzeMedia: (url: string, pending?: number) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null }),
   startMedia: (request: MediaRequest) => call<MediaJob>("start_media", { request }),
   listMediaJobs: () => call<MediaJob[]>("list_media_jobs"),

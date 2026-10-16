@@ -284,6 +284,17 @@ pub struct AnalysisDto {
     pub findings: Vec<Finding>,
     /// Stable code of what went wrong with the check (`http_404`, `slow`...), when it did.
     pub error_code: Option<String>,
+    /// The publisher's checksum was found next to the file (feature #6): the file will be checked against it.
+    pub publisher_checksum: Option<PublisherChecksumDto>,
+}
+
+/// The publisher's checksum list found for a link: its name (`SHA256SUMS`, never its address) and the digest kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublisherChecksumDto {
+    pub list: String,
+    /// `SHA-256` / `SHA-512`.
+    pub algo: String,
 }
 
 /// Why the quick check did not give an answer.
@@ -534,6 +545,7 @@ pub fn assess(o: Observed<'_>, plan: impl Fn(u64) -> (usize, usize)) -> Analysis
         health,
         findings,
         error_code,
+        publisher_checksum: None,
     }
 }
 

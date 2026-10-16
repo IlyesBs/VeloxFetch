@@ -773,3 +773,15 @@ first; 8 runs of 8 under the same load pass.
 | `tests/e2e/real-network-usage.mjs` (by hand, internet) | a real 145 MB download counted exactly (145.1 MB), never more than the system received; kept after a restart, deleting every download and clearing the history |
 | `tests/e2e/desktop-i18n.mjs` (+1 per language) | the card's "Today" / "This month" rows and the longest number (1023.9 MB) fit from 1360×860 down to 640×480 |
 | `tests/e2e/real-multinet.mjs` (+1, by hand, two networks) | Network usage counts what came through every network |
+
+## The publisher's checksum (feature #6, October 2026)
+
+| Test | Checks |
+|---|---|
+| `downloader-core` `integrity` (+2) | every list format (GNU, BSD, a lone digest, signed lists, names with spaces, SHA-512 first); never guessing (not listed, near names, md5, two digests, a web page, tag and length that disagree, a path in the name, a huge list) |
+| `downloader-core` `engine` (+1) | the answer is waited for; nothing found; a pause wins at once; a lookup that went away |
+| `download-manager` `publisher` (+1) | lists only next to the file, https only, never the link's query or another host |
+| `persistence` (+1) | who verified a file is kept with it and with its history line |
+| `tests/integration/tests/publisher.rs` (11) | a server that refuses the file is never asked for lists; a batch asks its folder's list once, a site without lists only a few times; match (card, history, details, timeline, after a restart); damaged never kept, then Retry; every usual list; no / too large / ambiguous list; a slow list; the user's checksum wins, the setting; no cookie or sign-in sent, https only in a release; the Add dialog's answer reused; "Will be verified" while downloading |
+| `tests/e2e/desktop-integrity.mjs` (new suite) | Settings, the Add dialog, the card (Will be verified, Verified), Completed, History, the details page, a damaged file, no list, the switch, a bad request refused; all 8 languages fit from 1360×860 to 640×480 |
+| `tests/e2e/real-publisher-checksum.mjs` (by hand, internet) | the Linux kernel (`sha256sums.asc`) and a Debian image (`SHA512SUMS`) verified, the files on disk have the published digests; an unlisted file finishes as before |

@@ -469,6 +469,11 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   measurement subtracts the bytes waiting in VeloxFetch's own receive buffers (`sysio::own_tcp_queued`). `throttle.ts` polls the state every 3 s, keeps the speed / limit history for the graph in
   Settings (`SmartThrottleSettings.tsx`, `BandwidthGraph`) and, while it is on, sets `html[data-throttle]`
   (`limiting` while downloads are slowed), which turns the accent amber everywhere.
+* **The publisher's checksum** (feature #6, `docs/publisher-checksum.md`): `manager/publisher.rs` looks for the list
+  next to a starting download and hands the engine a `watch` channel (`DownloadControl::set_publisher`); the engine
+  waits for it before finishing (`publisher_checksum`) and checks the file as for a user checksum
+  (`integrity::find_in_list`). `VerifyDto` on `DownloadDto` / `HistoryDto` drives `components/VerifyBadge.tsx` (card,
+  Completed, History), the details page's Integrity card and the Add dialog's Integrity row.
 * **Task cards** (`DownloadCard.tsx`): the file's kind as a big thumbnail with its extension, name, size and
   link, the neon progress track (green when finished) with the percent, live numbers, the 8x8 connection panel
   (`ThreadMatrix.tsx`: one cell per connection slot, lit cells flicker in CSS at a rate set by the
@@ -539,7 +544,7 @@ Views: Downloads (bento metrics + cards), Queue, History, Settings, Download det
 
 ## State and versioning
 
-`PRAGMA user_version` tracks schema migrations (currently v8: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places, v7 segment hashes and the `.part` stamp, v8 network usage per day). A database from a newer build is
+`PRAGMA user_version` tracks schema migrations (currently v9: v4 request headers handed over by browsers, v5 per-download diagnostics, v6 the Smart Download Queue's places, v7 segment hashes and the `.part` stamp, v8 network usage per day, v9 where a checksum came from and how a finished file was proven). A database from a newer build is
 refused rather than corrupted.
 
 ## Download Profiles
