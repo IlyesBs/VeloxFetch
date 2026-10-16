@@ -51,6 +51,11 @@ the system shows and the file name of the program; its folder only if you listed
 from your list runs. Only the names are read (not what the programs do), they are compared with your list and
 forgotten; nothing is stored or sent anywhere.
 
+## Game mode (desktop app)
+
+Game mode only slows or pauses VeloxFetch's own downloads for the time you choose. It looks at nothing on your
+computer and sends nothing; it keeps only when it ends and how long one click lasts, in VeloxFetch's settings.
+
 ## The publisher's checksum (desktop app, on by default; Settings > Folders > File integrity)
 
 When a file downloads from an `https` link, VeloxFetch also asks **the same site** for the checksum list it may publish

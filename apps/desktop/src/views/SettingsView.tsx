@@ -50,6 +50,7 @@ export const SHORTCUTS: { keys: string[]; what: Key }[] = [
   { keys: ["Ctrl", "2"], what: "nav.queue" },
   { keys: ["Ctrl", "3"], what: "nav.history" },
   { keys: ["Ctrl", ","], what: "nav.settings" },
+  { keys: ["Ctrl", "G"], what: "keys.game" },
   { keys: ["Esc"], what: "keys.esc" },
 ];
 

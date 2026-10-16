@@ -469,6 +469,12 @@ tabular numerals, reduced-motion support. Components never hard-code colours.
   measurement subtracts the bytes waiting in VeloxFetch's own receive buffers (`sysio::own_tcp_queued`). `throttle.ts` polls the state every 3 s, keeps the speed / limit history for the graph in
   Settings (`SmartThrottleSettings.tsx`, `BandwidthGraph`) and, while it is on, sets `html[data-throttle]`
   (`limiting` while downloads are slowed), which turns the accent amber everywhere.
+* **Game mode** (feature #7, `docs/game-mode.md`): `SmartState::game_mode` (`GameUntil`, settings `game_mode.until` /
+  `game_mode.minutes`) puts the gaming policy first in `smart_throttle_observe_signals` / `reapply_smart_cap`
+  (`Reason::Game`, the Smart bucket, the queue's `game_hold` with the pause policy), whatever level is in force;
+  `set_game_mode` changes it; `resume_game_mode` applies it before the first queue evaluation. The window:
+  `components/GameMode.tsx` (status bar button, banner under the title bar, Settings card), Ctrl+G, `html[data-game]`;
+  the tray's check item and its end notification in `src-tauri/src/desktop.rs`, kept in line by the 3 s watcher.
 * **The publisher's checksum** (feature #6, `docs/publisher-checksum.md`): `manager/publisher.rs` looks for the list
   next to a starting download and hands the engine a `watch` channel (`DownloadControl::set_publisher`); the engine
   waits for it before finishing (`publisher_checksum`) and checks the file as for a user checksum

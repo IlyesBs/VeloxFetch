@@ -42,6 +42,13 @@ const AUTO_KEY: &str = "smart_throttle.auto";
 const MIN_KEY: &str = "smart_throttle.min_bps";
 const POLICY_KEY: &str = "smart_throttle.game_policy";
 const GAME_LIMIT_KEY: &str = "smart_throttle.game_limit_bps";
+/// Game mode: when it ends (Unix milliseconds; `0` = when the user turns it off). Absent: off.
+const GAME_MODE_UNTIL_KEY: &str = "game_mode.until";
+/// How long one click turns Game mode on for (minutes; `0` = until the user turns it off).
+const GAME_MODE_MINUTES_KEY: &str = "game_mode.minutes";
+const DEFAULT_GAME_MODE_MINUTES: u32 = 120;
+/// The longest Game mode can be set for at once (a day, as its error says); "until I turn it off" is `0`.
+pub const MAX_GAME_MODE_MINUTES: u32 = 24 * 60;
 /// The low-bandwidth policy's limit until the user picks one.
 const DEFAULT_GAME_LIMIT_BPS: u64 = 512 * 1024;
 /// Scans in a row without a listed program before its policy is lifted.
@@ -137,6 +144,11 @@ pub(super) struct SmartState {
     watch: GameWatch,
     /// The pause policy holds the queue (as last decided).
     hold: bool,
+    /// Game mode, turned on by the user in one click: the gaming policy applies now, whatever runs and whatever
+    /// level is chosen, until it ends.
+    game_mode: Option<GameUntil>,
+    /// How long one click turns it on for.
+    game_minutes: u32,
     /// The previous measurement: when, the computer's received bytes, VeloxFetch's received bytes, and the bytes
     /// waiting in VeloxFetch's own receive buffers (where the system says).
     meter: Option<(Instant, u64, u64, Option<u64>)>,
@@ -209,8 +221,18 @@ impl SmartState {
                 .and_then(|s| s.parse::<u64>().ok())
                 .filter(|v| (MIN_FLOOR_BPS..=MAX_FLOOR_BPS).contains(v))
                 .unwrap_or(DEFAULT_GAME_LIMIT_BPS),
+            game_mode: get(GAME_MODE_UNTIL_KEY).and_then(|v| GameUntil::parse(&v)).filter(|g| !g.ended(now_ms())),
+            game_minutes: get(GAME_MODE_MINUTES_KEY)
+                .and_then(|s| s.parse::<u32>().ok())
+                .filter(|m| *m <= MAX_GAME_MODE_MINUTES)
+                .unwrap_or(DEFAULT_GAME_MODE_MINUTES),
             ..Default::default()
         }
+    }
+
+    /// Game mode is on now (one that has ended counts as off, even before it is cleared).
+    pub(super) fn game_mode_on(&self) -> bool {
+        self.game_mode.is_some_and(|g| !g.ended(now_ms()))
     }
 
     /// Smart throttle is on: the user's switch, or a profile that asks for its automatic mode; never while the
@@ -239,6 +261,47 @@ impl SmartState {
     pub(super) fn user_auto(&self) -> bool {
         self.auto
     }
+}
+
+/// When Game mode ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GameUntil {
+    /// When the user turns it off.
+    TurnedOff,
+    /// At this time (Unix milliseconds; wall-clock, so a computer that slept meanwhile still ends it on time).
+    At(i64),
+}
+
+impl GameUntil {
+    fn parse(v: &str) -> Option<Self> {
+        match v.trim().parse::<i64>().ok()? {
+            0 => Some(GameUntil::TurnedOff),
+            ms if ms > 0 => Some(GameUntil::At(ms)),
+            _ => None,
+        }
+    }
+
+    fn code(self) -> String {
+        match self {
+            GameUntil::TurnedOff => "0".into(),
+            GameUntil::At(ms) => ms.to_string(),
+        }
+    }
+
+    fn ended(self, now_ms: i64) -> bool {
+        matches!(self, GameUntil::At(ms) if now_ms >= ms)
+    }
+
+    fn until_ms(self) -> Option<i64> {
+        match self {
+            GameUntil::TurnedOff => None,
+            GameUntil::At(ms) => Some(ms),
+        }
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 /// A program name (or executable path) as compared: no `.exe`, no surrounding spaces, lower case, `/` between folders.
@@ -411,6 +474,8 @@ pub enum Reason {
     Checking,
     /// Manual: the level the user chose (Aggressive, Balanced, Performance) applies all the time.
     Manual,
+    /// Game mode: the user turned it on; the gaming policy applies until it ends.
+    Game,
 }
 
 impl Reason {
@@ -426,6 +491,7 @@ impl Reason {
             Reason::Unknown => "unknown",
             Reason::Checking => "checking",
             Reason::Manual => "manual",
+            Reason::Game => "game",
         }
     }
 }
@@ -841,6 +907,7 @@ impl DownloadManager {
 
     pub fn smart_throttle(&self) -> SmartThrottleDto {
         let s = self.inner.smart.lock().unwrap();
+        let game_on = s.game_mode_on();
         SmartThrottleDto {
             enabled: s.enabled,
             apps: s.apps.clone(),
@@ -850,7 +917,16 @@ impl DownloadManager {
             scan_ok: s.scan_ok,
             auto: s.auto,
             min_bps: s.floor,
-            reason: if s.on() { s.reason.code() } else { "off" }.to_string(),
+            reason: if game_on {
+                "game"
+            } else if !s.on() {
+                "off"
+            } else if s.reason == Reason::Game {
+                "fullFree" // Game mode just ended: the next observation says what now
+            } else {
+                s.reason.code()
+            }
+            .to_string(),
             other_bps: s.other_bps,
             user_idle: s.user_idle,
             peak_bps: (s.peak_bps >= 1.0).then_some(s.peak_bps as u64),
@@ -860,7 +936,85 @@ impl DownloadManager {
             game_hold: s.hold,
             profile_adaptive: s.profile,
             held_by_networks: s.held_by_networks,
+            game_mode: GameModeDto {
+                on: game_on,
+                until_ms: s.game_mode.filter(|_| game_on).and_then(GameUntil::until_ms),
+                minutes: s.game_minutes,
+            },
         }
+    }
+
+    /// Game mode, in one click: on (for the usual time, the given minutes, or until turned off with `0`), longer, or
+    /// off; and how long one click turns it on for. It applies at once (the gaming policy, whatever level is chosen
+    /// and whatever runs) and is kept across a restart until it ends. Nothing the user set is changed.
+    pub async fn set_game_mode(&self, req: SetGameMode) -> Result<SmartThrottleDto, ManagerError> {
+        let valid = |m: u32| m <= MAX_GAME_MODE_MINUTES;
+        if [req.minutes, req.default_minutes].into_iter().flatten().any(|m| !valid(m))
+            || req.add_minutes.is_some_and(|m| m == 0 || !valid(m))
+        {
+            return Err(ManagerError::invalid("Game mode lasts at most 24 hours"));
+        }
+        if req.add_minutes.is_some() && req.on == Some(false) {
+            return Err(ManagerError::invalid("Game mode cannot be made longer while it is turned off"));
+        }
+        if let Some(m) = req.default_minutes {
+            self.inner.store.set_setting(GAME_MODE_MINUTES_KEY, &m.to_string())?;
+            self.inner.smart.lock().unwrap().game_minutes = m;
+        }
+        let now = now_ms();
+        let next = {
+            let s = self.inner.smart.lock().unwrap();
+            let current = s.game_mode.filter(|g| !g.ended(now));
+            let at = |minutes: u32| if minutes == 0 { GameUntil::TurnedOff } else { GameUntil::At(now + i64::from(minutes) * 60_000) };
+            match (req.on, req.add_minutes) {
+                (Some(false), _) => Some(None),
+                (_, Some(add)) => Some(Some(match current {
+                    Some(GameUntil::TurnedOff) => GameUntil::TurnedOff,
+                    // Longer, never past a day from now.
+                    Some(GameUntil::At(ms)) => {
+                        GameUntil::At((ms + i64::from(add) * 60_000).min(now + i64::from(MAX_GAME_MODE_MINUTES) * 60_000))
+                    }
+                    None => at(add),
+                })),
+                (Some(true), None) => Some(Some(at(req.minutes.unwrap_or(s.game_minutes)))),
+                (None, None) => None,
+            }
+        };
+        if let Some(next) = next {
+            match next {
+                Some(g) => self.inner.store.set_setting(GAME_MODE_UNTIL_KEY, &g.code())?,
+                None => self.inner.store.delete_setting(GAME_MODE_UNTIL_KEY)?,
+            }
+            let was = {
+                let mut s = self.inner.smart.lock().unwrap();
+                let was = s.game_mode_on();
+                s.game_mode = next;
+                was
+            };
+            match next {
+                Some(g) => tracing::info!(until_ms = ?g.until_ms(), "game mode on"),
+                None if was => tracing::info!("game mode turned off"),
+                None => {}
+            }
+            self.reapply_smart_cap();
+        }
+        Ok(self.smart_throttle())
+    }
+
+    /// Game mode is on (the desktop app shows it in the tray menu).
+    pub fn game_mode_on(&self) -> bool {
+        self.inner.smart.lock().unwrap().game_mode_on()
+    }
+
+    /// At start: Game mode still on from before applies before anything starts (a paused queue stays paused).
+    pub(super) fn resume_game_mode(&self) {
+        if !self.game_mode_on() {
+            return;
+        }
+        tracing::info!("game mode still on from before");
+        self.reapply_smart_cap_only();
+        let hold = self.smart_holds_queue();
+        self.inner.queue.lock().unwrap().set_game_hold(hold);
     }
 
     pub async fn set_smart_throttle(&self, req: SetSmartThrottle) -> Result<SmartThrottleDto, ManagerError> {
@@ -983,7 +1137,7 @@ impl DownloadManager {
     pub(super) fn smart_is_limiting(&self) -> bool {
         let s = self.inner.smart.lock().unwrap();
         // Not Manual: its level holds all the time, and Low-priority downloads would never start.
-        s.on() && s.limit.is_some() && s.reason != Reason::Manual
+        (s.on() || s.game_mode_on()) && s.limit.is_some() && s.reason != Reason::Manual
     }
 
     fn velox_download_bps(&self) -> f64 {
@@ -995,7 +1149,7 @@ impl DownloadManager {
     /// The decision, from what was observed (tests give the signals directly).
     pub fn smart_throttle_observe_signals(&self, running: Option<&[String]>, sig: Signals) {
         let total = self.velox_download_bps();
-        let (changed, limit, reason, save_peak) = {
+        let (changed, limit, reason, save_peak, game_ended) = {
             let mut s = self.inner.smart.lock().unwrap();
             s.scan_ok = running.is_some();
             let found = if s.on() && s.automatic() {
@@ -1009,7 +1163,17 @@ impl DownloadManager {
             s.user_idle = sig.idle.map(|i| i >= IDLE_AFTER);
             let (share, floor, peak) = (s.share, s.floor, s.peak_bps);
             let reference = reference_speed(peak, s.recent_bps);
-            let (limit, reason) = if !s.on() {
+            let game = s.game_mode_on();
+            // Game mode that has just ended: forgotten (also by the settings, below).
+            let game_ended = !game && s.game_mode.is_some();
+            if game_ended {
+                s.game_mode = None;
+            }
+            let (limit, reason) = if game {
+                // Game mode wins over everything: the user asked for it, now.
+                s.ctl.reset();
+                (Some(game_cap(s.policy, reference, SMART_SHARE, floor, s.game_limit)), Reason::Game)
+            } else if !s.on() {
                 s.ctl.reset();
                 (None, Reason::Off)
             } else if !s.automatic() {
@@ -1040,15 +1204,22 @@ impl DownloadManager {
             if let Some(p) = save_peak {
                 s.saved_peak = p;
             }
-            let changed = s.active_app != found || s.limit != limit;
-            let hold = found.is_some() && s.policy == GamePolicy::Pause;
+            let changed = s.active_app != found || s.limit != limit || (s.reason == Reason::Game) != game;
+            let hold = (found.is_some() || game) && s.policy == GamePolicy::Pause;
             let hold_changed = s.hold != hold;
             s.hold = hold;
             s.active_app = found;
             s.limit = limit;
             s.reason = reason;
-            (changed || hold_changed, limit, reason, save_peak)
+            (changed || hold_changed, limit, reason, save_peak, game_ended)
         };
+        if game_ended {
+            tracing::info!("game mode ended");
+            if let Err(e) = self.inner.store.delete_setting(GAME_MODE_UNTIL_KEY) {
+                tracing::debug!(error = %e, "could not forget the ended game mode");
+                // it has ended anyway: read as ended at the next start
+            }
+        }
         if let Some(p) = save_peak {
             if let Err(e) = self.inner.store.set_setting(PEAK_KEY, &format!("{p:.0}")) {
                 tracing::debug!(error = %e, "could not save the learned speed");
@@ -1068,22 +1239,31 @@ impl DownloadManager {
     /// A new mode, minimum or gaming policy: an active cap follows at once (a listed program's cap, or the
     /// automatic one), and the queue is held or let go to match the policy.
     fn reapply_smart_cap(&self) {
+        self.reapply_smart_cap_only();
+        self.spawn_game_hold_sync();
+    }
+
+    /// [`Self::reapply_smart_cap`] without bringing the queue in line.
+    fn reapply_smart_cap_only(&self) {
         let limit = {
             let mut s = self.inner.smart.lock().unwrap();
             let reference = reference_speed(s.peak_bps, s.recent_bps);
             let (share, floor) = (s.share, s.floor);
-            if !s.on() {
+            if s.game_mode_on() {
+                s.ctl.reset();
+                s.reason = Reason::Game;
+            } else if !s.on() {
                 s.reason = Reason::Off;
             } else if !s.automatic() {
                 s.reason = Reason::Manual;
-            } else if matches!(s.reason, Reason::Manual | Reason::Off) {
+            } else if matches!(s.reason, Reason::Manual | Reason::Off | Reason::Game) {
                 s.reason = Reason::FullFree; // into Smart: it starts from full speed
             }
-            s.hold = s.reason == Reason::App && s.policy == GamePolicy::Pause;
+            s.hold = matches!(s.reason, Reason::App | Reason::Game) && s.policy == GamePolicy::Pause;
             let limit = match s.reason {
                 Reason::Off => None,
                 Reason::Manual => manual_cap(reference, share, floor),
-                Reason::App => Some(game_cap(s.policy, reference, SMART_SHARE, floor, s.game_limit)),
+                Reason::App | Reason::Game => Some(game_cap(s.policy, reference, SMART_SHARE, floor, s.game_limit)),
                 // The automatic cap follows the new settings now, and keeps its state (no lift-then-slow).
                 _ if s.limit.is_some() => s.ctl.retarget(reference, SMART_SHARE, floor),
                 _ => None,
@@ -1092,13 +1272,12 @@ impl DownloadManager {
             limit
         };
         self.inner.limits.set_smart(limit);
-        self.spawn_game_hold_sync();
     }
 
     /// The pause policy wants the queue held right now.
     pub(super) fn smart_holds_queue(&self) -> bool {
         let s = self.inner.smart.lock().unwrap();
-        s.on() && s.hold
+        (s.on() || s.game_mode_on()) && s.hold
     }
 
     /// Bring the queue in line with the pause policy, in the background (the observation runs on a blocking thread
@@ -1778,6 +1957,21 @@ mod tests {
         for p in [GamePolicy::Adaptive, GamePolicy::Low, GamePolicy::Pause] {
             assert!(game_cap(p, 0.0, 10, MIN_FLOOR_BPS, MIN_FLOOR_BPS) > 0, "{p:?}: zero would mean no limit at all");
         }
+    }
+
+    #[test]
+    fn game_mode_end_is_read_back_safely_and_ends_on_time() {
+        assert_eq!(GameUntil::parse("0"), Some(GameUntil::TurnedOff));
+        assert_eq!(GameUntil::parse(" 1700000000000 "), Some(GameUntil::At(1_700_000_000_000)));
+        for bad in ["", "-5", "soon", "1e9", "99999999999999999999"] {
+            assert_eq!(GameUntil::parse(bad), None, "{bad:?}");
+        }
+        assert_eq!(GameUntil::parse(&GameUntil::At(42).code()), Some(GameUntil::At(42)));
+        assert_eq!(GameUntil::parse(&GameUntil::TurnedOff.code()), Some(GameUntil::TurnedOff));
+        assert!(!GameUntil::TurnedOff.ended(i64::MAX), "until turned off never ends by itself");
+        assert!(!GameUntil::At(1_000).ended(999) && GameUntil::At(1_000).ended(1_000));
+        assert_eq!(GameUntil::At(7).until_ms(), Some(7));
+        assert_eq!(GameUntil::TurnedOff.until_ms(), None);
     }
 
     #[test]

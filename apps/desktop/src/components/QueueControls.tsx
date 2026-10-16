@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import { Icon } from "../ui/icons";
 import { formatWhen } from "./when";
 import { activeProfile, overridden, profileName } from "../profiles";
+import { gameOn, useThrottle } from "../throttle";
 
 const ACTIVE_CHOICES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 24, 32];
 const CONNECTION_CHOICES = [1, 2, 4, 8, 16, 24, 32, 48, 64];
@@ -23,6 +24,7 @@ export function QueueControls() {
   const waiting = useStore((s) => s.groups.queued.length);
   const [pauseRunning, setPauseRunning] = useState(true);
   const profiles = useStore((s) => s.profiles);
+  const throttle = useThrottle();
   if (!q) return null;
   const over = overridden(profiles);
   const prof = activeProfile(profiles);
@@ -39,7 +41,8 @@ export function QueueControls() {
   if (q.paused) {
     status = q.held > 0 ? t("qc.pausedHeld", { n: q.held }) : t("qc.paused");
   } else if (q.gameHold) {
-    status = t("qc.game", { n: q.held });
+    // Game mode, or a listed program that runs.
+    status = gameOn(throttle) ? t("qc.gameMode", { n: q.held }) : t("qc.game", { n: q.held });
   } else if (waitingForWindow) {
     status = q.nextChange ? t("qc.outsideOpens", { when: formatWhen(q.nextChange) }) : t("qc.outside");
   } else {

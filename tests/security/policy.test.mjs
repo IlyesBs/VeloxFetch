@@ -938,3 +938,30 @@ test("one version everywhere (the updater compares it; the extension reports it)
     assert.equal(got, v, `${name} says ${got}, Cargo.toml says ${v}`);
   }
 });
+
+test("Game mode: main window only, bounded, strict requests, nothing new looked at or sent", () => {
+  // (This file has a test-only helper near the top: cut at its test module instead.)
+  const smartAll = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
+  const smart = smartAll.slice(0, smartAll.indexOf("#[cfg(test)]\nmod tests"));
+  const api = read("crates", "download-manager", "src", "api.rs");
+  const desktop = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "desktop.rs"));
+  // The switch is the main window's only (the tray item runs in the app itself, not through a command).
+  assert.match(read("apps", "desktop", "src-tauri", "build.rs"), /"set_game_mode"/);
+  assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), /"allow-set-game-mode"/);
+  for (const other of ["download-window.json", "settings-window.json"]) {
+    assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes("game-mode"), `set_game_mode not in ${other}`);
+  }
+  // A strict request: unknown fields refused, at most a day, never longer than a day from now.
+  const req = api.slice(api.indexOf("pub struct SetGameMode") - 120, api.indexOf("pub struct SetGameMode"));
+  assert.match(req, /deny_unknown_fields/);
+  assert.match(smart, /pub const MAX_GAME_MODE_MINUTES: u32 = 24 \* 60;/);
+  assert.match(smart, /\.min\(now \+ i64::from\(MAX_GAME_MODE_MINUTES\) \* 60_000\)/);
+  // A saved end that cannot be read is off (never "on for ever" by accident); one that has passed is forgotten.
+  assert.match(smart, /ms if ms > 0 => Some\(GameUntil::At\(ms\)\),\s*_ => None,/);
+  assert.match(smart, /\.filter\(\|g\| !g\.ended\(now_ms\(\)\)\)/);
+  assert.match(smart, /delete_setting\(GAME_MODE_UNTIL_KEY\)/);
+  // Nothing new is looked at: Game mode does not scan programs or send anything; the end notification is local.
+  const game = smart.slice(smart.indexOf("pub async fn set_game_mode"), smart.indexOf("pub(super) fn resume_game_mode"));
+  assert.ok(!/http|client|send|running_programs|sysinfo/i.test(game.replace(/\/\/.*$/gm, "")), "Game mode only changes the cap and the queue");
+  assert.match(desktop, /notify\(manager, &text\(&prefs\.language, "gm\.endedTitle"\), &text\(&prefs\.language, "gm\.endedBody"\)\)/);
+});

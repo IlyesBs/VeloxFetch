@@ -816,7 +816,7 @@ pub struct SmartThrottleDto {
     pub auto: bool,
     /// The least downloads keep, whatever happens (bytes/s): they never stop.
     pub min_bps: u64,
-    /// What it is doing now: `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`, `checking` (a
+    /// What it is doing now: `off`, `game` (Game mode), `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`, `checking` (a
     /// few seconds slower to see whether another program wants the line), `programsOnly` (automatic mode off).
     pub reason: String,
     /// The computer's other download traffic (smoothed by nothing: the last reading), when known.
@@ -839,6 +839,33 @@ pub struct SmartThrottleDto {
     pub profile_adaptive: Option<bool>,
     /// Off because several networks at once is on (every network at full speed); the user's switch is kept.
     pub held_by_networks: bool,
+    /// Game mode (turned on in one click; the gaming policy applies until it ends).
+    pub game_mode: GameModeDto,
+}
+
+/// Game mode: on in one click from the status bar, the banner, the tray or Ctrl+G; the gaming policy (`game_policy`)
+/// applies now, whatever level is chosen and whatever runs, until it ends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameModeDto {
+    pub on: bool,
+    /// When it ends (Unix milliseconds); `None` while on: when the user turns it off.
+    pub until_ms: Option<i64>,
+    /// How long one click turns it on for (minutes; `0` = until turned off).
+    pub minutes: u32,
+}
+
+/// Turn Game mode on or off, make it longer, or set how long one click turns it on for.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetGameMode {
+    pub on: Option<bool>,
+    /// With `on: true`: for this long (minutes; `0` = until turned off); the usual time when left out.
+    pub minutes: Option<u32>,
+    /// Longer by this much (minutes); turns it on for that long when it was off.
+    pub add_minutes: Option<u32>,
+    /// How long one click turns it on for from now on (minutes; `0` = until turned off).
+    pub default_minutes: Option<u32>,
 }
 
 /// What downloads do while a listed program (a game, a call) runs. Nothing the user set is changed: the policy is

@@ -324,6 +324,11 @@ Details: `docs/download-intelligence.md`.
     none starts; only those resume when it closes, the user's own pauses stay). Detected at once, lifted after two
     scans without it (no flip-flop), kept at most 15 s if scans fail; matched by process or executable name; nothing
     the user set is changed.
+  - **Game mode** (feature #7, `docs/game-mode.md`): one click on the status bar's gamepad, the tray menu or Ctrl+G and
+    downloads give way to a game or a call at once (the same policy), whatever level is chosen (even Fast), with no
+    listed program needed. A banner on every screen says it is on, what downloads do and the time left (+1 hour, Turn
+    off); the window turns amber; the status bar pill counts down. One click lasts 1 h, 2 h (default), 4 h or until
+    turned off (Settings › Speed); kept across a restart; when it ends, full speed and a notification.
 - **Measured right:** the other traffic is the computer's received bytes minus VeloxFetch's own, both counted over the
   same seconds (with an allowance for packet headers, and a larger one while a limit paces downloads, when the
   system receives data by bursts). It is never fooled by VeloxFetch's own speed changing.
@@ -659,6 +664,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
 | The publisher's checksum | same file: the checksum and its source with the download (`checksum_source`), how each finished file was proven in the history (`verified`); answers of the last 10 minutes in memory only |
 | Network usage | same file: bytes received per local day in the `network_usage` table (numbers only) |
+| Game mode | same file: settings `game_mode.until` (when it ends; absent when off) and `game_mode.minutes` (how long one click lasts) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
@@ -868,6 +874,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Download Doctor | `docs/download-doctor.md` |
 | Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
 | The publisher's checksum (SHA256SUMS found next to the file) | `docs/publisher-checksum.md` |
+| Game mode (one click: downloads give way to a game or a call) | `docs/game-mode.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -882,6 +889,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-16 | `feat_game_mode` | Feature | #7 of the feature list: Game mode in one click. The status bar's gamepad button, the tray menu's "Game mode" item (ticked while on) or Ctrl+G: downloads give way to a game or a call at once with the gaming policy (give way / low speed / pause), whatever level is chosen and with no listed program needed. A banner on every screen (what downloads do, time left, +1 hour, Turn off), the window turns amber, the pill counts down; 1 h / 2 h / 4 h / until turned off (Settings › Speed); kept across a restart; a notification when it ends. The status bar no longer pushes anything out of the window in long languages. 8 languages. Real: a kernel.org download held to a quarter, to 256 KB/s, paused, and back to full speed; the real KDE tray item. | `docs/game-mode.md` |
 | 2026-10-16 | `feat_publisher_checksum` | Feature | #6 of the feature list: the publisher's checksum. The list a site publishes next to its file (SHA256SUMS, SHA512SUMS, sha256sums.asc, `<file>.sha256`…) is found while the file downloads (a handful of small requests at once, https, same site, no cookie or sign-in, 10 s at most) and the file is checked against it before it is finished; a damaged one is never kept. Shown in the Add dialog, on the card (Will be verified / Verified), in Completed, the History and the details page (Integrity card); Settings › Folders › File integrity (on by default). Schema v9 (v2.0.0). 8 languages. Real: the Linux kernel (sha256sums.asc) and a Debian image (SHA512SUMS) verified. | `docs/publisher-checksum.md` |
 | 2026-10-16 | `port_network_usage_v2` (from `main`, `fix_network_usage_history`) | Fix | Issue #45, brought to v2.0.0 (texts in all 8 languages): the dashboard's Network usage went back to 0 after a restart, an update, a reinstall or deleting the downloads (it counted only since launch). Every byte received is now saved per local day (schema v8, `network_usage`; every 5 s and on close); the card shows the total ever, today and this month; deleting downloads or clearing the history keeps it. Tests: persistence, unit, integration (restart on the next day of the next month), e2e +4. | `docs/network-usage.md` |
 | 2026-10-15 | `fix_smart_held_status` | Fix | While several networks at once holds Smart throttle off, its status line (under the sidebar's gauge, in Settings, the status bar's tooltip) said only "Off · downloads use full speed" — the reason was in a tooltip. It now says "Off · several networks at once" (`throttleStatus`, key `thr.heldByNetworks`, one line like the other states; the controls' tooltip keeps the whole sentence), in all 8 languages. Tests: `throttle.test.ts` (+3 expectations), `desktop-multinet.mjs` 34 → 37 (the line and the greyed level buttons while on, back after), `real-multinet.mjs` 20 → 21. | `docs/several-networks.md` |

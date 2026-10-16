@@ -1,4 +1,4 @@
-//! VeloxFetch on the desktop (phases 16-18): the tray icon and its menu, closing to the tray, starting hidden at
+//! VeloxFetch on the desktop (phases 16-18): the tray icon and its menu (with Game mode, feature #7), closing to the tray, starting hidden at
 //! login, a notification when a download finishes while the window is not in front, and bringing the window back
 //! (tray, dock, a second launch).
 //!
@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use download_manager::{DownloadManager, DownloadStatus, ManagerEvent, MediaStatus, PauseQueue};
+use download_manager::{DownloadManager, DownloadStatus, ManagerEvent, MediaStatus, PauseQueue, SetGameMode};
 use system_integration::system::{Notification, HIDDEN_ARG};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 
@@ -29,6 +29,9 @@ static START_HIDDEN: AtomicBool = AtomicBool::new(false);
 static HINT_SHOWN: AtomicBool = AtomicBool::new(false);
 /// Quit was chosen: closing the window must not hide it any more.
 static QUITTING: AtomicBool = AtomicBool::new(false);
+/// Game mode as the tray menu shows it (ticked), and that menu item.
+static GAME_SHOWN: AtomicBool = AtomicBool::new(false);
+static GAME_ITEM: Mutex<Option<CheckMenuItem<tauri::Wry>>> = Mutex::new(None);
 
 /// The program to start at login: the AppImage file when running from one (its own folder vanishes when it
 /// closes), else this program.
@@ -131,9 +134,10 @@ pub fn create_tray(app: &AppHandle, manager: &DownloadManager) -> bool {
         return false;
     }
     let lang = manager.desktop_prefs().language;
+    GAME_SHOWN.store(manager.game_mode_on(), Ordering::Relaxed);
     let built = (|| -> tauri::Result<()> {
         let menu = tray_menu(app, &lang)?;
-        let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu).tooltip("VeloxFetch").show_menu_on_left_click(false);
+        let mut tray = TrayIconBuilder::with_id(TRAY_ID).menu(&menu).tooltip(tray_tooltip(&lang)).show_menu_on_left_click(false);
         if let Some(icon) = app.default_window_icon() {
             tray = tray.icon(icon.clone());
         }
@@ -150,6 +154,18 @@ pub fn create_tray(app: &AppHandle, manager: &DownloadManager) -> bool {
                 let m = m.clone();
                 tauri::async_runtime::spawn(async move {
                     let _ = m.resume_queue().await;
+                });
+            }
+            // Game mode in one click, for the usual time (Settings › Speed); the same click turns it off.
+            "game" => {
+                let m = m.clone();
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let on = !m.game_mode_on();
+                    if let Err(e) = m.set_game_mode(SetGameMode { on: Some(on), ..Default::default() }).await {
+                        tracing::warn!(error = %e, "game mode not changed from the tray");
+                    }
+                    sync_tray_game(&app, m.game_mode_on(), &m.desktop_prefs().language);
                 });
             }
             "quit" => {
@@ -178,23 +194,65 @@ pub fn create_tray(app: &AppHandle, manager: &DownloadManager) -> bool {
 
 fn tray_menu(app: &AppHandle, lang: &str) -> tauri::Result<Menu<tauri::Wry>> {
     let item = |id: &str, key: &str| MenuItem::with_id(app, id, text(lang, key), true, None::<&str>);
-    Menu::with_items(
+    let game = CheckMenuItem::with_id(app, "game", text(lang, "tray.gameMode"), true, GAME_SHOWN.load(Ordering::Relaxed), None::<&str>)?;
+    let menu = Menu::with_items(
         app,
         &[
             &item("open", "tray.open")?,
+            &PredefinedMenuItem::separator(app)?,
+            &game,
             &PredefinedMenuItem::separator(app)?,
             &item("pause", "tray.pauseAll")?,
             &item("resume", "tray.resumeAll")?,
             &PredefinedMenuItem::separator(app)?,
             &item("quit", "tray.quit")?,
         ],
-    )
+    )?;
+    *GAME_ITEM.lock().unwrap_or_else(|p| p.into_inner()) = Some(game);
+    Ok(menu)
+}
+
+/// The tray icon's tooltip: says Game mode while it is on.
+fn tray_tooltip(lang: &str) -> String {
+    if GAME_SHOWN.load(Ordering::Relaxed) {
+        format!("VeloxFetch · {}", text(lang, "tray.gameModeOn"))
+    } else {
+        "VeloxFetch".to_string()
+    }
 }
 
 /// The language changed: the tray menu follows.
 pub fn relabel_tray(app: &AppHandle, lang: &str) {
     if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY_ID), tray_menu(app, lang)) {
         let _ = tray.set_menu(Some(menu));
+        let _ = tray.set_tooltip(Some(tray_tooltip(lang)));
+    }
+}
+
+/// Game mode changed (the tray, the window, its time ran out): the tray's tick and tooltip follow. Cheap when nothing
+/// changed (called every few seconds).
+pub fn sync_tray_game(app: &AppHandle, on: bool, lang: &str) {
+    if GAME_SHOWN.swap(on, Ordering::Relaxed) == on {
+        return;
+    }
+    if let Some(item) = GAME_ITEM.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+        let _ = item.set_checked(on);
+    }
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(tray_tooltip(lang)));
+    }
+}
+
+/// Game mode's time ran out (not turned off by the user): say so, when notifications are on and the window is not in
+/// front (the window shows it itself).
+pub fn notify_game_mode_ended(app: &AppHandle, manager: &DownloadManager) {
+    let prefs = manager.desktop_prefs();
+    let in_front = app
+        .get_webview_window(authz::MAIN)
+        .is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false) && w.is_focused().unwrap_or(false));
+    tracing::info!(told = prefs.notify_finished && !in_front, in_front, "game mode ran out");
+    if prefs.notify_finished && !in_front {
+        notify(manager, &text(&prefs.language, "gm.endedTitle"), &text(&prefs.language, "gm.endedBody"));
     }
 }
 
@@ -324,6 +382,10 @@ mod tests {
             "tray.pauseAll",
             "tray.resumeAll",
             "tray.quit",
+            "tray.gameMode",
+            "tray.gameModeOn",
+            "gm.endedTitle",
+            "gm.endedBody",
             "notify.finishedTitle",
             "notify.failedTitle",
             "notify.inTrayTitle",

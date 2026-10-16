@@ -86,6 +86,7 @@ pub enum Command {
     GetProfiles,
     ProfileAction,
     SetSmartThrottle,
+    SetGameMode,
     SetPreviewMode,
     GetPreviewInfo,
     GetPreviewBase,
@@ -108,7 +109,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 92] = [
+    pub const ALL: [Command; 93] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -183,6 +184,7 @@ impl Command {
         Command::GetProfiles,
         Command::ProfileAction,
         Command::SetSmartThrottle,
+        Command::SetGameMode,
         Command::SetPreviewMode,
         Command::GetPreviewInfo,
         Command::GetPreviewBase,
@@ -280,6 +282,7 @@ impl Command {
             Command::GetProfiles => "get_profiles",
             Command::ProfileAction => "profile_action",
             Command::SetSmartThrottle => "set_smart_throttle",
+            Command::SetGameMode => "set_game_mode",
             Command::SetPreviewMode => "set_preview_mode",
             Command::GetPreviewInfo => "get_preview_info",
             Command::GetPreviewBase => "get_preview_base",
@@ -437,6 +440,7 @@ mod tests {
             Command::GetProfiles,
             Command::ProfileAction,
             Command::SetSmartThrottle,
+            Command::SetGameMode,
             Command::SetPreviewMode,
             Command::GetPreviewInfo,
             Command::GetPreviewBase,

@@ -58,6 +58,7 @@ import type {
   DesktopPrefs,
   SetDesktopPrefs,
   SetSmartThrottle,
+  SetGameMode,
 } from "./types";
 
 export const EVENT_CHANNEL = "velox://event";
@@ -183,6 +184,7 @@ export const api = {
   setUpdateAuto: (enabled: boolean) => call<UpdateStatus>("set_update_auto", { enabled }),
   openReleasePage: () => call<void>("open_release_page"),
   setSmartThrottle: (request: SetSmartThrottle) => call<SmartThrottle>("set_smart_throttle", { request }),
+  setGameMode: (request: SetGameMode) => call<SmartThrottle>("set_game_mode", { request }),
   setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
   getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),
   getPreviewBase: () => call<string | null>("get_preview_base"),

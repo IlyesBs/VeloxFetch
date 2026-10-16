@@ -785,3 +785,15 @@ first; 8 runs of 8 under the same load pass.
 | `tests/integration/tests/publisher.rs` (11) | a server that refuses the file is never asked for lists; a batch asks its folder's list once, a site without lists only a few times; match (card, history, details, timeline, after a restart); damaged never kept, then Retry; every usual list; no / too large / ambiguous list; a slow list; the user's checksum wins, the setting; no cookie or sign-in sent, https only in a release; the Add dialog's answer reused; "Will be verified" while downloading |
 | `tests/e2e/desktop-integrity.mjs` (new suite) | Settings, the Add dialog, the card (Will be verified, Verified), Completed, History, the details page, a damaged file, no list, the switch, a bad request refused; all 8 languages fit from 1360×860 to 640×480 |
 | `tests/e2e/real-publisher-checksum.mjs` (by hand, internet) | the Linux kernel (`sha256sums.asc`) and a Debian image (`SHA512SUMS`) verified, the files on disk have the published digests; an unlisted file finishes as before |
+
+## Game mode (feature #7, October 2026)
+
+| Test | Checks |
+|---|---|
+| `download-manager` `smart_throttle` (+1) | the saved end is read back safely (`0`, a time, garbage, negative, too large) and ends on time |
+| `tests/integration/tests/game_mode.rs` (5) | one click slows a real download with Smart throttle off, off gives full speed back (file intact); the pause policy holds the queue, lets go only what it held; wins over Manual, a listed program and the Fast profile and gives each back; usual time, +1 hour, a day at most, refused requests; kept across a restart (held from the first moment), ended while closed / while running, a broken saved value |
+| `apps/desktop/src/throttle.test.ts` (+4) | the status line for every policy and over every level; time left; one click shown at once then the answer; the window's marks; a refused change |
+| `tests/security/policy.test.mjs` (+1, now 47) | main window only, strict request, a day at most, never on for ever by accident, nothing scanned or sent |
+| `tests/e2e/desktop-game-mode.mjs` (new suite, port 9395) | status bar button and pill, the banner on every screen, +1 hour, Turn off, the amber window and gauge, the real speed held and given back, Settings card and usual time, the shortcut list, Ctrl+G, the pause policy and the queue's words, kept after a restart, all 8 languages fit from 1360×860 to 640×480 with nothing pushed out of the status bar, refused requests, no JavaScript errors |
+| `tests/e2e/real-game-mode.mjs` (by hand, internet, port 9399) | a kernel.org download held to a quarter of its speed, to 256 KB/s, paused with progress kept, and back to full speed |
+| By hand: the real tray (KDE Plasma, D-Bus menu) | the "Game mode" item's tick on / off by click, unticked by itself when the time ends, the desktop notification |

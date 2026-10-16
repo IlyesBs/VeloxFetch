@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SetSmartThrottle, SmartThrottle } from "./types";
+import type { SetGameMode, SetSmartThrottle, SmartThrottle } from "./types";
 
 // throttle.ts marks <html> while it is on: a bare stand-in is enough here (no browser in these tests).
 (globalThis as unknown as { document: unknown }).document = { documentElement: { dataset: {} }, visibilityState: "visible" };
@@ -9,6 +9,7 @@ const server = vi.hoisted(() => ({
   state: null as unknown as SmartThrottle,
   sets: [] as { patch: SetSmartThrottle; resolve: () => void; reject: (e: unknown) => void }[],
   gets: [] as { resolve: () => void }[],
+  games: [] as { patch: SetGameMode; resolve: () => void; reject: (e: unknown) => void }[],
   toasts: [] as string[],
 }));
 
@@ -25,6 +26,22 @@ vi.mock("./api", () => ({
           reject,
         });
       }),
+    setGameMode: (patch: SetGameMode) =>
+      new Promise((resolve, reject) => {
+        server.games.push({
+          patch,
+          resolve: () => {
+            const on = patch.on ?? server.state.gameMode.on;
+            server.state = {
+              ...server.state,
+              reason: on ? "game" : "off",
+              gameMode: { ...server.state.gameMode, on, untilMs: on ? 1_000_000 : null },
+            };
+            resolve(server.state);
+          },
+          reject,
+        });
+      }),
     getSmartThrottle: () => new Promise((resolve) => server.gets.push({ resolve: () => resolve({ ...server.state }) })),
   },
   normalizeError: (e: unknown) => ({ message: String(e) }),
@@ -35,7 +52,8 @@ vi.mock("./hooks", () => ({
 
 vi.mock("./chrome", () => ({ syncFrameTheme: () => {} }));
 
-const { throttleStore, gaugeShare, throttleStatus, throttleOn, throttleLevel, LEVEL_REQUEST } = await import("./throttle");
+const { throttleStore, gaugeShare, throttleStatus, throttleOn, throttleLevel, LEVEL_REQUEST, gameOn, gameSecondsLeft, formatLeft, gameLine } =
+  await import("./throttle");
 const { paletteKey } = await import("./theme");
 
 const base: SmartThrottle = {
@@ -57,6 +75,7 @@ const base: SmartThrottle = {
   gameHold: false,
   profileAdaptive: null,
   heldByNetworks: false,
+  gameMode: { on: false, untilMs: null, minutes: 120 },
 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -65,6 +84,7 @@ beforeEach(async () => {
   server.sets = [];
   server.gets = [];
   server.toasts = [];
+  server.games = [];
   throttleStore.set({ ...base });
 });
 
@@ -236,5 +256,72 @@ describe("several networks at once", () => {
     expect(throttleStatus(t, { ...base, enabled: true, heldByNetworks: true })).toBe("thr.heldByNetworks");
     expect(throttleStatus(t, { ...base, enabled: true, profileAdaptive: false, heldByNetworks: true })).toBe("thr.heldByNetworks");
     expect(throttleStatus(t, { ...base, enabled: false })).toBe("thr.off");
+  });
+});
+
+describe("Game mode", () => {
+  const t = (k: string, v?: Record<string, string | number>) => `${k}${v ? JSON.stringify(v) : ""}`;
+  const playing: SmartThrottle = { ...base, reason: "game", limitBps: 262144, gamePolicy: "low", gameLimitBps: 262144, gameMode: { on: true, untilMs: 10_000, minutes: 120 } };
+
+  it("wins over every level and over several networks at once, and says what downloads do", () => {
+    expect(gameOn(playing)).toBe(true);
+    expect(gameOn(base)).toBe(false);
+    expect(throttleStatus(t, playing)).toMatch(/^gm\.name · gm\.lineLow\{"speed":"256/);
+    expect(throttleStatus(t, { ...playing, heldByNetworks: true })).toMatch(/^gm\.name/);
+    expect(throttleStatus(t, { ...playing, profileAdaptive: false })).toMatch(/^gm\.name/);
+    expect(gameLine(t, { ...playing, gamePolicy: "pause" })).toBe("gm.linePause");
+    expect(gameLine(t, { ...playing, gamePolicy: "adaptive" })).toMatch(/^gm\.lineAdaptive\{/);
+    expect(gameLine(t, { ...playing, gamePolicy: "adaptive", limitBps: null })).toBe("gm.lineAdaptiveNoSpeed");
+    // The gauge shows Game mode's cap even with Smart throttle off.
+    expect(gaugeShare({ ...playing, referenceBps: 1_048_576 })).toBe(0.25);
+  });
+
+  it("time left: counts down, never below zero, and none when it lasts until turned off", () => {
+    expect(gameSecondsLeft(playing.gameMode, 4_000)).toBe(6);
+    expect(gameSecondsLeft(playing.gameMode, 20_000)).toBe(0);
+    expect(gameSecondsLeft({ ...playing.gameMode, untilMs: null }, 0)).toBeNull();
+    expect(formatLeft(t, 30)).toBe('dur.s{"s":30}');
+    expect(formatLeft(t, 61)).toBe('dur.m{"m":2}');
+    expect(formatLeft(t, 2 * 3600)).toBe('dur.hm{"h":2,"m":0}');
+    expect(formatLeft(t, 6120)).toBe('dur.hm{"h":1,"m":42}');
+  });
+
+  it("one click shows it at once, then the app's answer; the whole window turns amber and says so", async () => {
+    void throttleStore.game({ on: true }, "on!");
+    const shown = throttleStore.get();
+    expect(shown?.gameMode.on).toBe(true);
+    expect(shown?.reason).toBe("game");
+    expect(Math.abs((shown?.gameMode.untilMs ?? 0) - Date.now() - 120 * 60_000)).toBeLessThan(5_000);
+    const root = (globalThis as unknown as { document: { documentElement: { dataset: Record<string, string> } } }).document.documentElement;
+    expect(root.dataset.game).toBe("on");
+    expect(root.dataset.throttle).toBeDefined();
+    await tick();
+    expect(server.games.map((x) => x.patch)).toEqual([{ on: true }]);
+    server.games[0]?.resolve();
+    await tick();
+    expect(throttleStore.get()?.gameMode.untilMs).toBe(1_000_000);
+    expect(server.toasts).toEqual(["on!"]);
+    // Off: gone at once, colours back.
+    const off = throttleStore.game({ on: false });
+    expect(throttleStore.get()?.gameMode.on).toBe(false);
+    expect(root.dataset.game).toBeUndefined();
+    expect(root.dataset.throttle).toBeUndefined();
+    await tick();
+    server.games[1]?.resolve();
+    await off;
+  });
+
+  it("until turned off shows no end; a refused change brings the real state back", async () => {
+    const bad = throttleStore.game({ on: true, minutes: 0 });
+    expect(throttleStore.get()?.gameMode.untilMs).toBeNull();
+    await tick();
+    server.games[0]?.reject("Game mode lasts at most 24 hours");
+    await bad;
+    await tick();
+    expect(server.toasts).toEqual(["Game mode lasts at most 24 hours"]);
+    expect(server.gets.length).toBe(1);
+    server.gets[0]?.resolve();
+    await tick();
+    expect(throttleStore.get()?.gameMode.on).toBe(false);
   });
 });

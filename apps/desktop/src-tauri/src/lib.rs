@@ -28,8 +28,8 @@ use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, MultiNetworkDto,
     NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PreviewDto, QueueAction,
-    QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetMultiNetwork, SetNetwork, SetPowerAction,
-    SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
+    QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetGameMode, SetMultiNetwork, SetNetwork,
+    SetPowerAction, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
 };
 use std::sync::Arc;
 use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
@@ -316,6 +316,7 @@ command!(get_smart_throttle, GetSmartThrottle, () -> SmartThrottleDto, |m| async
 command!(get_profiles, GetProfiles, () -> ProfilesDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_profiles()) });
 command!(profile_action, ProfileAction, (request: ProfileAction) -> ProfilesDto, |m| m.profile_action(request));
 command!(set_smart_throttle, SetSmartThrottle, (request: SetSmartThrottle) -> SmartThrottleDto, |m| m.set_smart_throttle(request));
+command!(set_game_mode, SetGameMode, (request: SetGameMode) -> SmartThrottleDto, |m| m.set_game_mode(request));
 command!(set_preview_mode, SetPreviewMode, (id: i64, enabled: bool) -> PreviewDto, |m| m.set_preview_mode(id, enabled));
 command!(get_preview_info, GetPreviewInfo, (id: i64) -> PreviewDto, |m| m.preview_info(id));
 // Where the player reads previews from, when not the custom protocol (Linux and macOS: see `preview_server::loopback`).
@@ -952,7 +953,7 @@ pub fn run() {
             };
             let test_source = dev_only("VELOX_CLIPBOARD_FILE").is_some();
             let clipboard = clipboard::ClipboardWatch::start(app.handle().clone(), manager.clone(), source, test_source);
-            smart_throttle::spawn(manager.clone());
+            smart_throttle::spawn(app.handle().clone(), manager.clone());
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             tauri::async_runtime::spawn(preview_server::loopback::start(manager.clone()));
             if fetch_tools {
@@ -1079,6 +1080,7 @@ pub fn run() {
             get_profiles,
             profile_action,
             set_smart_throttle,
+            set_game_mode,
             set_preview_mode,
             get_preview_info,
             get_preview_base,
