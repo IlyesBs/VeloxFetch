@@ -738,6 +738,14 @@ first; 8 runs of 8 under the same load pass.
 | `tests/e2e/desktop-preview.mjs` | Fast by default; Smart from Settings finds the listed program; back to Fast |
 | `tests/e2e/real-throttle.mjs` (by hand, real line, needs `yt-dlp` and `curl`) | Fast, Smart and Manual with a real 4K YouTube video and a listed program next to a real full-speed download (results in `docs/smart-throttle-and-preview.md`) |
 
+## Narrow windows: Settings tabs (October 2026)
+
+Below 768 px the Settings section tabs each grew to the width of all of them together (about 1,000 px) and pushed the
+whole Settings page sideways (since the first version). `desktop-i18n.mjs` now opens Downloads, Queue, History and
+Settings at 900, 760 and 640 px in English, French and Arabic and checks that nothing sticks out of the page (rows
+made to scroll sideways, like tab bars, excepted), that each Settings tab stays a tab and the tab row fits the window,
+and that nothing is pushed out of the status bar.
+
 ## Network usage kept (issue #45, October 2026)
 
 | Test | Checks |

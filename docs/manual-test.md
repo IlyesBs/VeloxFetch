@@ -519,3 +519,5 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. A failed download (a broken link): its card, its details (error, Doctor, timeline) and the Queue page say it in
    that language; the technical detail (HTTP status, error code) may stay as it is.
 3. A refused action (for example a proxy address without a port): the message is in that language.
+4. Make the window narrow (about 640 px wide) in each language: Settings shows its section tabs in one row that
+   scrolls sideways, and the page itself never scrolls sideways; nothing is cut off at the right of the status bar.
