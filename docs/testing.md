@@ -762,3 +762,14 @@ first; 8 runs of 8 under the same load pass.
 | `tests/e2e/desktop-preview.mjs` | Fast by default; Smart from Settings finds the listed program; back to Fast |
 | `tests/e2e/real-throttle.mjs` (by hand, real line, needs `yt-dlp` and `curl`) | Fast, Smart and Manual with a real 4K YouTube video and a listed program next to a real full-speed download (results in `docs/smart-throttle-and-preview.md`) |
 
+## Network usage kept (issue #45, October 2026)
+
+| Test | Checks |
+|---|---|
+| `persistence` `network_usage_is_kept_by_day_and_outlives_downloads_and_history` | per day and month; kept after deleting downloads and the history and after reopening; never wraps |
+| `download-manager` `usage` (+1) | bytes not saved yet count; a new day or month starts from them |
+| `tests/integration/tests/phase5.rs::network_usage_is_kept_after_deleting_downloads_clearing_history_and_restarting` | a real download; delete it and clear the history; restart the manager on the next day of the next month: total kept, today and month from 0, then counting again |
+| `tests/e2e/desktop-ipc.mjs` (+4) | counted while downloading (ever, today, month); kept after the app closes and opens again, and keeps counting; kept after deleting every download and clearing the history; the dashboard card shows the total, today and this month |
+| `tests/e2e/real-network-usage.mjs` (by hand, internet) | a real 145 MB download counted exactly (145.1 MB), never more than the system received; kept after a restart, deleting every download and clearing the history |
+| `tests/e2e/desktop-i18n.mjs` (+1 per language) | the card's "Today" / "This month" rows and the longest number (1023.9 MB) fit from 1360×860 down to 640×480 |
+| `tests/e2e/real-multinet.mjs` (+1, by hand, two networks) | Network usage counts what came through every network |

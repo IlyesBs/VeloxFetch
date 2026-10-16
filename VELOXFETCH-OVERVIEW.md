@@ -390,7 +390,7 @@ Details: `docs/download-intelligence.md`.
 
   | Page | Content |
   |---|---|
-  | **Downloads** | The dashboard: link bar, 6 stat cards, tabbed task cards, side column with live Network ↓↑ / Disk write-read, upcoming downloads, quick actions |
+  | **Downloads** | The dashboard: link bar, 6 stat cards (Network usage: everything ever received, today and this month, kept across restarts, updates and reinstalls: `docs/network-usage.md`), tabbed task cards, side column with live Network ↓↑ / Disk write-read, upcoming downloads, quick actions |
   | **Active** | Running and waiting work: live speed, connections in use, time left, Pause all / Resume all |
   | **Queue** | The queue page |
   | **Completed** | Finished files: search, kind filter, open / folder / remove / delete |
@@ -650,6 +650,7 @@ More: `docs/security.md`, `docs/threat-model.md`, `docs/PRIVACY.md`.
 | Download Intelligence | nothing: each check lives in memory only and is dropped when the dialog is answered or closed |
 | Download Doctor | the last diagnosis of each download, inside its saved diagnostics (SQLite `diagnostics` table, JSON); a copy in memory for the list |
 | Smart Download Queue | same file: each download's queue, place and start time in the `queue` table; the queues and their rules in the settings (`queues.list`, `queues.state`, `queues.held`) |
+| Network usage | same file: bytes received per local day in the `network_usage` table (numbers only) |
 | Sealing key for secrets | OS credential store (Windows Credential Manager / macOS Keychain / Secret Service) |
 | Log | `<app data>/logs/velox.log` (rotating, redacted) |
 | Video tools | `<app data>/tools` |
@@ -857,6 +858,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | The 1.0.0 release gate and the owner's release steps | `docs/release-candidate.md` |
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
+| Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -871,6 +873,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-16 | `port_network_usage_v2` (from `main`, `fix_network_usage_history`) | Fix | Issue #45, brought to v2.0.0 (texts in all 8 languages): the dashboard's Network usage went back to 0 after a restart, an update, a reinstall or deleting the downloads (it counted only since launch). Every byte received is now saved per local day (schema v8, `network_usage`; every 5 s and on close); the card shows the total ever, today and this month; deleting downloads or clearing the history keeps it. Tests: persistence, unit, integration (restart on the next day of the next month), e2e +4. | `docs/network-usage.md` |
 | 2026-10-15 | `fix_smart_held_status` | Fix | While several networks at once holds Smart throttle off, its status line (under the sidebar's gauge, in Settings, the status bar's tooltip) said only "Off · downloads use full speed" — the reason was in a tooltip. It now says "Off · several networks at once" (`throttleStatus`, key `thr.heldByNetworks`, one line like the other states; the controls' tooltip keeps the whole sentence), in all 8 languages. Tests: `throttle.test.ts` (+3 expectations), `desktop-multinet.mjs` 34 → 37 (the line and the greyed level buttons while on, back after), `real-multinet.mjs` 20 → 21. | `docs/several-networks.md` |
 | 2026-10-15 | `port_smart_throttle_v2` (from `main`, `fix_smart_throttle_probe`) | Fix | Issue #46, brought to v2.0.0 (texts in all 8 languages; several networks at once still holds it off, and the level buttons and radios are greyed out meanwhile): Smart throttle never saw a 4K YouTube video next to a download (64 connections starve it: 0.18 MB/s), counted someone watching without touching the mouse as away, and its modes changed nothing. Three levels: Fast (full speed), Smart (automatic: short checks at half speed find a starved program; a video counts without input; more room for a hungry program), Manual (Aggressive / Balanced / Performance all the time). Linux: VeloxFetch's own receive-buffer bytes subtracted from the measurement. The Fast profile holds Smart throttle off and lifts the speed limit. Real line: video found in 36 s, 0.18 -> 1.49 MB/s, full speed 29 s after. | `docs/smart-throttle-and-preview.md` |
 | 2026-10-15 | `feat_multinet_indicator` | Feature | Issue #44: with several networks at once on there was no sign of it. Now the Total speed card and the status bar say "2 networks" (orange behind a VPN / proxy or with fewer than two chosen; the tooltip lists each speed), and the dashboard's side column starts with "Networks in use": each network's speed now, its part of the total (bar), connections, state, and the total of all networks (always the sum; the usual network, also when left out, carries what is not spread; "Usual route (VPN)" behind a VPN). Appears and goes at once with the switch. `MetricsDto.networks` from `DownloadManager::network_speeds` / `multinet::Speeds` (bytes per network and of all downloads, windows of 0.9 s, smoothed; 0 at once when nothing runs; `None` while off). Names only, never addresses. 8 languages. Real cable + USB Wi-Fi: each network's speed matched the system's adapter counters within a few percent, 3 runs. Tests: 1 unit, vitest +2, `desktop-multinet.mjs` 21 → 34 checks (3 runs green), `real-multinet.mjs` 15 → 20 checks. | `docs/several-networks.md` |

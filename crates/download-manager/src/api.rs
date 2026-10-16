@@ -472,6 +472,11 @@ pub struct MetricsDto {
     pub total_downloaded: u64,
     /// Bytes received from the network since the app started.
     pub session_downloaded: u64,
+    /// Network usage (issue #45): bytes received from the network, kept across restarts, updates and reinstalls (never
+    /// lowered by deleting downloads or clearing the history): ever, today and this month (the computer's local time).
+    pub network_total: u64,
+    pub network_today: u64,
+    pub network_month: u64,
     pub disk_free: Option<u64>,
     pub disk_total: Option<u64>,
     /// Size of the download folder.
