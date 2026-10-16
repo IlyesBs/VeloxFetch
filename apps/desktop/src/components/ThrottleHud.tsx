@@ -9,6 +9,7 @@ import {
   THROTTLE_LEVELS,
   THROTTLE_MODES as MODES,
   throttleLevel,
+  gameOn,
   throttleOn,
   throttleStatus,
   throttleStore,
@@ -55,7 +56,8 @@ export function ThrottleHud({
   // Several networks at once is on: Smart throttle stays off (every network at full speed) until it is turned off.
   const held = !!s?.heldByNetworks;
   const lockTip = held ? t("multi.smartHeld") : byProfile ? profileTip : undefined;
-  const limiting = on && s?.limitBps != null;
+  // Game mode applies whatever the level: the gauge shows its cap too.
+  const limiting = (on || gameOn(s)) && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   // Live: the cap against the speed downloads usually get (the share they keep right now).
   const shown = gaugeShare(s);

@@ -79,6 +79,7 @@ const COMMANDS: &[&str] = &[
     "get_profiles",
     "profile_action",
     "set_smart_throttle",
+    "set_game_mode",
     "set_preview_mode",
     "get_preview_info",
     "get_preview_base",

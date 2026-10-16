@@ -85,6 +85,7 @@
     "allow-get-profiles",
     "allow-profile-action",
     "allow-set-smart-throttle",
+    "allow-set-game-mode",
     "allow-set-preview-mode",
     "allow-get-preview-info",
     "allow-get-preview-base",

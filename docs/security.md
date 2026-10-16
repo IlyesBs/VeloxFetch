@@ -815,3 +815,14 @@ Full rules: `docs/new-link-recovery.md` §6.
   The user's own checksum always wins. Plain http next to the local test servers only with the debug-only
   `VELOX_PUBLISHER_HTTP` switch (release builds never read it).
 * Two new commands, `get_publisher_check` / `set_publisher_check` (a boolean), main window only.
+
+## Game mode (feature #7, October 2026)
+
+* One new command, `set_game_mode` (`{ on, minutes, addMinutes, defaultMinutes }`, unknown fields refused), main
+  window only; the tray item calls the manager inside the app, not through a command.
+* Bounded and never stuck: at most 24 hours at once, "+1 hour" never past a day from now; "until I turn it off" only
+  when the user picks it, and then shown as such on every screen. A saved end that cannot be read is off; one that has
+  passed is forgotten (at the next 3 s observation, or at start).
+* Nothing new is read or sent: Game mode does not scan programs or reach the network; it sets only the Smart bucket's
+  cap and the queue gate that the gaming policy already used. Nothing the user set (levels, limits, queue pause) is
+  changed. The end notification is a local desktop notification, shown only when notifications are on.

@@ -21,6 +21,8 @@ export const MESSAGES: Record<string, Key> = {
   "enter the proxy address, like http://proxy.example:3128": "msg.enter_the_proxy_address_like_http_proxy_example",
   "these network names cannot be saved": "msg.these_network_names_cannot_be_saved",
   "Smart throttle stays off while several networks at once is on": "msg.smart_throttle_stays_off_while_several_networks",
+  "Game mode lasts at most 24 hours": "msg.game_mode_lasts_at_most_24_hours",
+  "Game mode cannot be made longer while it is turned off": "msg.game_mode_cannot_be_made_longer_while_it_is_turn",
   "enter the proxy as http://host:port (or socks5://host:port)": "msg.enter_the_proxy_as_http_host_port_or_socks5_host",
   "file name must not contain path separators": "msg.file_name_must_not_contain_path_separators",
   "give either a link or a waiting browser download": "msg.give_either_a_link_or_a_waiting_browser_download",

@@ -1310,6 +1310,35 @@ dialog::backdrop {
   background: var(--line-strong);
 }
 
+/* Game mode (feature #7): a button in the status bar (a lit pill while on), a banner on every screen, a card in
+   Settings. While it is on the accent pair is the Smart throttle amber (html[data-throttle]) and the window says so. */
+.game-btn {
+  @apply h-6 rounded-full px-2 text-dim transition-colors;
+}
+.game-btn:hover {
+  color: var(--fg);
+  background: var(--highlight);
+}
+.game-btn.game-btn-on {
+  @apply font-semibold;
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 12px var(--glow);
+}
+.game-banner {
+  color: var(--fg);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 75%);
+}
+.game-banner-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 14px var(--glow);
+}
+.game-card.game-card-on {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: linear-gradient(90deg, var(--accent-soft), transparent 80%);
+}
+
 .stop-violet {
   stop-color: var(--violet);
 }

@@ -80,9 +80,11 @@ node tests/e2e/desktop-video.mjs  # video bar hand-over -> video dialog -> file 
 node tests/e2e/desktop-preview.mjs  # live preview through the velox-preview protocol, smart throttle with the real process scan
 node tests/e2e/desktop-throttle.mjs # Smart throttle card / Settings / status bar: clicks, modes, a capped download that never stops
 node tests/e2e/desktop-gaming.mjs   # gaming policy with a stand-in game process: pause / resume only what it paused, low speed, off
+node tests/e2e/desktop-game-mode.mjs  # Game mode in one click: status bar, banner, Ctrl+G, Settings, pause policy, restart, 8 languages fit
 node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with downloads running (see docs/ui-performance.md)
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
+node tests/e2e/real-game-mode.mjs target/debug/velox-desktop.exe  # by hand, internet: a kernel.org download held by Game mode (give way, low speed, pause) and given its speed back
 node tests/e2e/real-publisher-checksum.mjs target/debug/velox-desktop.exe  # by hand, internet: the Linux kernel and a Debian image verified with their publisher's checksum
 node tests/e2e/real-network-usage.mjs target/debug/velox-desktop.exe  # by hand, internet: a real download counted in Network usage, kept after a restart and deleting everything
 ```
@@ -96,7 +98,8 @@ closed in the middle) and kept up to date: nothing to install (Settings > Browse
 A video downloading in the Videos list can be paused and resumed, watched while it downloads, and is tried again by itself
 when the site or the network fails part-way (Retry continues from what is already there). Videos count in the dashboard
 (speed, active, network) and land in the History. Files whose publisher lists a checksum next to them (SHA256SUMS…) are verified by themselves before they are
-finished, and marked "Verified" (`docs/publisher-checksum.md`). The Network usage card keeps everything VeloxFetch has received,
+finished, and marked "Verified" (`docs/publisher-checksum.md`). Game mode: one click on the status bar's gamepad, the tray menu or
+Ctrl+G and downloads give way to a game or a call at once, with a banner and a countdown (`docs/game-mode.md`). The Network usage card keeps everything VeloxFetch has received,
 with today and this month, across restarts, updates, reinstalls and deleted downloads (`docs/network-usage.md`). Videos protected with DRM (Netflix, Shahid, STC tv...) cannot be
 downloaded, and VeloxFetch says so.
 

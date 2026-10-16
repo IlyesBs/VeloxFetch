@@ -337,6 +337,7 @@ impl DownloadManager {
         // The active Download Profile's values over the user's settings, in force before anything starts.
         mgr.apply_profile();
         mgr.apply_saved_logging();
+        mgr.resume_game_mode();
         mgr.spawn_ticker();
         // First evaluation happens here, not in the background loop, so "what to do at launch" is
         // decided exactly once and can never race with the first user command.

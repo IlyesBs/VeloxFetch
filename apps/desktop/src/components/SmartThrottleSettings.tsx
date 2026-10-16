@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { GameModeSettings } from "./GameMode";
 import { actions } from "../actions";
 import { useStore } from "../hooks";
 import { formatSpeed } from "../format";
@@ -180,6 +181,7 @@ export function SmartThrottleSettings() {
 
   return (
     <Panel title={t("smart.title")} hint={t("smart.hint")}>
+      <GameModeSettings />
       <fieldset>
         <legend className="label mb-1.5">{t("smart.level")}</legend>
         <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" data-testid="smart-levels">

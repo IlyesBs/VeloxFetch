@@ -216,9 +216,28 @@ export interface SmartThrottle {
   profileAdaptive: boolean | null;
   /** Off because several networks at once is on (every network at full speed); `enabled` is the user's kept switch. */
   heldByNetworks: boolean;
+  /** Game mode: on in one click; the gaming policy applies now, whatever level is chosen, until it ends. */
+  gameMode: GameMode;
 }
 
-export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
+export interface GameMode {
+  on: boolean;
+  /** When it ends (Unix ms); null while on: when the user turns it off. */
+  untilMs: number | null;
+  /** How long one click turns it on for (minutes; 0 = until turned off). */
+  minutes: number;
+}
+
+/** Turn Game mode on or off, make it longer, or set how long one click turns it on for. */
+export interface SetGameMode {
+  on?: boolean;
+  /** With on: for this long (minutes; 0 = until turned off); the usual time when left out. */
+  minutes?: number;
+  addMinutes?: number;
+  defaultMinutes?: number;
+}
+
+export type ThrottleReason = "off" | "game" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
 
 export interface SetSmartThrottle {
   enabled?: boolean;

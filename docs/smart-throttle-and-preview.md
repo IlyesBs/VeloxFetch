@@ -97,6 +97,12 @@ says "Paused while a game or call runs · N will resume when it closes". No noti
 during the game (pause policy) runs at the reserved minimum; another user's or a protected process shows its name
 only (its executable is not readable), which is enough for name matching, not for path matching.
 
+### Game mode (feature #7, October 2026)
+
+The same policy, turned on by the user in one click (status bar, tray menu, Ctrl+G) instead of by a listed program, and
+in force whatever level is chosen until it ends (1 h, 2 h, 4 h or until turned off). `Reason::Game`; see
+`docs/game-mode.md`.
+
 ### What was wrong, and the fixes (October 2026)
 
 Measured on a real line (~3 MB/s, real servers, a competing download started by hand):

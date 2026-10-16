@@ -520,6 +520,23 @@ Needs two signed releases (x.y.z installed, a newer one published with `latest.j
 2. The same with the network unplugged at resume: it fails ("Retry" offered) and still shows about 30 %; plug the
    network back in, Retry: it continues from there.
 
+## AR. Game mode (feature #7; once per OS)
+
+1. Start a big download (for example `https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.10.tar.xz`), Smart throttle
+   on Fast. Click the gamepad in the status bar: the banner says "Game mode on · downloads keep …", the window turns
+   amber, the status bar pill counts down from 2 h, the download slows to about a quarter. Open History and Settings:
+   the banner is there too.
+2. Press **+1 hour** (3 h left), then **Turn off**: the banner goes, the colours come back, full speed again.
+3. Press **Ctrl+G** (⌘G on macOS): on; again: off.
+4. Tray icon menu: **Game mode** (ticked while on) turns it on and off; turning it on in the window ticks it within a
+   few seconds.
+5. Settings › Speed › Smart throttle: choose "Pause downloads" for "While a listed program runs or Game mode is on",
+   turn Game mode on: the download pauses, the Queue says "Paused for Game mode"; off: it resumes.
+6. Choose "Until I turn it off", turn it on, quit and start VeloxFetch: still on, the banner says "until you turn it off".
+7. With "1 hour", leave it to end (or set the clock forward): full speed, the tick goes, a notification "Game mode ended".
+8. In every language and at the smallest window (640×480): the pill and the banner fit; nothing is pushed out of the
+   status bar.
+
 ## AQ. Network usage kept (issue #45; once per OS and installation kind)
 1. Download a few files. The dashboard's **Network usage** card shows a total and two rows, "Today" and "This
    month", whose numbers are never cut (also in a small window and in every language); hovering it shows what was

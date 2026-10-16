@@ -7,6 +7,7 @@ import { ClipboardBanner } from "./components/ClipboardBanner";
 import { MediaDialog } from "./components/MediaDialog";
 import { PendingDialog } from "./components/PendingDialog";
 import { NewLinkHost } from "./components/NewLinkDialog";
+import { GameModeBanner, toggleGameMode } from "./components/GameMode";
 import { PowerBanner } from "./components/PowerBanner";
 import { Sidebar, type NavTarget, type RouteName } from "./components/shell/Sidebar";
 import { StatusBar } from "./components/shell/StatusBar";
@@ -148,6 +149,7 @@ export default function App() {
       else if (k === "2") go(() => setRoute({ name: "queue" }));
       else if (k === "3") go(() => setRoute({ name: "history" }));
       else if (k === ",") go(() => setRoute({ name: "settings" }));
+      else if (k === "g" && !e.shiftKey) go(() => toggleGameMode(t));
     };
     const onPaste = (e: ClipboardEvent) => {
       if (isEditable(e.target) || modalOpen()) return;
@@ -193,6 +195,7 @@ export default function App() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <TitleBar route={current} />
           <PowerBanner />
+          <GameModeBanner />
           <ClipboardBanner onReviewMany={(links) => setBatch({ links: links.join("\n") })} onStream={(url) => setStream({ url })} />
           {/* Never scrolls sideways: right to left, the Linux web view puts the bar on the left but lays the content out as
               if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers
