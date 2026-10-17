@@ -8,6 +8,10 @@ The extension only sends links to the VeloxFetch desktop application running on 
   windows.
 * **Where it goes:** to the VeloxFetch app on your computer, through the browser's native messaging. Nothing is sent to the
   developer or to any server by the extension.
+* **Firefox's data line:** Firefox asks each add-on to declare what it hands to anything outside the browser, the app on the
+  same computer included. The add-on declares exactly what is above: the pages you are on and links (*browsing activity*, *website
+  content*) and, when Send cookies is on, the site's cookies (*authentication information*). Firefox shows this list when you
+  install it; it does not mean anything goes to the developer.
 * **What is stored:** two switches (take over downloads, send cookies) in the browser's extension storage. The app keeps the download
   and, until it finishes, the headers needed to resume it; they are deleted when the download completes or is cancelled.
 * **Video detection (on; you can turn it off in the extension's popup):** the extension looks at the type and size of the files pages load, to

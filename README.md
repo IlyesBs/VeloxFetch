@@ -25,7 +25,7 @@ security, roadmap) on one page. Details: [`docs/architecture.md`](docs/architect
 apps/desktop        Tauri v2 app: src/ (React UI), src-tauri/ (commands, capabilities, CSP)
 apps/cli            `velox` command-line client
 apps/native-host    `velox-native-host`: the program browsers start for the extension
-apps/browser-extension  Manifest V3 extension (Chromium + Firefox), no dependencies
+apps/browser-extension  Manifest V3 extension (Chromium + Firefox 140+), no dependencies
 crates/http-client  reqwest wrapper: probing, verified ranges, pooling, DNS cache
 crates/downloader-core   the engine (chunking, retry, resume, limits, scheduling, integrity)
 crates/persistence  SQLite state + crash recovery
