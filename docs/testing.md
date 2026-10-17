@@ -754,6 +754,14 @@ Settings at 900, 760 and 640 px in English, French and Arabic and checks that no
 made to scroll sideways, like tab bars, excepted), that each Settings tab stays a tab and the tab row fits the window,
 and that nothing is pushed out of the status bar.
 
+## Firefox data consent (October 2026)
+
+addons.mozilla.org refused the add-on's zip: `data_collection_permissions` missing. `package.test.mjs` now checks that the
+Firefox manifest declares exactly `browsingActivity`, `websiteContent`, `authenticationInfo` (27 extension tests). By hand:
+Mozilla's `addons-linter` 10.14.0 on the built zip (before: the missing-key message; after: 0 errors, 0 warnings, 0 notices,
+with `strict_min_version` 140.0 and `gecko_android` 142.0), and `web-ext run` in a real Firefox 153 ESR with a scratch home and
+profile: the add-on installs and its background pings a stand-in native host (`velox-fetch@velox.app`).
+
 ## Network usage kept (issue #45, October 2026)
 
 | Test | Checks |

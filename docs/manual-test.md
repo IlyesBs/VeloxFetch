@@ -27,7 +27,7 @@ Data: `%APPDATA%\app.velox.fetch\`. Downloads: `Downloads\VeloxFetch\`.
    page and opens the folder. The steps are also shown in the app, with the folder path and a *Copy path* button.
 3. In the browser (last step, done by you once): **Chrome / Edge / Brave:** turn on *Developer mode*, click *Load unpacked*, choose the
    folder shown. The extension's ID must read `gbcanjaaelioalfdggkhbbnbinmfgdbc` - a different ID is refused on purpose.
-   **Firefox:** *Load Temporary Add-on*, pick `manifest.json` in the folder (Firefox forgets it when it closes).
+   **Firefox:** *Load Temporary Add-on*, pick `manifest.json` in the folder (Firefox forgets it when it closes; Firefox 140 or newer).
    Later, *Show steps* on a connected line shows these steps again; *Disconnect* removes the connection.
 4. Click the extension's toolbar icon: it should say **Connected to VeloxFetch 1.0.0**.
    If it says the browser is not connected, press Disconnect then Install extension again in VeloxFetch.

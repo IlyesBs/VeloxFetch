@@ -331,7 +331,8 @@ The diagnosis of a failure (full description: `docs/download-doctor.md`).
   The manifest allows exactly the shipped extension ids. Brave, Vivaldi and other Chromium forks read the
   Chromium key on Windows (verified against a real Brave), so "Brave" registers there.
 * **Extension ids.** The Chromium id is pinned by the public `key` in the extension's manifest and equals
-  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`.
+  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`. The Firefox
+  manifest needs Firefox 140+ (Android 142+) and declares what it hands to the app (`data_collection_permissions`).
 
 ## Batch downloads and clipboard (Phase 8)
 

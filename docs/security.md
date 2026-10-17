@@ -127,8 +127,10 @@ deleted from the database when the download ends.
 Unix); a process running as the same user can read it, exactly as it could read the browser's own data.
 Cookies are stored in the local database in clear text while a download is unfinished. The extension is
 unsigned and not on any store; Chrome / Edge / Brave load it in developer mode and Firefox as a temporary
-add-on until it is signed. The Firefox build has not been run in a real Firefox here; the Chromium build was
-tested in a real Brave (see below).
+add-on until it is signed. The Firefox build was loaded in a real Firefox 153 ESR (scratch home and profile): it
+installs and its background reaches the native helper; the Chromium build was tested in a real Brave (see below).
+The Firefox manifest declares what goes to the app (`data_collection_permissions`: browsing activity, website content,
+authentication information; Firefox 140+, required by addons.mozilla.org) and a test keeps that list exact.
 
 ### Lifecycle
 * On exit, running downloads are paused and saved before the process ends.

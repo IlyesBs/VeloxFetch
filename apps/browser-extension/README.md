@@ -38,7 +38,9 @@ npm test               # validation, least-privilege and id-drift checks (Node's
   `gbcanjaaelioalfdggkhbbnbinmfgdbc` (fixed by the public `key` in the manifest); the native host only accepts
   that id.
 * **Firefox:** open `about:debugging#/runtime/this-firefox`, *Load Temporary Add-on*, pick
-  `dist/firefox/manifest.json`. (A permanent install needs the add-on to be signed.)
+  `dist/firefox/manifest.json`. (A permanent install needs the add-on to be signed.) Firefox 140 or newer (Android
+  142): the manifest declares what the add-on hands to the app (`data_collection_permissions`: `browsingActivity`,
+  `websiteContent`, `authenticationInfo`), which addons.mozilla.org requires and Firefox shows at install.
 
 ## Permissions, and why
 
