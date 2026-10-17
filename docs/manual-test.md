@@ -37,7 +37,7 @@ Data: `%APPDATA%\app.velox.fetch\`. Downloads: `Downloads\VeloxFetch\`.
 3. In VeloxFetch open **Settings > Browser integration**: Chrome, Edge and Brave carry a **Chrome Web Store** badge. **Install extension**
    on another browser's line connects it and opens the store page there; the steps show the store's, with the page's address and
    **Copy link** if no browser could be opened. **Firefox** (until its add-on is published): *Load Temporary Add-on*, pick
-   `manifest.json` in the folder VeloxFetch opened (Firefox forgets it when it closes).
+   `manifest.json` in the folder VeloxFetch opened (Firefox forgets it when it closes; Firefox 140 or newer).
    Uninstalling VeloxFetch removes the registry keys / files of step 1 (the browsers keep an extension already added).
    Later, *Show steps* on a connected line shows these steps again; *Disconnect* removes the connection.
 4. Click the extension's toolbar icon: it should say **Connected to VeloxFetch 1.0.0**.

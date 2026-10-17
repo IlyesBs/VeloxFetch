@@ -41,6 +41,12 @@ So the work is in two parts:
 * Account (free): https://addons.mozilla.org/developers/ . Upload `VeloxFetch-extension-firefox.zip`.
 * Choose **"On your own"** (unlisted) for a quick automatic signature, or **listed** for the public directory. The signed `.xpi`
   installs permanently (unlike the temporary add-on used today). The add-on id is already `velox-fetch@velox.app`.
+* AMO refuses a new add-on without `browser_specific_settings.gecko.data_collection_permissions`. The manifest declares
+  `required: ["browsingActivity", "websiteContent", "authenticationInfo"]` (what it hands to the app through native
+  messaging, which Mozilla's policy counts), with `strict_min_version` 140.0 and `gecko_android` 142.0 (the first versions
+  with the built-in consent). Mozilla's validator (`addons-linter` 10.14.0) on the zip: 0 errors, 0 warnings, 0 notices.
+  If AMO asks: nothing goes to the developer or a server; Send cookies is the user's switch and private windows never send
+  cookies.
 
 ## 4. Wiring (done after the ids exist)
 
