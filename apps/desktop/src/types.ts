@@ -390,8 +390,10 @@ export interface ExtensionInstall {
   browser: BrowserName;
   /** "store": the browser offers the published extension itself; "developer": load the folder in Developer mode. */
   method: "store" | "developer";
-  /** Folder to pick in the browser (Load unpacked / temporary add-on). */
+  /** Folder to pick in the browser (Load unpacked / temporary add-on). Empty for the store. */
   folder: string;
+  /** The extension's page in the Chrome Web Store (store only). */
+  storeUrl: string;
   openedBrowser: boolean;
   openedFolder: boolean;
   integration: BrowserIntegration;
@@ -404,13 +406,32 @@ export interface BrowserIntegration {
   hostPresent: boolean;
   browsers: BrowserEntry[];
   chromeExtensionId: string;
+  /** The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there. */
+  chromeStoreId: string | null;
   firefoxExtensionId: string;
   /** Ask before a browser download starts. */
   confirmDownloads: boolean;
   videoBar: boolean;
   /** Cookies / credentials are sealed with a key from the OS credential store (false: kept in memory only). */
   secretsProtected: boolean;
+  /** The last time a VeloxFetch extension reached the app: it is installed and working. Null: never yet. */
+  extensionContact: ExtensionContact | null;
+  /** Since when (ms) the app waits for the browser to add the extension by itself (first start). Null: not waiting. */
+  extensionAwaitedSince: number | null;
+  /** After this long without the extension, its store page is offered instead. */
+  extensionWaitMs: number;
 }
+
+export interface ExtensionContact {
+  /** Milliseconds since 1970. */
+  at: number;
+  /** The extension from the Chrome Web Store. */
+  fromStore: boolean;
+}
+
+/** The extension reached the app (`announce`: the first time, or the one awaited since the first start), or the first
+ *  start waits for the browser to add it. */
+export type ExtensionEvent = { kind: "contact"; contact: ExtensionContact; announce: boolean } | { kind: "waiting"; since: number };
 
 /** A download a browser handed over, waiting for the user's decision. */
 export interface PendingDownload {

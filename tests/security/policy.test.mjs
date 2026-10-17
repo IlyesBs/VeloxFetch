@@ -891,3 +891,67 @@ test("one version everywhere (the updater compares it; the extension reports it)
     assert.equal(got, v, `${name} says ${got}, Cargo.toml says ${v}`);
   }
 });
+
+test("the installers point the browsers at the store extension the app trusts, at the documented places only, and remove it", () => {
+  const id = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(read("crates/browser-bridge/src/caller.rs"))?.[1];
+  assert.ok(id, "CHROME_STORE_ID is set");
+  const store = read("crates/system-integration/src/store_extension.rs");
+  const folders = [.../LINUX_SYSTEM_FOLDERS: \[&str; 3\] =\s*\[([^\]]+)\]/.exec(store)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const keys = [.../WINDOWS_MACHINE_KEYS: \[&str; 3\] =\s*\[([^\]]+)\]/.exec(store)[1].matchAll(/r"([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(folders.length, 3);
+  assert.equal(keys.length, 3);
+  const update = "https://clients2.google.com/service/update2/crx";
+
+  // Linux packages: exactly the shared folders, the id the app trusts, only a pointer to the store.
+  const postinst = read("apps/desktop/src-tauri/packaging/postinst.sh");
+  const postrm = read("apps/desktop/src-tauri/packaging/postrm.sh");
+  for (const s of [postinst, postrm]) {
+    assert.match(s, new RegExp(`^VELOX_EXTENSION_ID=${id}$`, "m"));
+    assert.match(s, new RegExp(`for dir in ${folders.join(" ")}; do`));
+  }
+  assert.ok(postinst.includes(`{"external_update_url":"${update}"}`));
+  assert.ok(!/external_crx|--load-extension|ExtensionInstallForcelist|policies/.test(postinst), "never a local package or a policy");
+  assert.match(postrm, /remove\|purge\|0\)[\s\S]*rm -f "\$dir\/\$VELOX_EXTENSION_ID\.json"/, "removed with the program, not on upgrade");
+
+  // Windows setup: the same keys under HKLM in the browsers' (32-bit) view, removed on uninstall but not on update.
+  const nsh = read("apps/desktop/src-tauri/installer-hooks.nsh").replace(/\r/g, "");
+  assert.ok(nsh.includes(`!define VELOX_EXTENSION_ID "${id}"`));
+  assert.ok(nsh.includes(`!define VELOX_STORE_UPDATE_URL "${update}"`));
+  const install = /!macro NSIS_HOOK_POSTINSTALL([\s\S]*?)!macroend/.exec(nsh)[1];
+  const uninstall = /!macro NSIS_HOOK_POSTUNINSTALL([\s\S]*?)!macroend/.exec(nsh)[1];
+  for (const k of keys) {
+    assert.ok(install.includes(`WriteRegStr HKLM "${k}\\\${VELOX_EXTENSION_ID}" "update_url" "\${VELOX_STORE_UPDATE_URL}"`), k);
+    assert.ok(uninstall.includes(`DeleteRegKey HKLM "${k}\\\${VELOX_EXTENSION_ID}"`), k);
+  }
+  assert.match(install, /SetRegView 32[\s\S]*Extensions[\s\S]*VELOX_REG_VIEW_BACK/);
+  assert.match(uninstall, /\$\{If\} \$UpdateMode <> 1[\s\S]*SetRegView 32[\s\S]*DeleteRegKey HKLM "Software\\Google[\s\S]*VELOX_REG_VIEW_BACK[\s\S]*\$\{EndIf\}/);
+  assert.ok(!/Policies|ExtensionInstallForcelist/.test(nsh), "never a browser policy");
+});
+
+test("the packages' extension lines really write the pointer and remove it again (run on scratch folders)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const os = await import("node:os");
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "velox-pointer-"));
+  try {
+    const dirs = ["a/extensions", "b/extensions", "c/extensions"].map((d) => path.join(tmp, d));
+    const at = (s, re) => s.match(re)[0].replace(/^(\s*)for dir in .*; do$/m, `$1for dir in ${dirs.map((d) => `'${d}'`).join(" ")}; do`);
+    const install = at(read("apps/desktop/src-tauri/packaging/postinst.sh"), /^VELOX_EXTENSION_ID=[\s\S]*?^done$/m);
+    const postrm = read("apps/desktop/src-tauri/packaging/postrm.sh");
+    const remove = /^VELOX_EXTENSION_ID=.*$/m.exec(postrm)[0] + "\n" + at(postrm, /^\s*for dir in [\s\S]*?^\s*done$/m);
+    fs.mkdirSync(path.join(tmp, "b"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "b", "other.json"), "{}"); // b: another package's folder, kept
+    execFileSync("sh", ["-c", install]);
+    for (const d of dirs) {
+      const f = path.join(d, "keobnkoppcchnbpmmfodidkcedglbhnn.json");
+      assert.deepEqual(JSON.parse(fs.readFileSync(f, "utf8")), { external_update_url: "https://clients2.google.com/service/update2/crx" });
+      assert.equal(fs.statSync(f).mode & 0o777, 0o644);
+      assert.deepEqual(fs.readdirSync(d), ["keobnkoppcchnbpmmfodidkcedglbhnn.json"], "no leftover temporary file");
+    }
+    execFileSync("sh", ["-c", install]); // installing again (an upgrade) is fine
+    execFileSync("sh", ["-c", remove]);
+    assert.ok(!fs.existsSync(path.join(tmp, "a")) && !fs.existsSync(path.join(tmp, "c")), "folders it created and left empty are gone");
+    assert.deepEqual(fs.readdirSync(path.join(tmp, "b")), ["other.json"], "another package's files stay");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

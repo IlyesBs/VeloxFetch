@@ -37,6 +37,9 @@ npm test               # validation, least-privilege and id-drift checks (Node's
   *Developer mode*, choose *Load unpacked* and pick `dist/chrome`. The extension id will be
   `gbcanjaaelioalfdggkhbbnbinmfgdbc` (fixed by the public `key` in the manifest); the native host only accepts
   that id.
+* **Published:** the Chrome Web Store item `keobnkoppcchnbpmmfodidkcedglbhnn` (built from `dist/chrome-store`, no
+  `key`). The native host trusts it too (`CHROME_STORE_ID`), and the app's installers point Chrome, Edge and Brave at
+  it (`docs/store-extension.md`). The developer build above stays for development.
 * **Firefox:** open `about:debugging#/runtime/this-firefox`, *Load Temporary Add-on*, pick
   `dist/firefox/manifest.json`. (A permanent install needs the add-on to be signed.)
 

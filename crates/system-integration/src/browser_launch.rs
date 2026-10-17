@@ -143,11 +143,16 @@ pub fn open_store_page(launcher: &Launcher, id: &str) -> std::io::Result<()> {
     if !crate::store_extension::valid_id(id) {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not an extension id"));
     }
-    let url = format!("https://chromewebstore.google.com/detail/{id}");
+    let url = store_page_url(id);
     match launcher {
         Launcher::Exe(exe) => spawn(Command::new(exe).arg(&url)),
         Launcher::MacApp(app) => spawn(Command::new("open").arg("-a").arg(app).arg(&url)),
     }
+}
+
+/// The extension's page in the Chrome Web Store.
+pub fn store_page_url(id: &str) -> String {
+    format!("https://chromewebstore.google.com/detail/{id}")
 }
 
 /// Show a folder in the system file manager.

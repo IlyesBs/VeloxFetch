@@ -186,6 +186,24 @@ pub fn status(browser: Browser, spec: &HostSpec, manifest_dir: &Path, target: &T
     Status { registered, host_present: spec.host_exe.is_file() }
 }
 
+/// A registration of ours that only needs writing again: the manifest the browser finds names our host and our
+/// helper program (or a helper that no longer exists), but differs from what we would write now (an update added
+/// an extension id, the store one). A registration pointing at another copy of VeloxFetch that still exists, or
+/// anything that is not ours, is left alone.
+pub fn needs_refresh(browser: Browser, spec: &HostSpec, target: &Target) -> bool {
+    let manifest_file = match target {
+        Target::File { path } => Some(path.clone()),
+        Target::Registry { subkey } => registry::get(subkey).map(PathBuf::from),
+    };
+    let Some(actual) = manifest_file.and_then(|f| std::fs::read_to_string(f).ok()) else { return false };
+    if actual == manifest_json(browser, spec) {
+        return false;
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&actual) else { return false };
+    v["name"].as_str() == Some(spec.name.as_str())
+        && v["path"].as_str().map(PathBuf::from).is_some_and(|p| p == spec.host_exe || !p.is_file())
+}
+
 // ------------------------------------------------------------------------------ registry access
 
 #[cfg(windows)]
@@ -319,6 +337,46 @@ mod tests {
         uninstall(Browser::Chrome, &s, &d, &target).unwrap();
         assert!(!status(Browser::Chrome, &s, &d, &target).registered);
         uninstall(Browser::Chrome, &s, &d, &target).unwrap(); // and removing twice is fine
+    }
+
+    #[test]
+    fn an_older_registration_of_ours_is_refreshed_and_nothing_else() {
+        let d = scratch("refresh");
+        let s = spec(&fake_host(&d));
+        let target = Target::File { path: d.join("nmh").join("app.velox.fetch.json") };
+        assert!(!needs_refresh(Browser::Chrome, &s, &target), "nothing registered: nothing to refresh");
+        install(Browser::Chrome, &s, &d, &target).unwrap();
+        assert!(!needs_refresh(Browser::Chrome, &s, &target), "up to date");
+
+        // An update adds the store extension: the old registration (the developer id only) is ours and refreshed.
+        let mut now = s.clone();
+        now.chromium_origins.push("chrome-extension://keobnkoppcchnbpmmfodidkcedglbhnn/".into());
+        assert!(!status(Browser::Chrome, &now, &d, &target).registered);
+        assert!(needs_refresh(Browser::Chrome, &now, &target));
+        install(Browser::Chrome, &now, &d, &target).unwrap();
+        assert!(status(Browser::Chrome, &now, &d, &target).registered && !needs_refresh(Browser::Chrome, &now, &target));
+
+        // Another copy of VeloxFetch whose helper exists: left alone. One whose helper is gone: ours to take over.
+        let other_dir = d.join("other");
+        std::fs::create_dir_all(&other_dir).unwrap();
+        let other = HostSpec { host_exe: fake_host(&other_dir), ..s.clone() };
+        install(Browser::Chrome, &other, &d, &target).unwrap();
+        assert!(!needs_refresh(Browser::Chrome, &now, &target));
+        std::fs::remove_file(&other.host_exe).unwrap();
+        assert!(needs_refresh(Browser::Chrome, &now, &target));
+
+        // Not ours (another program's host under the same file), or not JSON: never touched.
+        std::fs::write(target_path(&target), r#"{"name":"com.other.app","path":"/nope"}"#).unwrap();
+        assert!(!needs_refresh(Browser::Chrome, &now, &target));
+        std::fs::write(target_path(&target), "garbage").unwrap();
+        assert!(!needs_refresh(Browser::Chrome, &now, &target));
+    }
+
+    fn target_path(t: &Target) -> PathBuf {
+        match t {
+            Target::File { path } => path.clone(),
+            Target::Registry { .. } => unreachable!(),
+        }
     }
 
     #[test]

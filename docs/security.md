@@ -125,9 +125,9 @@ deleted from the database when the download ends.
 
 **Limits and honest caveats.** The token file is protected by the user's profile permissions (mode 0600 on
 Unix); a process running as the same user can read it, exactly as it could read the browser's own data.
-Cookies are stored in the local database in clear text while a download is unfinished. The extension is
-unsigned and not on any store; Chrome / Edge / Brave load it in developer mode and Firefox as a temporary
-add-on until it is signed. The Firefox build has not been run in a real Firefox here; the Chromium build was
+Cookies are stored in the local database in clear text while a download is unfinished. Chrome / Edge / Brave
+get the extension from the Chrome Web Store (signed by the store; see "The extension from the Chrome Web Store"
+below); Firefox loads it as a temporary add-on until its add-on is signed. The Firefox build has not been run in a real Firefox here; the Chromium build was
 tested in a real Brave (see below).
 
 ### Lifecycle
@@ -156,6 +156,7 @@ cargo test -p secrets -p persistence -p velox-integration-tests --test secrets  
 VELOX_TEST_OS_KEYRING=1 cargo test -p secrets os_store      # talks to the machine's real credential store
 node tests/e2e/desktop-media.mjs   # streams (HLS) in the real app: dialog, download, cancel, refusals, routing
 node tests/e2e/real-browser.mjs     # the built extension in a real Brave with a throwaway profile
+node tests/e2e/real-store-extension.mjs   # the store extension, added by the packages' pointer, in a real Brave (Linux)
 (cd apps/browser-extension && npm test)   # extension validation, least-privilege and id-drift guards
 ```
 
@@ -163,7 +164,16 @@ node tests/e2e/real-browser.mjs     # the built extension in a real Brave with a
 
 * One command (`install_browser_extension`, main window only). Its only input is an optional browser *name* from a closed set; no path, URL or program name comes from the UI (unknown fields are rejected).
 * It registers the native host for one browser (per user), copies the bundled extension into `<app data>/browser-extension/<chromium|firefox>` (plain files only, size/depth limited), then starts the browser with a fixed built-in page (`chrome://extensions`, `edge://extensions`, `brave://extensions`, `about:debugging`) and the system file manager on that folder. Programs are started with argument lists, never through a shell.
-* Browsers do not allow silent extension installation, so the final "Load unpacked / temporary add-on" step stays with the user (until the extension is published in the browser stores).
+* Chrome, Edge and Brave: no folder is copied and nothing but the extension's fixed Chrome Web Store page is opened (see below). Firefox: browsers do not allow silent installation, so the final "temporary add-on" step stays with the user until the add-on is signed.
+
+## The extension from the Chrome Web Store (installers)
+
+* The installers write only Chromium's documented external-extension pointer (id + Google's update URL) for every user: Linux `/usr/share/{google-chrome,chromium,microsoft-edge}/extensions/<id>.json` (mode 644, atomic), Windows `HKLM\Software\<browser>\Extensions\<id>` (32-bit view). They are removed on uninstall, not on upgrade. The app writes the per-user equivalents (Windows HKCU, macOS `External Extensions`) and removes them on Disconnect.
+* Never an enterprise policy (`ExtensionInstallForcelist`, which would lock the extension in and mark the browser as managed), never a local `.crx`, never a browser file or profile. The browser downloads the store-signed package, checks it, applies its own consent rules (its "New extension added" prompt on Windows / macOS), and the user can remove it.
+* The id, folders and keys are constants in Rust (`CHROME_STORE_ID`, `LINUX_SYSTEM_FOLDERS`, `WINDOWS_MACHINE_KEYS`); a policy test fails if an installer differs, uses a policy or a local package, or does not remove it.
+* The native-messaging allow-list is exactly the developer id and the store id. Old registrations are rewritten at start only when they name our host and our own (or a vanished) helper; another copy's or another program's registration is never touched, and debug builds never touch real ones.
+* **"Installed and working" (the first start).** The first start opens nothing when the browser adds the extension by itself, and waits for its first contact. A contact is counted by the bridge server only after the link's handshake passed (the token, then the allow-list), so a wrong token or a foreign extension never turns the status green. Only the time and "from the store" are kept (`browser-extension/contact.json` in the app's data folder, written atomically; a damaged file is ignored); never a page, a link or anything from the browser. The window is told through an event to the main window only. The fallback banner can only call the existing Install extension (a browser name from a closed set: the fixed store page).
+* Details and real-browser results: `docs/store-extension.md`.
 * Cross-platform: default-browser and browser-location detection exist for Windows (registry), Linux (`xdg-settings`, `PATH`) and macOS (LaunchServices, `/Applications`); the mapping logic is unit-tested on every OS, the OS calls only ran on Windows so far.
 
 ## Confirmation before a browser download starts
