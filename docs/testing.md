@@ -815,3 +815,23 @@ the same read. 0 failures in 60 and 15 runs. No app code changed.
 | `tests/e2e/desktop-game-mode.mjs` (new suite, port 9395) | status bar button and pill, the banner on every screen, +1 hour, Turn off, the amber window and gauge, the real speed held and given back, Settings card and usual time, the shortcut list, Ctrl+G, the pause policy and the queue's words, kept after a restart, all 8 languages fit from 1360×860 to 640×480 with nothing pushed out of the status bar, refused requests, no JavaScript errors |
 | `tests/e2e/real-game-mode.mjs` (by hand, internet, port 9399) | a kernel.org download held to a quarter of its speed, to 256 KB/s, paused with progress kept, and back to full speed |
 | By hand: the real tray (KDE Plasma, D-Bus menu) | the "Game mode" item's tick on / off by click, unticked by itself when the time ends, the desktop notification |
+
+## The extension from the Chrome Web Store (v2.0.0)
+
+* `node --test tests/security/policy.test.mjs`: two tests. The installers' id, Linux folders and Windows keys must match
+  `CHROME_STORE_ID`, `LINUX_SYSTEM_FOLDERS` and `WINDOWS_MACHINE_KEYS`, must be removed on uninstall (not upgrade), and
+  must never use a policy or a local package. The packages' own lines are also run on scratch folders: the pointer is
+  written (mode 644, atomic), a second run is fine, and remove takes it away with the empty folders while another
+  package's file stays.
+* Unit tests: `browser-bridge` (the store id is trusted, nothing else) and `system-integration` (`needs_refresh`: an
+  older registration of ours is refreshed; up-to-date ones, another copy's, another program's and broken ones are
+  not).
+* `desktop-browser.mjs`: an older registration is brought up to date at start; the store id passes the real helper; the
+  Chrome Web Store badges show; Install extension gives the store steps and no folder; Firefox keeps its folder. Writes
+  `docs/screenshots/settings-browser-store.png`.
+* `real-store-extension.mjs` (by hand, internet, Linux with Brave): first start opens exactly the store page (never a
+  folder); Brave adds the extension from the store by itself through the packages' pointer, switched on; the store
+  extension reaches this test's VeloxFetch and a link it hands over arrives intact. It needs no root: without
+  `/usr/share/chromium/extensions/<id>.json` it uses a private copy of Brave, whose `extensions` folder Chromium reads
+  the same way. Result on 17 October 2026: 3 runs out of 3 passed (`docs/store-extension.md`).
+* NSIS hooks: compiled with makensis 3.11 (`~/.local/e2e-tools/nsis`) for x64 and x86.

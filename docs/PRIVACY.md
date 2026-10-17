@@ -15,6 +15,8 @@ The extension only sends links to the VeloxFetch desktop application running on 
   page or close the tab; nothing is sent anywhere until you click **Download video**, which sends that one video's link (or, on
   YouTube and similar sites, the page's address) to the app like any other download. The app reads video pages with yt-dlp on your
   computer; your cookies are never given to it.
+* **Installing the extension:** VeloxFetch's installer only tells Chrome, Edge and Brave the extension's Chrome Web Store id.
+  The browser downloads it from the Chrome Web Store itself, as for any extension; VeloxFetch sends nothing to anyone for this.
 * **Video tools:** the desktop app downloads yt-dlp, Deno and ffmpeg from each project's official server (GitHub releases of
   yt-dlp and of its ffmpeg builds, dl.deno.land, gyan.dev, ffmpeg.martin-riedl.de) shortly after it starts, if they are missing,
   and replaces yt-dlp when it is two weeks old. These are plain file downloads: nothing about you or your downloads is sent.
