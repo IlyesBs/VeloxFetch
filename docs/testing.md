@@ -772,3 +772,35 @@ profile: the add-on installs and its background pings a stand-in native host (`v
 | `tests/e2e/desktop-ipc.mjs` (+4) | counted while downloading (ever, today, month); kept after the app closes and opens again, and keeps counting; kept after deleting every download and clearing the history; the dashboard card shows the total, today and this month |
 | `tests/e2e/real-network-usage.mjs` (by hand, internet) | a real 145 MB download counted exactly (145.1 MB), never more than the system received; kept after a restart, deleting every download and clearing the history |
 | `tests/e2e/desktop-i18n.mjs` (+1 per language) | the card's "Today" / "This month" rows and the longest number (1023.9 MB) fit from 1360×860 down to 640×480 |
+
+## The extension from the Chrome Web Store
+
+* `node --test tests/security/policy.test.mjs`: two tests. The installers' id, Linux folders and Windows keys must match
+  `CHROME_STORE_ID`, `LINUX_SYSTEM_FOLDERS` and `WINDOWS_MACHINE_KEYS`, must be removed on uninstall (not upgrade), and
+  must never use a policy or a local package. The packages' own lines are also run on scratch folders: the pointer is
+  written (mode 644, atomic), a second run is fine, and remove takes it away with the empty folders while another
+  package's file stays.
+* Unit tests: `browser-bridge` (the store id is trusted, nothing else) and `system-integration` (`needs_refresh`: an
+  older registration of ours is refreshed; up-to-date ones, another copy's, another program's and broken ones are
+  not).
+* `desktop-browser.mjs`: an older registration is brought up to date at start; the store id passes the real helper; the
+  Chrome Web Store badges show; Install extension gives the store steps and no folder; Firefox keeps its folder. Writes
+  `docs/screenshots/settings-browser-store.png`.
+* Unit tests: `link.rs` (a contact reaches the app only after a passed handshake), `bridge.rs` (`ContactLog`: the first
+  contact announced, saved and remembered; the awaited one ends the wait; damaged files ignored), `store_extension.rs`
+  (`system_pointer`).
+* `desktop-extension-wait.mjs` (Linux; stand-in default browser, a real helper as the store extension): first start
+  with the packages' pointer connects the browser and opens nothing; Settings says the browser adds it; after the
+  wait (`VELOX_EXTENSION_WAIT_MS`, debug builds) the banner offers the store page, Later hides it; the first contact
+  gives the green banner and "installed and working" with the badge, ends the wait, keeps only `at` / `fromStore`; a
+  restart keeps it without the banner; without the pointer (AppImage) the first start opens the store page. Writes
+  `extension-waiting.png`, `settings-extension-working.png`.
+* `real-store-extension.mjs` (by hand, internet, Linux with Chrome, Edge or Brave; `VELOX_REAL_BROWSER`,
+  `VELOX_REAL_BROWSER_DIR` for one unpacked from its .deb): first start connects the browser and opens nothing; the
+  browser adds the extension from the store by itself through the packages' pointer, switched on; the extension
+  reaches VeloxFetch by itself (green banner, Settings "installed and working"); a link it hands over arrives intact.
+  It uses the installed pointers when VeloxFetch's package is installed, else a private copy of the browser whose
+  `extensions` folder Chromium reads the same way (no root). Result on 17 October 2026: Chrome 155, Edge 155 and
+  Brave 1.97 all passed with the pointers the real .deb wrote (`docs/store-extension.md`). Writes
+  `extension-arrived.png`.
+* NSIS hooks: compiled with makensis 3.11 (`~/.local/e2e-tools/nsis`) for x64 and x86.

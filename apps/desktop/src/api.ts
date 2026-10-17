@@ -9,6 +9,7 @@ import { MESSAGES } from "./messages";
 
 export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem";
 import type {
+  ExtensionEvent,
   Analysis,
   DuplicateMatch,
   NewLinkOutcome,
@@ -197,6 +198,11 @@ export const api = {
 /** Download links the user copied (only when clipboard detection is on). */
 export function onClipboardLinks(handler: (links: string[]) => void): Promise<UnlistenFn> {
   return listen<{ links: string[] }>("velox://clipboard", (ev) => handler(ev.payload.links));
+}
+
+/** The browser extension reached the app, or the first start waits for it (main window). */
+export function onExtensionEvent(handler: (e: ExtensionEvent) => void): Promise<UnlistenFn> {
+  return listen<ExtensionEvent>("velox://extension", (ev) => handler(ev.payload));
 }
 
 export function onManagerEvent(handler: (e: ManagerEvent) => void): Promise<UnlistenFn> {

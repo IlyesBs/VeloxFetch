@@ -9,7 +9,8 @@ use browser_bridge::frame::{read_frame, write_frame, MAX_IPC_MESSAGE};
 use browser_bridge::server::{BoxFuture, DownloadAccepted, Handler, HandlerError, ServerConfig};
 use browser_bridge::transport::connect;
 use browser_bridge::{
-    serve, Caller, Client, ClientError, DownloadRequest, Endpoint, Listener, Token, CHROME_EXTENSION_ID, FIREFOX_EXTENSION_ID,
+    serve, Caller, Client, ClientError, DownloadRequest, Endpoint, Listener, Token, CHROME_EXTENSION_ID, CHROME_STORE_ID,
+    FIREFOX_EXTENSION_ID,
 };
 use serde_json::{json, Value};
 
@@ -28,6 +29,7 @@ fn endpoint() -> Endpoint {
 struct Recorder {
     seen: Mutex<Vec<(DownloadRequest, Caller)>>,
     fail_with: Mutex<Option<&'static str>>,
+    contacts: Mutex<Vec<Caller>>,
 }
 
 impl Handler for Recorder {
@@ -44,6 +46,10 @@ impl Handler for Recorder {
             seen.push((req.clone(), caller));
             Ok(DownloadAccepted { id: seen.len() as i64, filename: req.filename.unwrap_or_else(|| "from-url.bin".into()) })
         })
+    }
+
+    fn contacted(&self, caller: &Caller) {
+        self.contacts.lock().unwrap().push(caller.clone());
     }
 }
 
@@ -99,6 +105,20 @@ async fn ping_and_download_round_trip_with_the_caller_identity() {
     assert_eq!(seen.len(), 1);
     assert_eq!(seen[0].0.referrer.as_deref(), Some("https://example.com/page"));
     assert_eq!(seen[0].1, chrome());
+}
+
+#[tokio::test]
+async fn the_app_learns_each_contact_of_an_allowed_extension_and_nothing_else() {
+    let rig = start(ServerConfig::default());
+    let store = Caller::Chromium { extension_id: CHROME_STORE_ID.unwrap().into() };
+    let mut c = Client::connect(&rig.ep, &rig.token, &store).await.unwrap();
+    assert!(c.request(json!({"command":"ping"})).await.unwrap().ok);
+    assert_eq!(*rig.handler.contacts.lock().unwrap(), vec![store.clone()], "one contact per connection, after the handshake");
+    // A wrong token or a caller outside the allowlist is not a contact.
+    assert!(Client::connect(&rig.ep, &Token::generate(), &store).await.is_err());
+    let evil = Caller::Chromium { extension_id: "abcdefghijklmnopabcdefghijklmnop".into() };
+    assert!(Client::connect(&rig.ep, &rig.token, &evil).await.is_err());
+    assert_eq!(rig.handler.contacts.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

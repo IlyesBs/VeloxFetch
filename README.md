@@ -82,9 +82,17 @@ node tests/e2e/desktop-throttle.mjs # Smart throttle card / Settings / status ba
 node tests/e2e/desktop-gaming.mjs   # gaming policy with a stand-in game process: pause / resume only what it paused, low speed, off
 node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with downloads running (see docs/ui-performance.md)
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
+node tests/e2e/desktop-extension-wait.mjs  # first start with the store extension: nothing opens, the wait, the fallback banner, "installed and connected" on its first contact, AppImage opens the store page
+VELOX_REAL_BROWSER=chrome node tests/e2e/real-store-extension.mjs  # by hand, internet, Linux + Chrome / Edge / Brave: the browser adds the Chrome Web Store extension by itself through the packages' pointer, the first start opens nothing, the extension reaches the app
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
 node tests/e2e/real-network-usage.mjs target/debug/velox-desktop.exe  # by hand, internet: a real download counted in Network usage, kept after a restart and deleting everything
 ```
+
+Browser extension: Chrome, Edge and Brave get it from the **Chrome Web Store**. Installing VeloxFetch (Windows setup,
+deb / rpm) asks them to add it and the browser does it by itself; VeloxFetch says **Browser extension installed** when
+it first reaches the app, and offers the store page only if it has not come after 3 minutes. Settings > Browser shows
+the Chrome Web Store badge and never asks for Developer mode (Firefox: a temporary add-on until its add-on is published).
+See `docs/store-extension.md`.
 
 Videos: with the browser extension installed, a **Download video** bar appears over videos
 (files, HLS / DASH streams, and video pages on YouTube, Vimeo and similar sites); click it and choose the quality and the file type

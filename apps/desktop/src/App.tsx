@@ -4,6 +4,7 @@ import { api, normalizeError } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
 import { ClipboardBanner } from "./components/ClipboardBanner";
+import { ExtensionBanner } from "./components/ExtensionBanner";
 import { MediaDialog } from "./components/MediaDialog";
 import { PendingDialog } from "./components/PendingDialog";
 import { NewLinkHost } from "./components/NewLinkDialog";
@@ -193,6 +194,7 @@ export default function App() {
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <TitleBar route={current} />
           <PowerBanner />
+          <ExtensionBanner />
           <ClipboardBanner onReviewMany={(links) => setBatch({ links: links.join("\n") })} onStream={(url) => setStream({ url })} />
           {/* Never scrolls sideways: right to left, the Linux web view puts the bar on the left but lays the content out as
               if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers
