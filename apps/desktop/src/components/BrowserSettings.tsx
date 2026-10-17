@@ -4,17 +4,18 @@ import { api, normalizeError } from "../api";
 import { act, store } from "../hooks";
 import type { BrowserIntegration, BrowserName, ExtensionInstall } from "../types";
 import { useT, type Key } from "../i18n";
+import { Icon } from "../ui/icons";
 import { Panel } from "../ui/primitives";
 import { Rich } from "../ui/rich";
 
 const LABEL: Record<BrowserName, Key> = { chrome: "br.chrome", edge: "br.edge", brave: "br.brave", firefox: "br.firefox" };
 
 /**
- * Browser integration: lets the VeloxFetch extension hand links to this app. On the first start the app sets it
- * up for the default browser by itself (bridge.rs `auto_install_once`). Each browser also has one button:
- * "Install extension" connects that browser, then either asks it to add the published extension from its
- * store (the browser's own prompt) or prepares the extension folder and opens the extensions page for
- * Developer mode. "Disconnect" undoes the registration.
+ * Browser integration: lets the VeloxFetch extension hand links to this app. The installers already point Chrome,
+ * Edge and Brave at the extension in the Chrome Web Store, and on the first start the app sets it up for the default
+ * browser by itself (bridge.rs `auto_install_once`). Each browser also has one button: "Install extension" connects
+ * that browser, then opens the extension's store page (Chrome, Edge, Brave: never a folder), or, for Firefox until
+ * its add-on is published, prepares the extension folder and opens the extensions page. "Disconnect" undoes it.
  */
 export function BrowserSettings() {
   const t = useT();
@@ -62,6 +63,7 @@ export function BrowserSettings() {
   };
 
   const label = (b: BrowserName) => t(LABEL[b]);
+  const fromStore = (b: BrowserName) => !!state?.chromeStoreId && b !== "firefox";
   if (!state) {
     return (
       <Panel title={t("br.title")} hint={t("br.hint")}>
@@ -73,7 +75,7 @@ export function BrowserSettings() {
   return (
     <Panel title={t("br.title")} hint={t("br.hint")}>
       <p className="mb-3 text-xs text-dim" data-testid="extension-intro">
-        <Rich text={t("br.intro")} />
+        <Rich text={state.chromeStoreId ? t("br.introStore") : t("br.intro")} />
       </p>
 
       <ul className="space-y-2" data-testid="browser-list">
@@ -82,6 +84,16 @@ export function BrowserSettings() {
             <span className="min-w-0 flex-1">
               <span className="text-[13px] font-medium">{label(b.browser)}</span>
               {b.isDefault && <span className="ms-2 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] text-accent">{t("br.default")}</span>}
+              {fromStore(b.browser) && b.supported && (
+                <span
+                  className="ms-2 inline-flex items-center gap-1 rounded-full border border-accent px-2 py-0.5 text-[11px] font-medium text-accent"
+                  title={t("br.storeBadgeHint")}
+                  data-testid={`browser-${b.browser}-store`}
+                >
+                  <Icon name="shield" size={11} />
+                  {t("br.storeBadge")}
+                </span>
+              )}
               {b.supported && !b.found && <span className="ms-2 text-[11px] text-dim">{t("br.notFound")}</span>}
             </span>
             <span className={`text-xs ${b.registered ? "text-ok" : "text-dim"}`} data-testid={`browser-${b.browser}-status`}>
@@ -120,7 +132,21 @@ export function BrowserSettings() {
         <ol className="selectable mt-4 list-decimal space-y-1.5 rounded-xl border border-line bg-raised p-3.5 ps-8 text-xs" data-testid="extension-steps">
           {installed.method === "store" ? (
             <>
-              <li>{t("br.stStore", { browser: label(installed.browser) })}</li>
+              <li data-testid="extension-store-opened">
+                {installed.openedBrowser ? (
+                  t("br.stStore", { browser: label(installed.browser) })
+                ) : (
+                  <>
+                    {t("br.stStoreOpenYourself", { browser: label(installed.browser) })}{" "}
+                    <code className="break-all rounded bg-canvas px-1.5 py-0.5" data-testid="extension-store-url">
+                      {installed.storeUrl}
+                    </code>{" "}
+                    <button className="btn btn-ghost h-6 px-2 text-xs" onClick={() => void actions.copy(installed.storeUrl)}>
+                      {t("br.copyLink")}
+                    </button>
+                  </>
+                )}
+              </li>
               <li>
                 <Rich text={t("br.stStoreAccept")} />
               </li>

@@ -289,8 +289,15 @@ Details: `docs/download-intelligence.md`.
   - **starts VeloxFetch when it is closed**: a download sent from the browser opens the app and arrives in it. The
     helper finds the app itself (beside it, the Linux packages' `bin`, the macOS bundle, or the path the app recorded
     for an AppImage); a browser in a snap / Flatpak asks the desktop to open `veloxfetch://start`.
-- **Install:** a button in Settings > Browser registers the helper per user and opens the extension page. Browsers
-  installed as snap / Flatpak packages get their own copy of the helper and link.
+- **Install (v2.0.0): the extension comes from the Chrome Web Store.**
+  - The installers point Chrome, Edge and Brave at it for every user, and the browser adds it by itself (Linux:
+    switched on; Windows / macOS: its "New extension added → Enable").
+  - The first start opens its store page in the default browser.
+  - Settings > Browser shows a **Chrome Web Store** badge on those rows, and **Install extension** opens the store page,
+    never a folder or the extensions page.
+  - Firefox keeps the temporary add-on until its add-on is published.
+  - The helper is registered per user; older registrations are brought up to date at start.
+  - Browsers installed as snap / Flatpak packages get their own copy of the helper and link (`docs/store-extension.md`).
 
 ### Videos
 - **Video pages** (YouTube, Vimeo… through yt-dlp):
@@ -875,6 +882,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
 | The publisher's checksum (SHA256SUMS found next to the file) | `docs/publisher-checksum.md` |
 | Game mode (one click: downloads give way to a game or a call) | `docs/game-mode.md` |
+| The extension from the Chrome Web Store, installed with the app | `docs/store-extension.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -889,6 +897,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-17 | `feat_store_extension` | Feature | The extension is published in the Chrome Web Store (`keobnkoppcchnbpmmfodidkcedglbhnn`). The deb / rpm packages and the Windows setup point Chrome, Edge and Brave at it for every user (Chromium's external-extension pointer; removed on uninstall). The browser adds it by itself: a real Brave did, switched on. The first start and Install extension open its store page, never a folder or the extensions page. Chrome Web Store badges in Settings > Browser, texts in 8 languages. The store id is trusted by the helper, and older registrations are brought up to date at start. Firefox keeps the temporary add-on until its review ends. | `docs/store-extension.md` |
 | 2026-10-16 | `fix_throttle_switch_smooth_v2` | Fix | Reported again: switching Smart throttle's levels or turning it on left downloads at 0 for 10–20 s. Under a speed limit a download keeps 1–2 connections; one that went quiet (the server or the line stopped sending without closing) was only given up after the 30 s read timeout, and a server that allows 2 connections refused a new one meanwhile. Now a ranged transfer quiet for 4 s (only time spent waiting for bytes) is given up and its part continues at once on a new connection, not counted against the server. New real-line check `real-throttle-switch.mjs` (the sidebar's buttons every 8 s, the longest stop per step). v2.0.0 only, as asked. | `docs/smart-throttle-and-preview.md`, `docs/architecture.md` |
 | 2026-10-16 | `port_phase6_held_race_v2` (from `main`, `fix_phase6_held_race`) | Test | Brought to v2.0.0: a queue test failed about 1 run in 10: it read how many downloads the queue held in the moment between a download being saved as paused and the queue writing it down (both under the queue's lock: the app was right). It and the game pause test now wait for the count. 0 failures in 60 runs. | `docs/testing.md` |
 | 2026-10-16 | `port_settings_narrow_v2` (from `main`, `fix_settings_narrow`) | Fix | Brought to v2.0.0: in a window narrower than 768 px, the Settings section tabs each grew to about 1,000 px and pushed the whole Settings page sideways (since the first version). They now sit in one row that scrolls sideways, and the page fits the window. `desktop-i18n.mjs` checks every page in all 8 languages at 900, 760 and 640 px.  Also: the Video tools status in Settings wrapped past the panel in German and Russian at 900 px; it now wraps within half the row.| `docs/testing.md` |

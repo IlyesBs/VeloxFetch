@@ -20,14 +20,20 @@ Data: `%APPDATA%\app.velox.fetch\`. Downloads: `Downloads\VeloxFetch\`.
 4. Settings > Scheduler and Settings > When downloads finish (try **Sleep** first) as in the previous checklist.
 
 ## B. Browser integration (new)
-1. Install / extract VeloxFetch and **start it once**. (Portable zip: keep the `extension` folder next to the programs.)
-2. In VeloxFetch open **Settings > Browser integration**. Each browser has its own line: press **Install extension** on the line of the
-   browser you use (it is marked "Default browser" only if it is your Windows default; Brave is on the "Brave and other Chromium
-   browsers" line). VeloxFetch connects that browser, copies the extension into its own data folder, opens the browser on its extensions
-   page and opens the folder. The steps are also shown in the app, with the folder path and a *Copy path* button.
-3. In the browser (last step, done by you once): **Chrome / Edge / Brave:** turn on *Developer mode*, click *Load unpacked*, choose the
-   folder shown. The extension's ID must read `gbcanjaaelioalfdggkhbbnbinmfgdbc` - a different ID is refused on purpose.
-   **Firefox:** *Load Temporary Add-on*, pick `manifest.json` in the folder (Firefox forgets it when it closes).
+1. Install VeloxFetch with the setup / the deb or rpm package (v2.0.0). **Chrome / Edge / Brave get the extension from the Chrome
+   Web Store** (`docs/store-extension.md`):
+   * Windows: `reg query "HKLM\SOFTWARE\WOW6432Node\Google\Chrome\Extensions\keobnkoppcchnbpmmfodidkcedglbhnn" /v update_url`
+     shows `https://clients2.google.com/service/update2/crx` (and the same under `Microsoft\Edge` and `BraveSoftware\Brave-Browser`).
+     Open Chrome: it shows **New extension added (VeloxFetch)** → **Enable extension**.
+   * Linux: `/usr/share/chromium/extensions/keobnkoppcchnbpmmfodidkcedglbhnn.json` exists. Open Brave / Chrome: VeloxFetch is in
+     the extensions, switched on.
+2. **Start VeloxFetch once.** Your default browser opens on the VeloxFetch page in the Chrome Web Store (if the extension is not added
+   yet: **Add to Chrome** / **Add to Brave** / **Get**). No folder and no extensions page open.
+3. In VeloxFetch open **Settings > Browser integration**: Chrome, Edge and Brave carry a **Chrome Web Store** badge. **Install extension**
+   on another browser's line connects it and opens the store page there; the steps show the store's, with the page's address and
+   **Copy link** if no browser could be opened. **Firefox** (until its add-on is published): *Load Temporary Add-on*, pick
+   `manifest.json` in the folder VeloxFetch opened (Firefox forgets it when it closes).
+   Uninstalling VeloxFetch removes the registry keys / files of step 1 (the browsers keep an extension already added).
    Later, *Show steps* on a connected line shows these steps again; *Disconnect* removes the connection.
 4. Click the extension's toolbar icon: it should say **Connected to VeloxFetch 1.0.0**.
    If it says the browser is not connected, press Disconnect then Install extension again in VeloxFetch.

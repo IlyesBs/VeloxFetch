@@ -18,6 +18,9 @@ const HOST = path.join(path.dirname(APP), exe("velox-native-host"));
 const SHOTS = path.resolve("docs/screenshots");
 const MB = 1024 * 1024;
 const CHROME_ORIGIN = "chrome-extension://gbcanjaaelioalfdggkhbbnbinmfgdbc/";
+// The extension from the Chrome Web Store (CHROME_STORE_ID): trusted next to the developer one.
+const STORE_ID = "keobnkoppcchnbpmmfodidkcedglbhnn";
+const STORE_ORIGIN = `chrome-extension://${STORE_ID}/`;
 const EVIL_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/";
 const WIN = process.platform === "win32";
 // The app's local link: a named pipe on Windows, a socket in the temp folder elsewhere.
@@ -137,6 +140,14 @@ try {
   // The machine may legitimately have real registrations (the user connected a browser): the test only
   // proves it leaves them exactly as they were.
   const realBefore = realState();
+  // An older version connected Edge when only the developer extension existed: its registration must be brought up
+  // to date at start, so the store extension can reach the app without the user doing anything (Linux / macOS).
+  if (!WIN) {
+    fs.mkdirSync(path.dirname(nmFile(SCRATCH_HOME, "edge")), { recursive: true });
+    fs.writeFileSync(nmFile(SCRATCH_HOME, "edge"), JSON.stringify({ name: "app.velox.fetch", description: "VeloxFetch browser integration", path: HOST, type: "stdio", allowed_origins: [CHROME_ORIGIN] }, null, 2));
+    fs.mkdirSync(path.dirname(nmFile(SCRATCH_HOME, "firefox")), { recursive: true });
+    fs.writeFileSync(nmFile(SCRATCH_HOME, "firefox"), JSON.stringify({ name: "com.other.app", path: "/nope", type: "stdio", allowed_extensions: ["x@y"] }));
+  }
 
   await h.launch();
   await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "UI to render");
@@ -144,6 +155,14 @@ try {
   check("confirmation before browser downloads is ON by default", (await invoke("get_browser_integration")).ok.confirmDownloads === true);
   check("the app reports that cookies are sealed on disk (secure storage)", (await invoke("get_browser_integration")).ok.secretsProtected === true);
   await invoke("set_browser_confirm", { enabled: false }); // the sections below test the handoff itself
+  if (!WIN) {
+    const edge = JSON.parse(fs.readFileSync(nmFile(SCRATCH_HOME, "edge"), "utf8"));
+    check("an older registration of ours is brought up to date at start: the store extension may use it too",
+      JSON.stringify(edge.allowed_origins) === JSON.stringify([CHROME_ORIGIN, STORE_ORIGIN]) && path.resolve(edge.path) === HOST, JSON.stringify(edge));
+    check("another program's registration is never touched", JSON.parse(fs.readFileSync(nmFile(SCRATCH_HOME, "firefox"), "utf8")).name === "com.other.app");
+    await invoke("set_browser_integration", { request: { browser: "edge", enabled: false } });
+    fs.rmSync(nmFile(SCRATCH_HOME, "firefox"));
+  }
 
   // ---- 1. ping + a real handoff --------------------------------------------------------------------
   const host = startHost();
@@ -221,6 +240,9 @@ try {
   check("started by hand (no browser arguments): refused", (await Promise.race([byHand.exited, sleep(5000).then(() => "timeout")])) === 2 && /browser/.test(byHand.stderr), byHand.stderr);
   const weird = startHost(["--parent-window=123"]);
   check("only a --parent-window argument: refused", (await Promise.race([weird.exited, sleep(5000).then(() => "timeout")])) === 2);
+  const fromStore = startHost([STORE_ORIGIN]);
+  check("the extension from the Chrome Web Store is accepted", (await fromStore.ask({ command: "ping" })).ok === true);
+  fromStore.close();
   const ff = startHost([path.join(os.tmpdir(), "velox-firefox.json"), "velox-fetch@velox.app"]);
   check("Firefox-style arguments with our add-on id are accepted", (await ff.ask({ command: "ping" })).ok === true);
   ff.close();
@@ -332,8 +354,8 @@ try {
   const manifestPath = registered("chrome");
   check("Connect wrote the registration (scratch only)", !!manifestPath && (!WIN || manifestPath.includes("app.velox.fetch.chrome.json")), String(manifestPath));
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  check("the manifest allows exactly our extension and points at the host next to the app",
-    JSON.stringify(manifest.allowed_origins) === JSON.stringify([CHROME_ORIGIN]) && manifest.type === "stdio" && manifest.name === "app.velox.fetch" && path.resolve(manifest.path).toLowerCase() === HOST.toLowerCase(), JSON.stringify(manifest));
+  check("the manifest allows exactly our two extensions (developer, store) and points at the host next to the app",
+    JSON.stringify(manifest.allowed_origins) === JSON.stringify([CHROME_ORIGIN, STORE_ORIGIN]) && manifest.type === "stdio" && manifest.name === "app.velox.fetch" && path.resolve(manifest.path).toLowerCase() === HOST.toLowerCase(), JSON.stringify(manifest));
   await h.page("document.documentElement.setAttribute('data-theme','dark')");
   await sleep(350);
   await h.screenshot(path.join(SHOTS, "settings-browser-dark.png"), { width: 1100, height: 1500 });
@@ -430,22 +452,43 @@ try {
   await click("[data-testid=browser-confirm-toggle]");
   await waitFor(async () => (await page("document.querySelector('[data-testid=browser-confirm-toggle]').checked")).ok === false, "confirmation switched off");
 
-  // ---- 8. "Install extension" button -------------------------------------------------------------------------------
+  // ---- 8. "Install extension" button: Chrome, Edge and Brave from the Chrome Web Store, never a folder -------------
   check("each browser row offers Install extension (nothing is connected yet)", (await text("[data-testid=browser-brave-toggle]")) === "Install extension" && (await page("document.querySelectorAll('[data-testid=extension-steps]').length")).ok === 0);
+  const badges = await Promise.all(["chrome", "edge", "brave", "firefox"].map((b) => text(`[data-testid=browser-${b}-store]`)));
+  check("Chrome, Edge and Brave are marked Chrome Web Store, Firefox is not", badges.join() === "Chrome Web Store,Chrome Web Store,Chrome Web Store,", JSON.stringify(badges));
+  check("the introduction says the browsers get it from the Chrome Web Store", /Chrome Web Store/.test((await text("[data-testid=extension-intro]")) ?? ""));
   await click("[data-testid=browser-brave-toggle]");
   await waitFor(async () => (await text("[data-testid=extension-steps]")) !== null, "installation steps to appear");
-  const folder = (await text("[data-testid=extension-folder]"))?.trim() ?? "";
-  const inData = path.resolve(folder).toLowerCase().startsWith(path.join(h.dataDir, "browser-extension").toLowerCase());
-  check("the button copied the extension into the app's own data folder", inData && fs.existsSync(path.join(folder, "manifest.json")), folder);
-  const m1 = JSON.parse(fs.readFileSync(path.join(folder, "manifest.json"), "utf8"));
-  check("the copy is complete (background script, popup, icons) and pins the trusted extension id",
-    ["background.js", "popup.html", "popup.js", "lib/validate.js", "icons/128.png"].every((f) => fs.existsSync(path.join(folder, f))) && !!m1.key);
-  check("the steps explain what to do in the browser", /Developer mode|Temporary Add-on/.test((await text("[data-testid=extension-steps]")) ?? ""));
+  await page("document.querySelector('[data-testid=extension-steps]').scrollIntoView({ block: 'center' })");
+  await sleep(300);
+  await h.screenshot(path.join(SHOTS, "settings-browser-store.png"), { width: 1100, height: 1100 });
+  const steps = (await text("[data-testid=extension-steps]")) ?? "";
+  check("the steps are the store's: its page and its Add button, no Developer mode, no folder",
+    /Chrome Web Store/.test(steps) && /Add to Chrome/.test(steps) && !/Developer mode|Load unpacked/.test(steps) && (await text("[data-testid=extension-folder]")) === null, steps);
+  check("not opened (tests never start programs): the store page's address is shown to open by hand",
+    (await text("[data-testid=extension-store-url]"))?.trim() === `https://chromewebstore.google.com/detail/${STORE_ID}`);
+  check("no extension folder was prepared for a Chromium browser", !fs.existsSync(path.join(h.dataDir, "browser-extension", "chromium")));
+  const braveInstall = (await invoke("install_browser_extension", { request: { browser: "chrome" } })).ok;
+  check("Chrome: the store, nothing opened, no folder", braveInstall?.method === "store" && braveInstall.folder === "" && braveInstall.openedBrowser === false && braveInstall.openedFolder === false, JSON.stringify(braveInstall));
+  if (process.platform === "darwin") {
+    const pointer = path.join(SCRATCH_HOME, "Library/Application Support/Google/Chrome/External Extensions", `${STORE_ID}.json`);
+    check("macOS: Chrome is pointed at the store extension for this user (scratch home only)", JSON.parse(fs.readFileSync(pointer, "utf8")).external_update_url === "https://clients2.google.com/service/update2/crx");
+  }
+  if (WIN) {
+    let v = "";
+    try {
+      v = execFileSync("reg", ["query", `HKCU\\${SCRATCH}\\store\\chrome\\${STORE_ID}`, "/v", "update_url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {}
+    check("Windows: Chrome is pointed at the store extension for this user (scratch key only)", v.includes("https://clients2.google.com/service/update2/crx"), v);
+  }
+  await invoke("set_browser_integration", { request: { browser: "chrome", enabled: false } });
   const statuses = await Promise.all(["chrome", "edge", "brave", "firefox"].map((b) => text(`[data-testid=browser-${b}-status]`)));
   check("only the browser whose button was pressed got connected (Brave, not the default one)", statuses.join() === "Not connected,Not connected,Connected,Not connected", statuses.join());
   check("a connected row offers Disconnect and Show steps", (await text("[data-testid=browser-brave-toggle]")) === "Disconnect" && (await page("!!document.querySelector('[data-testid=browser-brave-steps]')")).ok === true);
   const ffInstall = await invoke("install_browser_extension", { request: { browser: "firefox" } });
-  check("Firefox gets its own build (temporary add-on manifest)", !!ffInstall.ok && ffInstall.ok.folder.endsWith("firefox") && !!JSON.parse(fs.readFileSync(path.join(ffInstall.ok.folder, "manifest.json"), "utf8")).browser_specific_settings, JSON.stringify(ffInstall));
+  check("Firefox (no store add-on yet) gets its own build (temporary add-on manifest)", ffInstall.ok?.method === "developer" && ffInstall.ok.folder.endsWith("firefox") && !!JSON.parse(fs.readFileSync(path.join(ffInstall.ok.folder, "manifest.json"), "utf8")).browser_specific_settings, JSON.stringify(ffInstall));
+  const ffFolder = ffInstall.ok?.folder ?? "";
+  check("the copy is complete (background script, popup, icons)", ["background.js", "popup.html", "popup.js", "lib/validate.js", "icons/128.png"].every((f) => fs.existsSync(path.join(ffFolder, f))));
   check("no program was started by the test run", ffInstall.ok?.openedBrowser === false && ffInstall.ok?.openedFolder === false);
   const badExt = await invoke("install_browser_extension", { request: { browser: "netscape" } });
   check("an unknown browser is rejected", !!badExt.err);

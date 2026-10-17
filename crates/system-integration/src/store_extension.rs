@@ -6,7 +6,9 @@
 //! * Windows: `HKCU\Software\<browser>\Extensions\<id>`, value `update_url`;
 //! * macOS: `~/Library/Application Support/<browser>/External Extensions/<id>.json`;
 //! * Linux: Chromium browsers read these pointers only from system folders, so there is no per-user way:
-//!   [`Support::None`], and the caller falls back to the extensions page (Developer mode).
+//!   [`Support::None`]. The deb / rpm packages write them there for every user when VeloxFetch is installed
+//!   ([`LINUX_SYSTEM_FOLDERS`], `packaging/postinst.sh`), and the Windows setup writes the machine-wide keys
+//!   ([`WINDOWS_MACHINE_KEYS`], `installer-hooks.nsh`).
 //!
 //! Only for Chromium browsers (Chrome, Edge, Brave), and only once the extension is published in a store
 //! (an id is configured). Firefox installs add-ons from addons.mozilla.org pages only.
@@ -19,6 +21,16 @@ use crate::Platform;
 
 /// Chrome Web Store's update service: what the browser contacts to fetch the published extension.
 pub const CHROME_STORE_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
+
+/// Linux: the folders the deb / rpm packages put `<id>.json` in, for every user: Chrome's own, Chromium's (which
+/// Brave and other Chromium browsers read too: checked against a real Brave), and Edge's.
+pub const LINUX_SYSTEM_FOLDERS: [&str; 3] =
+    ["/usr/share/google-chrome/extensions", "/usr/share/chromium/extensions", "/usr/share/microsoft-edge/extensions"];
+
+/// Windows: the machine-wide keys the setup writes `<id>\update_url` under (HKLM, the 32-bit view: where the
+/// browsers read them), for every user. Brave reads Chrome's key; its own is written as well.
+pub const WINDOWS_MACHINE_KEYS: [&str; 3] =
+    [r"Software\Google\Chrome\Extensions", r"Software\Microsoft\Edge\Extensions", r"Software\BraveSoftware\Brave-Browser\Extensions"];
 
 /// How this browser can be offered the store extension on this system.
 #[derive(Debug, Clone, PartialEq, Eq)]

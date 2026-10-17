@@ -365,7 +365,15 @@ The diagnosis of a failure (full description: `docs/download-doctor.md`).
   The manifest allows exactly the shipped extension ids. Brave, Vivaldi and other Chromium forks read the
   Chromium key on Windows (verified against a real Brave), so "Brave" registers there.
 * **Extension ids.** The Chromium id is pinned by the public `key` in the extension's manifest and equals
-  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`.
+  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`. The Chrome Web
+  Store id (`CHROME_STORE_ID`, `keobnkoppcchnbpmmfodidkcedglbhnn`) is trusted too (`chromium_ids()`).
+* **The extension from the Chrome Web Store (v2.0.0).** The installers point Chrome, Edge and Brave at it for every
+  user (`packaging/postinst.sh`: `/usr/share/<browser>/extensions/<id>.json`; `installer-hooks.nsh`: `HKLM`, 32-bit
+  view), and `postrm.sh` / the uninstaller remove it. `install_extension` for a Chromium browser connects it, writes the
+  per-user pointer where the system has one (`store_way`) and opens the store page (`method: "store"`, never a
+  folder); Firefox keeps the developer folder. At start `refresh_registrations` rewrites a registration of ours that
+  an older version wrote (`native_messaging::needs_refresh`), so the store extension can reach the app after an
+  update. See `docs/store-extension.md`.
 
 ## Batch downloads and clipboard (Phase 8)
 

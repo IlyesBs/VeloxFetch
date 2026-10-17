@@ -829,3 +829,23 @@ stop once on kernel.org, and on Hetzner 45 s without a byte or an error until "e
 | `downloader-core` `engine.rs` | `a_network_that_lost_a_transfer_is_not_counted_against_the_server` (+ `Quiet`) | counting it against the server |
 | `tests/integration/src/lib.rs` | the test server's `quiet_gen`: every answer under way goes quiet and holds its place until the client closes it | |
 
+
+## The extension from the Chrome Web Store (v2.0.0)
+
+* `node --test tests/security/policy.test.mjs`: two tests. The installers' id, Linux folders and Windows keys must match
+  `CHROME_STORE_ID`, `LINUX_SYSTEM_FOLDERS` and `WINDOWS_MACHINE_KEYS`, must be removed on uninstall (not upgrade), and
+  must never use a policy or a local package. The packages' own lines are also run on scratch folders: the pointer is
+  written (mode 644, atomic), a second run is fine, and remove takes it away with the empty folders while another
+  package's file stays.
+* Unit tests: `browser-bridge` (the store id is trusted, nothing else) and `system-integration` (`needs_refresh`: an
+  older registration of ours is refreshed; up-to-date ones, another copy's, another program's and broken ones are
+  not).
+* `desktop-browser.mjs`: an older registration is brought up to date at start; the store id passes the real helper; the
+  Chrome Web Store badges show; Install extension gives the store steps and no folder; Firefox keeps its folder. Writes
+  `docs/screenshots/settings-browser-store.png`.
+* `real-store-extension.mjs` (by hand, internet, Linux with Brave): first start opens exactly the store page (never a
+  folder); Brave adds the extension from the store by itself through the packages' pointer, switched on; the store
+  extension reaches this test's VeloxFetch and a link it hands over arrives intact. It needs no root: without
+  `/usr/share/chromium/extensions/<id>.json` it uses a private copy of Brave, whose `extensions` folder Chromium reads
+  the same way. Result on 17 October 2026: 3 runs out of 3 passed (`docs/store-extension.md`).
+* NSIS hooks: compiled with makensis 3.11 (`~/.local/e2e-tools/nsis`) for x64 and x86.
