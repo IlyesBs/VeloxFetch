@@ -30,6 +30,100 @@ use system_integration::Platform;
 struct AppHandler {
     manager: DownloadManager,
     notify: Notify,
+    contacts: Arc<ContactLog>,
+}
+
+/// When a VeloxFetch extension last reached the app (from any browser): proof that it is installed and working.
+/// Only a time and where the extension came from; nothing about pages or links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionContact {
+    /// Milliseconds since 1970.
+    pub at: u64,
+    /// The extension from the Chrome Web Store (not the developer copy, nor Firefox's add-on).
+    pub from_store: bool,
+}
+
+/// Told to the window (the `velox://extension` event).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ExtensionEvent {
+    /// A contact was saved. `announce`: the first contact ever, or the one the app waited for since the first start;
+    /// the window says "installed and connected".
+    Contact { contact: ExtensionContact, announce: bool },
+    /// The first start waits for the browser to add the extension by itself, since `since` (ms since 1970).
+    Waiting { since: u64 },
+}
+
+pub type OnExtensionEvent = Arc<dyn Fn(ExtensionEvent) + Send + Sync>;
+
+/// The extension's contacts, kept in the data folder (`browser-extension/contact.json`) so Settings knows after a
+/// restart too, and the first start's wait (`browser-extension/.awaiting`: since when the app waits for the browser
+/// to add the extension by itself).
+struct ContactLog {
+    dir: PathBuf,
+    /// The last contact, and when it was last saved (saved at most every ten minutes: the extension pings often).
+    last: Mutex<(Option<ExtensionContact>, Option<std::time::Instant>)>,
+    on_event: OnExtensionEvent,
+}
+
+const SAVE_CONTACT_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+impl ContactLog {
+    fn open(data_dir: &Path, on_event: OnExtensionEvent) -> Self {
+        let dir = data_dir.join("browser-extension");
+        let saved = std::fs::read(dir.join("contact.json")).ok().and_then(|b| serde_json::from_slice::<ExtensionContact>(&b).ok());
+        Self { dir, last: Mutex::new((saved, None)), on_event }
+    }
+
+    fn last(&self) -> Option<ExtensionContact> {
+        self.last.lock().unwrap_or_else(|p| p.into_inner()).0
+    }
+
+    /// Since when the app waits for the browser to add the extension (`None`: not waiting).
+    fn awaited_since(&self) -> Option<u64> {
+        std::fs::read_to_string(self.dir.join(".awaiting")).ok().and_then(|s| s.trim().parse().ok())
+    }
+
+    fn start_waiting(&self) -> std::io::Result<()> {
+        let since = now_ms();
+        std::fs::create_dir_all(&self.dir)?;
+        std::fs::write(self.dir.join(".awaiting"), since.to_string())?;
+        (self.on_event)(ExtensionEvent::Waiting { since });
+        Ok(())
+    }
+
+    fn record(&self, caller: &Caller) {
+        let from_store = matches!(caller, Caller::Chromium { extension_id } if Some(extension_id.as_str()) == CHROME_STORE_ID);
+        let contact = ExtensionContact { at: now_ms(), from_store };
+        let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
+        let first = last.0.is_none();
+        let save = first || last.0.map(|c| c.from_store) != Some(from_store) || last.1.is_none_or(|t| t.elapsed() >= SAVE_CONTACT_EVERY);
+        last.0 = Some(contact);
+        if !save {
+            return;
+        }
+        last.1 = Some(std::time::Instant::now());
+        drop(last);
+        let awaited = self.awaited_since().is_some();
+        let written = std::fs::create_dir_all(&self.dir).and_then(|_| {
+            let tmp = self.dir.join("contact.json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec(&contact).unwrap_or_default())?;
+            std::fs::rename(&tmp, self.dir.join("contact.json"))
+        });
+        if let Err(e) = written {
+            tracing::warn!(error = %e, "could not save the extension's contact");
+        }
+        if awaited {
+            let _ = std::fs::remove_file(self.dir.join(".awaiting"));
+            tracing::info!(from_store, "the browser extension arrived and reached the app");
+        }
+        (self.on_event)(ExtensionEvent::Contact { contact, announce: first || awaited });
+    }
 }
 
 impl Handler for AppHandler {
@@ -39,6 +133,10 @@ impl Handler for AppHandler {
 
     fn video_bar(&self) -> bool {
         self.manager.video_bar()
+    }
+
+    fn contacted(&self, caller: &Caller) {
+        self.contacts.record(caller);
     }
 
     fn download(&self, req: DownloadRequest, caller: Caller) -> BoxFuture<'_, Result<DownloadAccepted, HandlerError>> {
@@ -94,9 +192,12 @@ pub struct ExtensionInstallDto {
     /// "store": the browser offers the published extension itself (its "New extension added" prompt, or the
     /// store page that was opened); "developer": the user loads the folder below in Developer mode.
     pub method: &'static str,
-    /// Folder holding the extension, to be picked in the browser (Load unpacked / temporary add-on).
+    /// Folder holding the extension, to be picked in the browser (Load unpacked / temporary add-on). Empty for the
+    /// store.
     pub folder: String,
-    /// The browser was found and opened on its extensions page.
+    /// The extension's page in the Chrome Web Store (store only; empty otherwise).
+    pub store_url: String,
+    /// The browser was found and opened (on the store page, or on its extensions page).
     pub opened_browser: bool,
     pub opened_folder: bool,
     pub integration: BrowserIntegrationDto,
@@ -125,6 +226,8 @@ pub struct BrowserIntegrationDto {
     pub host_present: bool,
     pub browsers: Vec<BrowserEntry>,
     pub chrome_extension_id: String,
+    /// The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there.
+    pub chrome_store_id: Option<String>,
     pub firefox_extension_id: String,
     /// Ask the user (a dialog with the file's details) before a browser download starts.
     pub confirm_downloads: bool,
@@ -133,6 +236,13 @@ pub struct BrowserIntegrationDto {
     /// Cookies and credentials handed over by a browser survive a restart, sealed with a key from
     /// the operating system's credential store. When false they are kept in memory only.
     pub secrets_protected: bool,
+    /// The last time a VeloxFetch extension reached the app: it is installed and working. `None`: never yet.
+    pub extension_contact: Option<ExtensionContact>,
+    /// Since when (ms since 1970) the app waits for the browser to add the extension by itself (first start, through
+    /// the installer's pointer). `None`: not waiting.
+    pub extension_awaited_since: Option<u64>,
+    /// After this long without the extension, the window offers its store page instead.
+    pub extension_wait_ms: u64,
 }
 
 pub struct Bridge {
@@ -143,6 +253,12 @@ pub struct Bridge {
     spec: HostSpec,
     targets: Vec<(Browser, Option<Target>)>,
     home: Option<PathBuf>,
+    /// Debug builds only (tests): where the store pointer goes instead of the real place (a scratch home, or a
+    /// scratch registry key on Windows).
+    store_scratch: Option<StoreScratch>,
+    /// Linux: the root the packages' pointers are looked for under (`/`; a scratch folder in tests).
+    system_root: PathBuf,
+    contacts: Arc<ContactLog>,
     /// Where to look for browsers installed as snap / Flatpak packages (Linux): `(home, system root)`.
     sandbox_roots: Option<(PathBuf, PathBuf)>,
     /// The token and handler of the link this instance serves, to serve it in more folders.
@@ -194,7 +310,9 @@ impl Bridge {
         manager: DownloadManager,
         resource_dir: Option<PathBuf>,
         notify: Notify,
+        on_extension: OnExtensionEvent,
     ) -> Self {
+        let contacts = Arc::new(ContactLog::open(data_dir, on_extension));
         let link = match listener {
             None => None,
             Some(listener) => match Token::create_file(data_dir) {
@@ -203,7 +321,7 @@ impl Bridge {
                     None
                 }
                 Ok(token) => {
-                    let handler = Arc::new(AppHandler { manager: manager.clone(), notify });
+                    let handler = Arc::new(AppHandler { manager: manager.clone(), notify, contacts: contacts.clone() });
                     tauri::async_runtime::spawn(serve(listener, token.clone(), handler.clone(), server_config()));
                     Some((token, handler))
                 }
@@ -271,6 +389,13 @@ impl Bridge {
             (Platform::Linux, true) => dev_var("VELOX_SANDBOX_HOME").map(|h| (PathBuf::from(&h), Path::new(&h).join("system-root"))),
             _ => None,
         };
+        let store_scratch = match (&scratch_home, &scratch) {
+            (Some(h), _) => Some(StoreScratch::Home(h.clone())),
+            (None, Some(key)) => Some(StoreScratch::Key(key.clone())),
+            (None, None) => None,
+        };
+        // Release builds, or a test that gave its own scratch places: never a debug build on the real registrations.
+        let may_refresh = !cfg!(debug_assertions) || store_scratch.is_some();
         let bridge = Self {
             manager,
             resource_dir,
@@ -279,6 +404,14 @@ impl Bridge {
             spec,
             targets,
             home,
+            store_scratch,
+            // Tests give a scratch root; a debug build never relies on the real system folders.
+            system_root: match dev_var("VELOX_STORE_SYSTEM_ROOT") {
+                Some(root) => PathBuf::from(root),
+                None if cfg!(debug_assertions) => data_dir.join("no-system-root"),
+                None => PathBuf::from("/"),
+            },
+            contacts,
             sandbox_roots,
             link,
             served: Mutex::new(HashSet::new()),
@@ -286,8 +419,39 @@ impl Bridge {
                 .filter(|_| !cfg!(debug_assertions) && Platform::current() == Platform::Linux)
                 .map(|exe| ProtocolHandler { scheme: app_start::SCHEME.into(), exe }),
         };
+        if may_refresh {
+            bridge.refresh_registrations();
+        }
         bridge.refresh_sandboxed();
         bridge
+    }
+
+    /// Keep connected browsers working after an update without the user doing anything: a registration of ours that
+    /// is out of date (the store extension's id was added, the helper moved) is written again, so the extension
+    /// from the store can reach the app at once. A browser the user never connected, or another copy of VeloxFetch's
+    /// registration, is left alone.
+    fn refresh_registrations(&self) {
+        for (b, t) in &self.targets {
+            let Some(t) = t else { continue };
+            if nm::needs_refresh(*b, &self.spec, t) {
+                match nm::install(*b, &self.spec, &self.manifest_dir, t) {
+                    Ok(()) => tracing::info!(browser = ?b, "browser registration brought up to date"),
+                    Err(e) => tracing::warn!(error = %e, browser = ?b, "could not bring a browser registration up to date"),
+                }
+            }
+        }
+    }
+
+    /// Where this browser's pointer to the store extension goes for this user.
+    fn store_way(&self, browser: Browser, id: &str) -> store::Support {
+        match &self.store_scratch {
+            None => store::support(browser, Platform::current(), self.home.as_deref(), id),
+            Some(StoreScratch::Home(h)) => store::support(browser, Platform::current(), Some(h), id),
+            Some(StoreScratch::Key(key)) => match store::support(browser, Platform::current(), None, id) {
+                store::Support::Registry { .. } => store::Support::Registry { key: format!(r"{key}\store\{}\{id}", browser.as_str()) },
+                other => other,
+            },
+        }
     }
 
     /// The snap / Flatpak browsers installed now (looked up every time: one can be installed or run for the first
@@ -380,10 +544,26 @@ impl Bridge {
             host_present: self.spec.host_exe.is_file(),
             browsers,
             chrome_extension_id: CHROME_EXTENSION_ID.to_string(),
+            chrome_store_id: CHROME_STORE_ID.map(str::to_string),
             firefox_extension_id: FIREFOX_EXTENSION_ID.to_string(),
             confirm_downloads: self.manager.browser_confirm(),
             video_bar: self.manager.video_bar(),
             secrets_protected: self.manager.secrets_protected(),
+            extension_contact: self.contacts.last(),
+            extension_awaited_since: self.contacts.awaited_since(),
+            extension_wait_ms: dev_var("VELOX_EXTENSION_WAIT_MS").and_then(|v| v.parse().ok()).unwrap_or(180_000),
+        }
+    }
+
+    /// Whether this browser adds the store extension by itself, with nothing for the user to open: the installer's
+    /// pointer is in place (Linux deb / rpm), or the app just wrote the per-user one (Windows, macOS: the browser
+    /// shows its own "New extension added"). Not for an AppImage: Linux has no per-user pointer.
+    fn browser_adds_it_itself(&self, browser: Browser, id: &str) -> bool {
+        match self.store_way(browser, id) {
+            store::Support::None => store::system_pointer(browser, &self.system_root, id).is_some_and(|p| p.is_file()),
+            way => store::offer(&way)
+                .inspect_err(|e| tracing::warn!(error = %e, "pointing the browser at the store extension failed"))
+                .unwrap_or(false),
         }
     }
 
@@ -406,29 +586,29 @@ impl Bridge {
         // 1. connect the browser to the app (per user)
         self.set(SetBrowserIntegration { browser, enabled: true })?;
 
-        // 2. published in a store: let the browser offer it (its own prompt; the store page opens too)
+        // 2. Chrome, Edge, Brave: the extension from the Chrome Web Store, never a folder. The browser is pointed at
+        // it for this user where the system allows it (its own "New extension added" prompt; the installers already
+        // did it for every user), and its store page opens with the browser's own Add button. Tests set
+        // VELOX_NO_LAUNCH so they never start real programs (debug builds only).
         let launching = dev_var("VELOX_NO_LAUNCH").is_none();
-        if let Some(id) = CHROME_STORE_ID {
-            let way = store::support(browser, platform, self.home.as_deref(), id);
-            match store::offer(&way) {
-                Ok(true) => {
-                    let opened_browser =
-                        launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_store_page(&l, id).is_ok());
-                    return Ok(ExtensionInstallDto {
-                        browser,
-                        method: "store",
-                        folder: String::new(),
-                        opened_browser,
-                        opened_folder: false,
-                        integration: self.integration(),
-                    });
-                }
-                Ok(false) => {} // no per-user way here (Linux): Developer mode below
-                Err(e) => tracing::warn!(error = %e, "offering the store extension failed; using Developer mode"),
+        if let Some(id) = CHROME_STORE_ID.filter(|_| browser != Browser::Firefox) {
+            if let Err(e) = store::offer(&self.store_way(browser, id)) {
+                tracing::warn!(error = %e, "pointing the browser at the store extension failed; its store page still opens");
             }
+            let opened_browser =
+                launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_store_page(&l, id).is_ok());
+            return Ok(ExtensionInstallDto {
+                browser,
+                method: "store",
+                folder: String::new(),
+                store_url: launch::store_page_url(id),
+                opened_browser,
+                opened_folder: false,
+                integration: self.integration(),
+            });
         }
 
-        // 3. the extension files, in a fixed folder inside the app's data folder
+        // 3. Firefox (until its add-on is published), or no store id: the extension files, in a fixed folder inside the app's data folder
         let family = if browser == Browser::Firefox { "firefox" } else { "chromium" };
         let source = dev_var("VELOX_EXTENSION_SRC")
             .map(PathBuf::from)
@@ -444,8 +624,7 @@ impl Bridge {
             err("could not prepare the extension folder")
         })?;
 
-        // 4. open the browser on its extensions page, and the folder to pick. Tests set
-        // VELOX_NO_LAUNCH so they never start real programs (debug builds only).
+        // 4. open the browser on its extensions page, and the folder to pick.
         let opened_browser =
             launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_extensions_page(browser, &l).is_ok());
         let opened_folder = launching && launch::open_folder(platform, &folder).is_ok();
@@ -454,6 +633,7 @@ impl Bridge {
             browser,
             method: "developer",
             folder: folder.to_string_lossy().into_owned(),
+            store_url: String::new(),
             opened_browser,
             opened_folder,
             integration: self.integration(),
@@ -461,9 +641,9 @@ impl Bridge {
     }
 
     /// First start only: set the extension up for the default browser without waiting for the user to find the
-    /// button (connect the browser, then the store prompt or the extensions page). Done once per installation (a
-    /// marker in the data folder), never in debug builds unless a test asks, and it never fails the app: whatever
-    /// goes wrong is logged, and Settings > Browser still has the button.
+    /// button (connect the browser, then the extension's store page; Firefox: its extensions page). Done once per
+    /// installation (a marker in the data folder), never in debug builds unless a test asks, and it never fails the
+    /// app: whatever goes wrong is logged, and Settings > Browser still has the button.
     pub fn auto_install_once(&self, resources: Option<&Path>) {
         let wanted = !cfg!(debug_assertions) || dev_var("VELOX_AUTO_EXTENSION").is_some();
         let Some(data_dir) = self.manifest_dir.parent() else { return };
@@ -482,9 +662,27 @@ impl Bridge {
             let _ = mark(&marker); // set up before (an older version, or by hand)
             return;
         }
-        match self.install_extension(InstallExtension { browser: Some(browser) }, resources) {
-            Ok(r) => tracing::info!(browser = ?browser, method = r.method, "extension set up on first start"),
-            Err(e) => tracing::warn!(browser = ?browser, error = %e.message, "setting up the extension on first start failed"),
+        // The browser adds the store extension by itself: connect it and wait for the extension to reach the app (the
+        // window offers the store page if it does not come). Otherwise (an AppImage, Firefox) the usual flow: the
+        // store page, or Firefox's extensions page.
+        let by_itself = CHROME_STORE_ID.filter(|_| browser != Browser::Firefox).is_some_and(|id| self.browser_adds_it_itself(browser, id));
+        if by_itself {
+            match self.set(SetBrowserIntegration { browser, enabled: true }) {
+                Ok(_) => {
+                    tracing::info!(browser = ?browser, "browser connected on first start; it adds the extension from the Chrome Web Store by itself");
+                    if self.contacts.last().is_none() {
+                        if let Err(e) = self.contacts.start_waiting() {
+                            tracing::warn!(error = %e, "could not remember that the app waits for the extension");
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(browser = ?browser, error = %e.message, "connecting the browser on first start failed"),
+            }
+        } else {
+            match self.install_extension(InstallExtension { browser: Some(browser) }, resources) {
+                Ok(r) => tracing::info!(browser = ?browser, method = r.method, "extension set up on first start"),
+                Err(e) => tracing::warn!(browser = ?browser, error = %e.message, "setting up the extension on first start failed"),
+            }
         }
         if let Err(e) = mark(&marker) {
             tracing::warn!(error = %e, "could not remember that the extension was offered");
@@ -515,8 +713,7 @@ impl Bridge {
             }
             // Disconnect also stops the browser offering the store extension.
             if let Some(id) = CHROME_STORE_ID {
-                let way = store::support(req.browser, Platform::current(), self.home.as_deref(), id);
-                if let Err(e) = store::withdraw(&way) {
+                if let Err(e) = store::withdraw(&self.store_way(req.browser, id)) {
                     tracing::warn!(error = %e, "could not withdraw the store extension offer");
                 }
             }
@@ -534,6 +731,12 @@ impl Bridge {
         })?;
         Ok(self.integration())
     }
+}
+
+/// Tests: the store pointer under a scratch home (macOS) or a scratch registry key (Windows), never the real one.
+enum StoreScratch {
+    Home(PathBuf),
+    Key(String),
 }
 
 fn server_config() -> ServerConfig {
@@ -574,4 +777,76 @@ fn mark(marker: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(marker, b"1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the window was told: each contact, and whether it was announced.
+    type Told = Arc<Mutex<Vec<(ExtensionContact, bool)>>>;
+
+    fn log(dir: &Path) -> (ContactLog, Told) {
+        let told = Arc::new(Mutex::new(Vec::new()));
+        let t = told.clone();
+        let on = move |e| match e {
+            ExtensionEvent::Contact { contact, announce } => t.lock().unwrap().push((contact, announce)),
+            ExtensionEvent::Waiting { since } => assert!(since > 0),
+        };
+        (ContactLog::open(dir, Arc::new(on)), told)
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("velox-contact-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn the_first_contact_is_announced_saved_and_remembered_after_a_restart() {
+        let dir = scratch("first");
+        let (l, told) = log(&dir);
+        assert_eq!(l.last(), None);
+        let store = Caller::Chromium { extension_id: CHROME_STORE_ID.unwrap().into() };
+        l.record(&store);
+        l.record(&store); // pings come often: one save, one message
+        let told = told.lock().unwrap().clone();
+        assert_eq!(told.len(), 1);
+        assert!(told[0].1, "the first contact ever is announced");
+        assert!(told[0].0.from_store);
+        let (again, told2) = log(&dir);
+        assert_eq!(again.last(), Some(told[0].0), "kept in the data folder");
+        again.record(&store);
+        assert!(!told2.lock().unwrap()[0].1, "not announced again after a restart");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_awaited_extension_ends_the_wait_and_is_announced() {
+        let dir = scratch("await");
+        let (l, told) = log(&dir);
+        l.record(&Caller::Chromium { extension_id: CHROME_EXTENSION_ID.into() });
+        assert!(!told.lock().unwrap()[0].0.from_store, "the developer copy is not the store's");
+        // Then the first start of a new installation waits for the store extension.
+        l.start_waiting().unwrap();
+        assert!(l.awaited_since().is_some_and(|t| t > 0));
+        l.record(&Caller::Chromium { extension_id: CHROME_STORE_ID.unwrap().into() });
+        let told = told.lock().unwrap().clone();
+        assert_eq!(told.len(), 2, "a change of extension is saved at once");
+        assert!(told[1].1 && told[1].0.from_store, "the awaited one is announced");
+        assert_eq!(l.awaited_since(), None, "the wait is over");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_contact_file_is_ignored() {
+        let dir = scratch("bad");
+        std::fs::create_dir_all(dir.join("browser-extension")).unwrap();
+        std::fs::write(dir.join("browser-extension/contact.json"), b"{not json").unwrap();
+        std::fs::write(dir.join("browser-extension/.awaiting"), b"soon").unwrap();
+        let (l, _) = log(&dir);
+        assert_eq!(l.last(), None);
+        assert_eq!(l.awaited_since(), None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

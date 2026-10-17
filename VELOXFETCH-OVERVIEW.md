@@ -272,8 +272,18 @@ Details: `docs/download-intelligence.md`.
   - **starts VeloxFetch when it is closed**: a download sent from the browser opens the app and arrives in it. The
     helper finds the app itself (beside it, the Linux packages' `bin`, the macOS bundle, or the path the app recorded
     for an AppImage); a browser in a snap / Flatpak asks the desktop to open `veloxfetch://start`.
-- **Install:** a button in Settings > Browser registers the helper per user and opens the extension page. Browsers
-  installed as snap / Flatpak packages get their own copy of the helper and link.
+- **Install: the extension comes from the Chrome Web Store.**
+  - The installers point Chrome, Edge and Brave at it for every user, and the browser adds it by itself (Linux:
+    switched on; Windows / macOS: its "New extension added → Enable").
+  - The first start opens nothing: VeloxFetch connects the default browser and waits for the extension. When it
+    first reaches the app, a green banner says **Browser extension installed** and Settings > Browser shows
+    **Extension installed and working**. Only if it has not come after 3 minutes does a banner offer the store page
+    (an AppImage, which has no pointer, opens the store page on its first start).
+  - Settings > Browser shows a **Chrome Web Store** badge on those rows, and **Install extension** opens the store page,
+    never a folder or the extensions page.
+  - Firefox keeps the temporary add-on until its add-on is published.
+  - The helper is registered per user; older registrations are brought up to date at start.
+  - Browsers installed as snap / Flatpak packages get their own copy of the helper and link (`docs/store-extension.md`).
 
 ### Videos
 - **Video pages** (YouTube, Vimeo… through yt-dlp):
@@ -842,6 +852,7 @@ More: `docs/testing.md`, `docs/release-process.md`.
 | Video download details | `docs/video-details.md` |
 | Download Doctor | `docs/download-doctor.md` |
 | Network usage (kept across restarts, updates, reinstalls) | `docs/network-usage.md` |
+| The extension from the Chrome Web Store, installed with the app | `docs/store-extension.md` |
 | Design decisions over time | `docs/adr/` |
 | Look and feel (reference images, screenshots) | `docs/design/`, `docs/screenshots/` |
 
@@ -856,6 +867,7 @@ was green (Rust, vitest, policy, e2e on Linux).
 
 | Date | Branch (commit) | Kind | What changed | Doc |
 |---|---|---|---|---|
+| 2026-10-17 | `fix_store_extension_main` (from `v2.0.0`, `feat_store_extension` + `fix_store_extension_first_start`) | Fix | Brought to 1.x: the extension from the Chrome Web Store (`keobnkoppcchnbpmmfodidkcedglbhnn`) instead of Developer mode. The deb / rpm packages and the Windows setup point Chrome, Edge and Brave at it for every user (Chromium's external-extension pointer; removed on uninstall) and the browser adds it by itself. The first start opens nothing: VeloxFetch connects the default browser, waits, and says **Browser extension installed** (green banner; Settings > Browser "installed and working") when the extension first reaches it; only after 3 minutes without it does a banner offer the store page (an AppImage opens the store page at once). Install extension opens the store page, never a folder. Chrome Web Store badges; texts in English, French and Arabic. The store id is trusted by the helper; older registrations are brought up to date at start. Firefox keeps the temporary add-on. | `docs/store-extension.md` |
 | 2026-10-16 | `fix_phase6_held_race` | Test | A queue test failed about 1 run in 10: it read how many downloads the queue held in the moment between a download being saved as paused and the queue writing it down (both under the queue's lock: the app was right). It and the game pause test now wait for the count. 0 failures in 60 runs. | `docs/testing.md` |
 | 2026-10-16 | `fix_settings_narrow` | Fix | In a window narrower than 768 px, the Settings section tabs each grew to about 1,000 px and pushed the whole Settings page sideways (since the first version). They now sit in one row that scrolls sideways, and the page fits the window. `desktop-i18n.mjs` checks every page in every language at 900, 760 and 640 px. | `docs/testing.md
 | 2026-10-16 | `fix_network_usage_history` | Fix | Issue #45: the dashboard's Network usage went back to 0 after a restart, an update, a reinstall or deleting the downloads (it counted only since launch). Every byte received is now saved per local day (schema v8, `network_usage`; every 5 s and on close); the card shows the total ever, today and this month; deleting downloads or clearing the history keeps it. Tests: persistence, unit, integration (restart on the next day of the next month), e2e +4. | `docs/network-usage.md` |

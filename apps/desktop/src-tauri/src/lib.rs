@@ -36,6 +36,8 @@ use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
 
 /// Event channel the UI listens on.
 pub const EVENT_CHANNEL: &str = "velox://event";
+/// The browser extension reached the app, or the first start waits for it (`bridge::ExtensionEvent`), main window only.
+pub const EXTENSION_EVENT: &str = "velox://extension";
 
 struct AppState {
     manager: DownloadManager,
@@ -904,12 +906,17 @@ pub fn run() {
 
             let data_dir = db_path_dir.clone();
             let front = app.handle().clone();
+            let told = app.handle().clone();
             let bridge = bridge::Bridge::start(
                 &data_dir,
                 listener,
                 manager.clone(),
                 app.path().resource_dir().ok(),
                 Arc::new(move || bring_to_front(&front)),
+                // The extension reached the app, or the first start waits for it: the main window shows it.
+                Arc::new(move |event| {
+                    let _ = told.emit_to(authz::MAIN, EXTENSION_EVENT, event);
+                }),
             );
             let source: Box<dyn system_integration::clipboard::ClipboardSource> = match dev_only("VELOX_CLIPBOARD_FILE") {
                 // Debug builds only (end-to-end tests): text from a file, so the user's real clipboard is never touched.

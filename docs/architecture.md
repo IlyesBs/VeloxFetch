@@ -331,7 +331,20 @@ The diagnosis of a failure (full description: `docs/download-doctor.md`).
   The manifest allows exactly the shipped extension ids. Brave, Vivaldi and other Chromium forks read the
   Chromium key on Windows (verified against a real Brave), so "Brave" registers there.
 * **Extension ids.** The Chromium id is pinned by the public `key` in the extension's manifest and equals
-  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`.
+  the id compiled into the host (a test compares them); the Firefox id is `velox-fetch@velox.app`. The Chrome Web
+  Store id (`CHROME_STORE_ID`, `keobnkoppcchnbpmmfodidkcedglbhnn`) is trusted too (`chromium_ids()`).
+* **The extension from the Chrome Web Store.** The installers point Chrome, Edge and Brave at it for every
+  user (`packaging/postinst.sh`: `/usr/share/<browser>/extensions/<id>.json`; `installer-hooks.nsh`: `HKLM`, 32-bit
+  view), and `postrm.sh` / the uninstaller remove it. `install_extension` for a Chromium browser connects it, writes the
+  per-user pointer where the system has one (`store_way`) and opens the store page (`method: "store"`, never a
+  folder); Firefox keeps the developer folder. At start `refresh_registrations` rewrites a registration of ours that
+  an older version wrote (`native_messaging::needs_refresh`), so the store extension can reach the app after an
+  update. The first start (`auto_install_once`) opens nothing when the browser adds the extension by itself
+  (`browser_adds_it_itself`: the packages' pointer on Linux, `store_extension::system_pointer`; the per-user one on
+  Windows / macOS): it connects the browser and waits. The server's `Handler::contacted` (after every handshake that
+  passed) feeds `ContactLog` (`browser-extension/contact.json`, `.awaiting`), which tells the main window
+  (`velox://extension`: `contact` / `waiting`); `ExtensionBanner` and Settings show "installed and working", or after
+  `extensionWaitMs` the store page as the fallback. See `docs/store-extension.md`.
 
 ## Batch downloads and clipboard (Phase 8)
 
