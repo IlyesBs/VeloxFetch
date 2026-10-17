@@ -495,8 +495,10 @@ export interface ExtensionInstall {
   browser: BrowserName;
   /** "store": the browser offers the published extension itself; "developer": load the folder in Developer mode. */
   method: "store" | "developer";
-  /** Folder to pick in the browser (Load unpacked / temporary add-on). */
+  /** Folder to pick in the browser (Load unpacked / temporary add-on). Empty for the store. */
   folder: string;
+  /** The extension's page in the Chrome Web Store (store only). */
+  storeUrl: string;
   openedBrowser: boolean;
   openedFolder: boolean;
   integration: BrowserIntegration;
@@ -509,6 +511,8 @@ export interface BrowserIntegration {
   hostPresent: boolean;
   browsers: BrowserEntry[];
   chromeExtensionId: string;
+  /** The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there. */
+  chromeStoreId: string | null;
   firefoxExtensionId: string;
   /** Ask before a browser download starts. */
   confirmDownloads: boolean;

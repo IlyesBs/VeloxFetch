@@ -11,10 +11,11 @@
 
 /// Chromium extension id, fixed by the public key in the extension's manifest.
 pub const CHROME_EXTENSION_ID: &str = "gbcanjaaelioalfdggkhbbnbinmfgdbc";
-/// The extension's id in the Chrome Web Store, once it is published there (the store gives an item its own id).
-/// While it is `None`, browsers get the extension through Developer mode ("Load unpacked"); once it is set, the
-/// app offers the store extension and the browser shows its own "New extension added" prompt.
-pub const CHROME_STORE_ID: Option<&str> = None;
+/// The extension's id in the Chrome Web Store (the store gives an item its own id). Chrome, Edge and Brave get the
+/// extension from the store: the installers point the browsers at it (their own "New extension added" prompt) and
+/// Install extension opens its store page. While it is `None`, browsers get it through Developer mode instead.
+/// The installers carry the same id (`packaging/postinst.sh`, `installer-hooks.nsh`; a test keeps them in step).
+pub const CHROME_STORE_ID: Option<&str> = Some("keobnkoppcchnbpmmfodidkcedglbhnn");
 
 /// Every Chromium extension id that may use the bridge: the one loaded unpacked, and the store one.
 pub fn chromium_ids() -> Vec<String> {
@@ -131,6 +132,13 @@ mod tests {
 
         let other = Caller::from_args(&a(&["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"])).unwrap();
         assert_eq!(other.check(&Allowlist::default()), Err(CallerError::NotAllowed), "well-formed but not ours");
+    }
+
+    #[test]
+    fn the_store_extension_is_trusted_next_to_the_developer_one() {
+        let store = Caller::from_args(&a(&["chrome-extension://keobnkoppcchnbpmmfodidkcedglbhnn/"])).unwrap();
+        assert!(store.check(&Allowlist::default()).is_ok());
+        assert_eq!(chromium_ids(), a(&[CHROME_EXTENSION_ID, "keobnkoppcchnbpmmfodidkcedglbhnn"]));
     }
 
     #[test]

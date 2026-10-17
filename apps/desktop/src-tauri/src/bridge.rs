@@ -94,9 +94,12 @@ pub struct ExtensionInstallDto {
     /// "store": the browser offers the published extension itself (its "New extension added" prompt, or the
     /// store page that was opened); "developer": the user loads the folder below in Developer mode.
     pub method: &'static str,
-    /// Folder holding the extension, to be picked in the browser (Load unpacked / temporary add-on).
+    /// Folder holding the extension, to be picked in the browser (Load unpacked / temporary add-on). Empty for the
+    /// store.
     pub folder: String,
-    /// The browser was found and opened on its extensions page.
+    /// The extension's page in the Chrome Web Store (store only; empty otherwise).
+    pub store_url: String,
+    /// The browser was found and opened (on the store page, or on its extensions page).
     pub opened_browser: bool,
     pub opened_folder: bool,
     pub integration: BrowserIntegrationDto,
@@ -125,6 +128,8 @@ pub struct BrowserIntegrationDto {
     pub host_present: bool,
     pub browsers: Vec<BrowserEntry>,
     pub chrome_extension_id: String,
+    /// The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there.
+    pub chrome_store_id: Option<String>,
     pub firefox_extension_id: String,
     /// Ask the user (a dialog with the file's details) before a browser download starts.
     pub confirm_downloads: bool,
@@ -143,6 +148,9 @@ pub struct Bridge {
     spec: HostSpec,
     targets: Vec<(Browser, Option<Target>)>,
     home: Option<PathBuf>,
+    /// Debug builds only (tests): where the store pointer goes instead of the real place (a scratch home, or a
+    /// scratch registry key on Windows).
+    store_scratch: Option<StoreScratch>,
     /// Where to look for browsers installed as snap / Flatpak packages (Linux): `(home, system root)`.
     sandbox_roots: Option<(PathBuf, PathBuf)>,
     /// The token and handler of the link this instance serves, to serve it in more folders.
@@ -271,6 +279,13 @@ impl Bridge {
             (Platform::Linux, true) => dev_var("VELOX_SANDBOX_HOME").map(|h| (PathBuf::from(&h), Path::new(&h).join("system-root"))),
             _ => None,
         };
+        let store_scratch = match (&scratch_home, &scratch) {
+            (Some(h), _) => Some(StoreScratch::Home(h.clone())),
+            (None, Some(key)) => Some(StoreScratch::Key(key.clone())),
+            (None, None) => None,
+        };
+        // Release builds, or a test that gave its own scratch places: never a debug build on the real registrations.
+        let may_refresh = !cfg!(debug_assertions) || store_scratch.is_some();
         let bridge = Self {
             manager,
             resource_dir,
@@ -279,6 +294,7 @@ impl Bridge {
             spec,
             targets,
             home,
+            store_scratch,
             sandbox_roots,
             link,
             served: Mutex::new(HashSet::new()),
@@ -286,8 +302,39 @@ impl Bridge {
                 .filter(|_| !cfg!(debug_assertions) && Platform::current() == Platform::Linux)
                 .map(|exe| ProtocolHandler { scheme: app_start::SCHEME.into(), exe }),
         };
+        if may_refresh {
+            bridge.refresh_registrations();
+        }
         bridge.refresh_sandboxed();
         bridge
+    }
+
+    /// Keep connected browsers working after an update without the user doing anything: a registration of ours that
+    /// is out of date (the store extension's id was added, the helper moved) is written again, so the extension
+    /// from the store can reach the app at once. A browser the user never connected, or another copy of VeloxFetch's
+    /// registration, is left alone.
+    fn refresh_registrations(&self) {
+        for (b, t) in &self.targets {
+            let Some(t) = t else { continue };
+            if nm::needs_refresh(*b, &self.spec, t) {
+                match nm::install(*b, &self.spec, &self.manifest_dir, t) {
+                    Ok(()) => tracing::info!(browser = ?b, "browser registration brought up to date"),
+                    Err(e) => tracing::warn!(error = %e, browser = ?b, "could not bring a browser registration up to date"),
+                }
+            }
+        }
+    }
+
+    /// Where this browser's pointer to the store extension goes for this user.
+    fn store_way(&self, browser: Browser, id: &str) -> store::Support {
+        match &self.store_scratch {
+            None => store::support(browser, Platform::current(), self.home.as_deref(), id),
+            Some(StoreScratch::Home(h)) => store::support(browser, Platform::current(), Some(h), id),
+            Some(StoreScratch::Key(key)) => match store::support(browser, Platform::current(), None, id) {
+                store::Support::Registry { .. } => store::Support::Registry { key: format!(r"{key}\store\{}\{id}", browser.as_str()) },
+                other => other,
+            },
+        }
     }
 
     /// The snap / Flatpak browsers installed now (looked up every time: one can be installed or run for the first
@@ -380,6 +427,7 @@ impl Bridge {
             host_present: self.spec.host_exe.is_file(),
             browsers,
             chrome_extension_id: CHROME_EXTENSION_ID.to_string(),
+            chrome_store_id: CHROME_STORE_ID.map(str::to_string),
             firefox_extension_id: FIREFOX_EXTENSION_ID.to_string(),
             confirm_downloads: self.manager.browser_confirm(),
             video_bar: self.manager.video_bar(),
@@ -406,29 +454,29 @@ impl Bridge {
         // 1. connect the browser to the app (per user)
         self.set(SetBrowserIntegration { browser, enabled: true })?;
 
-        // 2. published in a store: let the browser offer it (its own prompt; the store page opens too)
+        // 2. Chrome, Edge, Brave: the extension from the Chrome Web Store, never a folder. The browser is pointed at
+        // it for this user where the system allows it (its own "New extension added" prompt; the installers already
+        // did it for every user), and its store page opens with the browser's own Add button. Tests set
+        // VELOX_NO_LAUNCH so they never start real programs (debug builds only).
         let launching = dev_var("VELOX_NO_LAUNCH").is_none();
-        if let Some(id) = CHROME_STORE_ID {
-            let way = store::support(browser, platform, self.home.as_deref(), id);
-            match store::offer(&way) {
-                Ok(true) => {
-                    let opened_browser =
-                        launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_store_page(&l, id).is_ok());
-                    return Ok(ExtensionInstallDto {
-                        browser,
-                        method: "store",
-                        folder: String::new(),
-                        opened_browser,
-                        opened_folder: false,
-                        integration: self.integration(),
-                    });
-                }
-                Ok(false) => {} // no per-user way here (Linux): Developer mode below
-                Err(e) => tracing::warn!(error = %e, "offering the store extension failed; using Developer mode"),
+        if let Some(id) = CHROME_STORE_ID.filter(|_| browser != Browser::Firefox) {
+            if let Err(e) = store::offer(&self.store_way(browser, id)) {
+                tracing::warn!(error = %e, "pointing the browser at the store extension failed; its store page still opens");
             }
+            let opened_browser =
+                launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_store_page(&l, id).is_ok());
+            return Ok(ExtensionInstallDto {
+                browser,
+                method: "store",
+                folder: String::new(),
+                store_url: launch::store_page_url(id),
+                opened_browser,
+                opened_folder: false,
+                integration: self.integration(),
+            });
         }
 
-        // 3. the extension files, in a fixed folder inside the app's data folder
+        // 3. Firefox (until its add-on is published), or no store id: the extension files, in a fixed folder inside the app's data folder
         let family = if browser == Browser::Firefox { "firefox" } else { "chromium" };
         let source = dev_var("VELOX_EXTENSION_SRC")
             .map(PathBuf::from)
@@ -444,8 +492,7 @@ impl Bridge {
             err("could not prepare the extension folder")
         })?;
 
-        // 4. open the browser on its extensions page, and the folder to pick. Tests set
-        // VELOX_NO_LAUNCH so they never start real programs (debug builds only).
+        // 4. open the browser on its extensions page, and the folder to pick.
         let opened_browser =
             launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_extensions_page(browser, &l).is_ok());
         let opened_folder = launching && launch::open_folder(platform, &folder).is_ok();
@@ -454,6 +501,7 @@ impl Bridge {
             browser,
             method: "developer",
             folder: folder.to_string_lossy().into_owned(),
+            store_url: String::new(),
             opened_browser,
             opened_folder,
             integration: self.integration(),
@@ -461,9 +509,9 @@ impl Bridge {
     }
 
     /// First start only: set the extension up for the default browser without waiting for the user to find the
-    /// button (connect the browser, then the store prompt or the extensions page). Done once per installation (a
-    /// marker in the data folder), never in debug builds unless a test asks, and it never fails the app: whatever
-    /// goes wrong is logged, and Settings > Browser still has the button.
+    /// button (connect the browser, then the extension's store page; Firefox: its extensions page). Done once per
+    /// installation (a marker in the data folder), never in debug builds unless a test asks, and it never fails the
+    /// app: whatever goes wrong is logged, and Settings > Browser still has the button.
     pub fn auto_install_once(&self, resources: Option<&Path>) {
         let wanted = !cfg!(debug_assertions) || dev_var("VELOX_AUTO_EXTENSION").is_some();
         let Some(data_dir) = self.manifest_dir.parent() else { return };
@@ -515,8 +563,7 @@ impl Bridge {
             }
             // Disconnect also stops the browser offering the store extension.
             if let Some(id) = CHROME_STORE_ID {
-                let way = store::support(req.browser, Platform::current(), self.home.as_deref(), id);
-                if let Err(e) = store::withdraw(&way) {
+                if let Err(e) = store::withdraw(&self.store_way(req.browser, id)) {
                     tracing::warn!(error = %e, "could not withdraw the store extension offer");
                 }
             }
@@ -534,6 +581,12 @@ impl Bridge {
         })?;
         Ok(self.integration())
     }
+}
+
+/// Tests: the store pointer under a scratch home (macOS) or a scratch registry key (Windows), never the real one.
+enum StoreScratch {
+    Home(PathBuf),
+    Key(String),
 }
 
 fn server_config() -> ServerConfig {
