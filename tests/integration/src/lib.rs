@@ -81,6 +81,9 @@ pub struct State {
     turn: tokio::sync::Semaphore,
     /// For every answer the client stopped reading: the 32 KiB body chunks it had been sent before.
     pub cut_after_chunks: Mutex<Vec<usize>>,
+    /// Raised by a test: every data answer under way goes quiet at its next chunk (the connection stays open and sends
+    /// nothing more: a server or a network that stopped sending without closing); answers started after are fine.
+    pub quiet_gen: AtomicUsize,
     /// Body bytes written per client address (which network a request came through).
     pub bytes_by_peer: Mutex<std::collections::HashMap<std::net::IpAddr, u64>>,
     /// `/signed/..` links are refused (`403`) to a client from this address (a link signed for another address).
@@ -176,6 +179,7 @@ pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
         one_at_a_time: AtomicBool::new(false),
         turn: tokio::sync::Semaphore::new(1),
         cut_after_chunks: Mutex::new(Vec::new()),
+        quiet_gen: AtomicUsize::new(0),
         bytes_by_peer: Mutex::new(Default::default()),
         refuse_peer: Mutex::new(None),
     });
@@ -376,6 +380,7 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         return false;
     }
     let cut = is_data_get && take(&st.truncate_next);
+    let gen = st.quiet_gen.load(Ordering::SeqCst);
     let body = if cut { &body[..body.len() / 2] } else { body };
     let delay = *st.chunk_delay.lock().unwrap();
 
@@ -391,6 +396,16 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         }
         st.bytes_served.fetch_add(chunk.len() as u64, Ordering::SeqCst);
         count_peer(s, st, chunk.len());
+        if is_data_get && st.quiet_gen.load(Ordering::SeqCst) != gen {
+            // Open and silent until the client closes it (it still counts against `max_concurrent` meanwhile).
+            let mut buf = [0u8; 512];
+            let _ = tokio::time::timeout(Duration::from_secs(600), async {
+                while matches!(s.read(&mut buf).await, Ok(n) if n > 0) {}
+            })
+            .await;
+            ok = false;
+            break;
+        }
         // Pace between chunks only: the request must not look "active" after its last byte is out.
         if !delay.is_zero() && i + 1 < chunks {
             tokio::time::sleep(delay).await;

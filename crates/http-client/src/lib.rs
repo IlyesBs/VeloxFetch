@@ -56,6 +56,11 @@ pub enum HttpError {
     /// another one). Not a sign of an overloaded server.
     #[error("a connection through one of several networks was lost")]
     NetworkLost,
+    /// A ranged transfer received nothing for [`ClientConfig::transfer_quiet`]: the connection went quiet (a server
+    /// or a network that stopped sending without closing). Its part continues at once on a new connection. Not a
+    /// sign of an overloaded server.
+    #[error("the connection went quiet: continued on a new one")]
+    Quiet,
     /// A ranged answer describes another version of the file than the one being downloaded (another strong `ETag`,
     /// another total size in `Content-Range`): its bytes must never join the ones already saved.
     #[error("the file changed on the server during the download: {0}")]
@@ -70,7 +75,7 @@ impl HttpError {
             // Anything that went wrong on the wire is transient (timeouts, resets, truncated bodies —
             // the latter surfaces as a `Decode`-kind error). Local/config failures are not.
             HttpError::Transport(e) => !(e.is_builder() || e.is_redirect() || tls_will_fail_again(e)),
-            HttpError::Stalled | HttpError::NetworkLost => true,
+            HttpError::Stalled | HttpError::NetworkLost | HttpError::Quiet => true,
             _ => false,
         }
     }
@@ -146,7 +151,15 @@ pub struct ClientConfig {
     /// A transfer through one of several networks that receives nothing for this long is given up: that network
     /// rests and the part continues on another one.
     pub lane_stall: Duration,
+    /// Any other ranged transfer that receives nothing for this long is given up and its part continues at once on a
+    /// new connection ([`HttpError::Quiet`]), instead of waiting for the read timeout. Under a speed limit a download
+    /// keeps only one or two connections: one that went quiet stopped the whole download for `read_timeout`.
+    pub transfer_quiet: Duration,
 }
+
+/// See [`ClientConfig::transfer_quiet`]. Only the time spent waiting for bytes counts (a speed limit that keeps the
+/// reader waiting is not silence).
+pub const TRANSFER_QUIET: Duration = Duration::from_secs(4);
 
 impl Default for ClientConfig {
     fn default() -> Self {
@@ -170,6 +183,7 @@ impl Default for ClientConfig {
             dns_cache_ttl: Duration::from_secs(60),
             spread_any_link: false,
             lane_stall: lanes::LANE_STALL,
+            transfer_quiet: TRANSFER_QUIET,
         }
     }
 }
@@ -692,7 +706,7 @@ impl HttpClient {
             Some((s, e, total)) if s == start && e >= s && e <= end => total,
             other => return Err(HttpError::RangeNotHonored(format!("Content-Range {other:?} does not match requested {start}-{end}"))),
         };
-        Ok(RangeStream { resp, total, lane: None })
+        Ok(RangeStream { resp, total, lane: None, quiet: self.cfg.transfer_quiet })
     }
 }
 
@@ -820,6 +834,8 @@ pub struct RangeStream {
     total: Option<u64>,
     /// The network it came through, when requests are spread (see [`HttpClient::set_routes`]).
     lane: Option<(LaneUse, Duration, Lanes)>,
+    /// Given up after this long without a byte, when not through one of several networks.
+    quiet: Duration,
 }
 
 impl RangeStream {
@@ -836,7 +852,21 @@ impl RangeStream {
     pub fn into_stream(self) -> impl Stream<Item = Result<Bytes>> + Send {
         use futures_util::StreamExt;
         let Some((lane, stall, lanes)) = self.lane else {
-            return self.resp.bytes_stream().map(|r| r.map_err(HttpError::from)).boxed();
+            // The usual route: a connection that stops sending without closing is given up after `quiet` (only the
+            // time spent waiting for bytes counts), and the part continues at once on a new one.
+            let quiet = self.quiet;
+            return futures_util::stream::unfold(Some(self.resp.bytes_stream()), move |state| async move {
+                let mut body = state?;
+                match tokio::time::timeout(quiet, body.next()).await {
+                    Ok(Some(item)) => Some((item.map_err(HttpError::from), Some(body))),
+                    Ok(None) => None,
+                    Err(_) => {
+                        tracing::debug!(secs = quiet.as_secs_f64(), "a transfer went quiet: its part continues on a new connection");
+                        Some((Err(HttpError::Quiet), None))
+                    }
+                }
+            })
+            .boxed();
         };
         // Through one of several networks:
         // * a network that stops sending (a Wi-Fi that froze, a phone that lost its signal) is given up after

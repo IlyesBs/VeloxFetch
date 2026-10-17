@@ -85,6 +85,7 @@ node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with download
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
 node tests/e2e/real-store-extension.mjs  # by hand, internet, Linux + Brave: the Chrome Web Store extension added by the packages' pointer, first start opens its store page, it reaches the app
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
+node tests/e2e/real-throttle-switch.mjs target/debug/velox-desktop.exe  # by hand, internet: Fast / Smart / Manual switched every few seconds with the sidebar's buttons on a real download; the longest stop per step
 node tests/e2e/real-game-mode.mjs target/debug/velox-desktop.exe  # by hand, internet: a kernel.org download held by Game mode (give way, low speed, pause) and given its speed back
 node tests/e2e/real-publisher-checksum.mjs target/debug/velox-desktop.exe  # by hand, internet: the Linux kernel and a Debian image verified with their publisher's checksum
 node tests/e2e/real-network-usage.mjs target/debug/velox-desktop.exe  # by hand, internet: a real download counted in Network usage, kept after a restart and deleting everything

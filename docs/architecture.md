@@ -167,6 +167,14 @@ side for a small, fixed set of things (see `apps/desktop/src-tauri/src/lib.rs`).
   the best speed seen fades slowly so one lucky burst is not the reference for ever. Measured on a real
   server that allows 2 connections: before, the count cycled 4 → 2 → 1 → 2 → 4 every ~17 s and the speed
   between ~0.9 and ~2 MB/s; after, 2 connections for the whole run.
+* A connection that goes quiet (October 2026): a ranged transfer that receives nothing for 4 s
+  (`ClientConfig::transfer_quiet`, `http_client::TRANSFER_QUIET`; only the time spent waiting for bytes counts, a
+  speed limit that keeps the reader waiting is not silence) is given up with `HttpError::Quiet`, and its part
+  continues at once on a new connection from what was written. Like a lost transfer through one of several
+  networks, it is not counted against the server (`note_retry_kind`: the connection count stays). Before, only the
+  read timeout (30 s) ended it: under a speed limit a download keeps one or two connections, and on a server that
+  allows two (it still counted the quiet one) the whole download stood at 0 for 10–30 s, which looked like
+  "switching Smart throttle stops the download".
 * Limits that change while downloads wait: any change settles what the connections owed the old limit (those
   bytes have already arrived). Lowered, the waits already running are kept; raised or lifted, the waiting
   connections go at once. (Kept in time, the debt still stopped every connection for 1.4 s the moment a cap went

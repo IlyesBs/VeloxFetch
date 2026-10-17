@@ -144,6 +144,60 @@ async fn runs_still_spread_the_last_parts_over_every_connection() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_connection_that_goes_quiet_under_a_cap_is_replaced_within_seconds_not_after_the_read_timeout() {
+    // Under a speed limit a download keeps one or two connections. One that stops sending without closing (a server
+    // or a network that hangs) stopped the whole download until the read timeout (30 s): "the speed falls to 0 for
+    // 10 to 20 seconds when Smart throttle changes". It is given up after a few seconds of silence and its part
+    // continues on a new connection; the server is not blamed (the connections are not cut).
+    let data = random_data(12 * MB, 25);
+    let srv = serve(data.clone()).await;
+    srv.state.keep_alive.store(true, Ordering::SeqCst);
+    // Like a real server that allows two connections per client (answers 429 above): a quiet connection still holds
+    // its place there until the client closes it.
+    srv.state.max_concurrent.store(2, Ordering::SeqCst);
+    *srv.state.chunk_delay.lock().unwrap() = Duration::from_millis(60); // ~530 KB/s per connection: nothing piles up in buffers
+    let limits = RateLimits::new();
+    let mut c = cfg();
+    c.adaptive.interval = Duration::from_millis(250);
+    c.max_connections = 8;
+    let d = downloader(c).with_limits(limits.clone());
+    let dir = tmpdir("quiet");
+    let (p, ctl) = (ProgressHandle::new(), DownloadControl::new());
+    let task = {
+        let (d, p, ctl, url, dir) = (d.clone(), p.clone(), ctl.clone(), srv.url("/q.bin"), dir.clone());
+        tokio::spawn(async move { d.download(&DownloadRequest::new(url, &dir), ctl, p).await })
+    };
+    let t = Instant::now();
+    while p.received() < MB as u64 {
+        assert!(t.elapsed() < Duration::from_secs(10), "test setup: the download runs");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // A cap (a game, Manual): few connections; then the next requests go quiet.
+    limits.set_smart(Some(900_000));
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Every connection under way goes quiet at once (new ones are fine).
+    srv.state.quiet_gen.fetch_add(1, Ordering::SeqCst);
+    let mut last = (Instant::now(), p.received());
+    let mut longest = Duration::ZERO;
+    let t = Instant::now();
+    while t.elapsed() < Duration::from_secs(14) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let now = p.received();
+        if now > last.1 {
+            last = (Instant::now(), now);
+        } else {
+            longest = longest.max(last.0.elapsed());
+        }
+    }
+    assert!(longest > Duration::from_secs(2), "test setup: the connections went quiet ({longest:?})");
+    assert!(longest < Duration::from_secs(7), "the download stopped {longest:?} (a quiet connection waited for the read timeout)");
+    limits.set_smart(None);
+    let out = tokio::time::timeout(Duration::from_secs(60), task).await.expect("finished").unwrap().unwrap();
+    assert_eq!(std::fs::read(&out.path).unwrap(), *data, "the file is intact");
+    ctl.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_cap_keeps_few_connections_holds_its_speed_and_never_stops_the_download() {
     // Many connections at full speed, then a cap far below (a game starts): only the connections the cap needs stay
     // (each extra one filled the system's buffers: bursts, the cap overshot by half for many seconds, then everything
