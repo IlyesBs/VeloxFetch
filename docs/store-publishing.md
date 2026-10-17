@@ -58,5 +58,6 @@ So the work is in two parts:
 (`CHROME_STORE_ID`), it is trusted next to the developer id, and the installers point Chrome, Edge and Brave at it
 for every user (Linux deb / rpm: `/usr/share/<browser>/extensions/<id>.json`; Windows: `HKLM` keys in the 32-bit view;
 macOS: the app writes the per-user `External Extensions` file). Install extension opens the store page instead of
-a folder. Edge uses the same Chrome Web Store package through Google's update URL. Firefox: still to do after AMO's
+a folder, and the first start opens nothing when the browser adds it by itself. Edge uses the same Chrome Web Store
+package through Google's update URL (a real Edge 155 on Linux added it by itself). Firefox: still to do after AMO's
 review. Details: `docs/store-extension.md`.

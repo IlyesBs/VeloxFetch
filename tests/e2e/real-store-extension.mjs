@@ -1,23 +1,26 @@
-// By hand, with the internet, on Linux with Brave (or Chrome / Chromium) installed: the extension from the Chrome
-// Web Store, end to end, with the real browser and the real store:
+// By hand, with the internet, on Linux with Brave, Chrome or Edge: the extension from the Chrome Web Store, end to
+// end, with the real browser and the real store:
 //
-//  1. The packages' pointer (postinst.sh) is in the browser's system folder: the browser adds the published
-//     extension by itself from the Chrome Web Store, in a fresh profile, without anyone clicking anything in
-//     VeloxFetch's folder or the extensions page.
-//  2. First start of VeloxFetch (default browser = this browser): it connects the browser and opens the extension's
-//     store page in it. It never opens a folder (a stand-in `xdg-open` proves it) or the extensions page.
-//  3. The store extension talks to VeloxFetch through the browser's own native messaging (ping), and a link it
-//     hands over is downloaded, intact.
+//  1. First start of VeloxFetch right after installing (default browser = this browser): it connects the browser
+//     and opens nothing: the packages' pointer (postinst.sh) is in place, so the browser adds the extension by
+//     itself. No store page, no folder (a stand-in `xdg-open` proves it), no extensions page. VeloxFetch waits.
+//  2. The browser starts (as the user's does) and adds the published extension from the Chrome Web Store by
+//     itself, switched on, in a fresh profile, with no click anywhere.
+//  3. The extension reaches VeloxFetch through the browser's own native messaging: the window says "installed and
+//     connected" (banner) and Settings shows it working; a link it hands over is downloaded, intact.
 //
 //   sudo sh -c "$(sed -n '/^VELOX_EXTENSION_ID=/,/^done$/p' apps/desktop/src-tauri/packaging/postinst.sh)"   (once)
 //   node tests/e2e/real-store-extension.mjs [path-to-debug-velox-desktop]
+//   VELOX_REAL_BROWSER=chrome|edge|brave        which browser (default: the first one installed)
+//   VELOX_REAL_BROWSER_DIR=<folder>             a browser unpacked without installing it (dpkg-deb -x google-chrome.deb
+//                                               x, then x/opt/google/chrome), instead of the installed one
 //
 // What it touches, only for the run: a throwaway browser profile (your own profile is never opened, and the browser
 // runs on the test's hidden display); the test app's own folders. The browser is started by a stand-in launcher
 // that adds the throwaway profile, so VeloxFetch's "open the store page" never reaches your running browser. The
 // browser is stopped by its own process id.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import { check, createHarness, exe, finish, path, sha256, sleep, startFileServer, waitFor } from "./harness.mjs";
@@ -25,41 +28,62 @@ import { check, createHarness, exe, finish, path, sha256, sleep, startFileServer
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
 const HOST = path.join(path.dirname(APP), exe("velox-native-host"));
 const ID = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(fs.readFileSync("crates/browser-bridge/src/caller.rs", "utf8"))[1];
-const POINTER = `/usr/share/chromium/extensions/${ID}.json`;
-let REAL = ["/usr/bin/brave-browser", "/usr/bin/google-chrome", "/usr/bin/chromium"].find((p) => fs.existsSync(p));
+// Per browser: its launcher and desktop file (what VeloxFetch looks for), its program folder, its profile folder
+// under $HOME, and its system pointer folder (the one compiled into the browser; postinst.sh writes all three).
+const BROWSERS = {
+  brave: { launcher: "brave-browser", dir: "/opt/brave.com/brave", exe: "brave", config: ".config/BraveSoftware/Brave-Browser", system: "/usr/share/chromium/extensions" },
+  chrome: { launcher: "google-chrome", dir: "/opt/google/chrome", exe: "chrome", config: ".config/google-chrome", system: "/usr/share/google-chrome/extensions" },
+  edge: { launcher: "microsoft-edge", dir: "/opt/microsoft/msedge", exe: "msedge", config: ".config/microsoft-edge", system: "/usr/share/microsoft-edge/extensions" },
+};
+const NAME =
+  process.env.VELOX_REAL_BROWSER ?? Object.keys(BROWSERS).find((k) => fs.existsSync(path.join(BROWSERS[k].dir, BROWSERS[k].exe)));
+const B = BROWSERS[NAME];
+const DIR = process.env.VELOX_REAL_BROWSER_DIR ? path.resolve(process.env.VELOX_REAL_BROWSER_DIR) : B?.dir;
 const MB = 1024 * 1024;
 const DBG = 9404;
 
-if (process.platform !== "linux" || !REAL) {
-  console.log("SKIP  Linux with Brave, Chrome or Chromium only");
+if (process.platform !== "linux" || !B || !fs.existsSync(path.join(DIR, B.exe))) {
+  console.log("SKIP  Linux with Brave, Chrome or Edge only (VELOX_REAL_BROWSER, VELOX_REAL_BROWSER_DIR)");
   process.exit(0);
 }
+console.log(`browser: ${NAME}, ${execFileSync(path.join(DIR, B.exe), ["--version"], { encoding: "utf8" }).trim()}`);
+const POINTER = path.join(B.system, `${ID}.json`);
+let REAL = path.join(DIR, B.exe);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "velox-store-"));
-// Without the system pointer (no root to run the packages' script): a private copy of the installed Brave, whose
+const postinst = (dir) => {
+  const lines = fs.readFileSync("apps/desktop/src-tauri/packaging/postinst.sh", "utf8").match(/^VELOX_EXTENSION_ID=[\s\S]*?^done$/m)[0];
+  execFileSync("sh", ["-c", lines.replace(/^for dir in .*; do$/m, `for dir in '${dir}'; do`)]);
+  return fs.readFileSync(path.join(dir, `${ID}.json`), "utf8").trim();
+};
+// Where VeloxFetch looks for the packages' pointer: the real system folders when the packages wrote it (VeloxFetch
+// installed here), else a scratch root that gets it from the packages' own lines.
+let systemRoot = "/";
+// Without the system pointer (no root to run the packages' script): a private copy of the browser, whose
 // `extensions` folder beside the program Chromium reads the same way (DIR_EXTERNAL_EXTENSIONS), gets the pointer
 // written by the packages' own lines (postinst.sh, only the folder changed).
 if (!fs.existsSync(POINTER)) {
-  const BRAVE_DIR = "/opt/brave.com/brave";
-  if (!fs.existsSync(path.join(BRAVE_DIR, "brave"))) {
-    console.log(`SKIP  ${POINTER} is missing and there is no Brave to copy: run the postinst part shown in this file's header (sudo)`);
-    process.exit(0);
-  }
-  const copy = path.join(tmp, "brave");
-  execFileSync("cp", ["-a", "--reflink=auto", BRAVE_DIR, copy]);
-  const lines = fs.readFileSync("apps/desktop/src-tauri/packaging/postinst.sh", "utf8").match(/^VELOX_EXTENSION_ID=[\s\S]*?^done$/m)[0];
-  const script = lines.replace(/^for dir in .*; do$/m, `for dir in '${path.join(copy, "extensions")}'; do`);
-  execFileSync("sh", ["-c", script]);
-  const written = path.join(copy, "extensions", `${ID}.json`);
-  console.log(`no system pointer: a private copy of Brave, pointer written by postinst.sh's lines: ${fs.readFileSync(written, "utf8").trim()}`);
-  REAL = path.join(copy, "brave");
+  const copy = path.join(tmp, "browser");
+  execFileSync("cp", ["-a", "--reflink=auto", DIR, copy]);
+  console.log(`no system pointer: a private copy of the browser, pointer written by postinst.sh's lines: ${postinst(path.join(copy, "extensions"))}`);
+  REAL = path.join(copy, B.exe);
+  systemRoot = path.join(tmp, "root");
+  postinst(path.join(systemRoot, B.system));
+} else {
+  console.log(`the packages' pointer is installed: ${POINTER}`);
 }
 const home = path.join(tmp, "home");
-const profile = path.join(home, ".config/BraveSoftware/Brave-Browser");
+// The browser's helpers are looked for under $HOME's default profile folder; its data goes to a folder of its own
+// (Chrome allows remote debugging only with a data folder other than the default one).
+const nmDir = path.join(home, B.config);
+const profile = path.join(tmp, "browser-data");
 const bin = path.join(tmp, "bin");
 const opened = path.join(tmp, "opened.log");
 const folderOpened = path.join(tmp, "folder-opened.log");
 fs.mkdirSync(bin, { recursive: true });
 fs.mkdirSync(profile, { recursive: true });
+fs.mkdirSync(path.join(nmDir, "NativeMessagingHosts"), { recursive: true });
+// Some browsers look for helpers in the data folder given on the command line instead: the same folder there.
+fs.symlinkSync(path.join(nmDir, "NativeMessagingHosts"), path.join(profile, "NativeMessagingHosts"));
 const srv = await startFileServer(8 * MB);
 const h = createHarness({
   port: 9403,
@@ -68,6 +92,7 @@ const h = createHarness({
     PATH: `${bin}:${process.env.PATH}`,
     VELOX_NMH_SCRATCH_HOME: home,
     VELOX_AUTO_EXTENSION: "1",
+    VELOX_STORE_SYSTEM_ROOT: systemRoot,
   },
 });
 const { page, invoke } = h;
@@ -77,12 +102,12 @@ let browserPid = null;
 try {
   // The helper the browser starts gets the test app's folders (a browser does not have to pass its environment on).
   const hostWrapper = path.join(bin, "velox-host-wrapper");
-  fs.writeFileSync(hostWrapper, `#!/bin/sh\nexport VELOX_DATA_DIR='${h.dataDir}' VELOX_BRIDGE_ENDPOINT='${h.endpoint}'\nexec '${HOST}' "$@"\n`, { mode: 0o755 });
-  const manifest = path.join(profile, "NativeMessagingHosts", "app.velox.fetch.json");
+  fs.writeFileSync(hostWrapper, `#!/bin/sh\necho "$(date +%T) $*" >> '${tmp}/host.log'\nexport VELOX_DATA_DIR='${h.dataDir}' VELOX_BRIDGE_ENDPOINT='${h.endpoint}'\nexec '${HOST}' "$@"\n`, { mode: 0o755 });
+  const manifest = path.join(nmDir, "NativeMessagingHosts", "app.velox.fetch.json");
   // Stand-ins: the browser launcher adds the throwaway profile and points the manifest VeloxFetch wrote at the
   // wrapper; xdg-open only records that something tried to open a folder.
   fs.writeFileSync(
-    path.join(bin, "brave-browser"),
+    path.join(bin, B.launcher),
     `#!/bin/sh
 printf '%s\\n' "$*" >> '${opened}'
 [ -f '${manifest}' ] && sed -i 's|"path": ".*"|"path": "${hostWrapper}"|' '${manifest}'
@@ -94,43 +119,39 @@ exec '${REAL}' --user-data-dir='${profile}' --remote-debugging-port=${DBG} --ozo
     { mode: 0o755 },
   );
   fs.writeFileSync(path.join(bin, "xdg-open"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${folderOpened}'\n`, { mode: 0o755 });
-  // The test's desktop says this browser is the default one (the app's settings folder is the test's own).
+  // The test's desktop says this browser is the default one: the app's settings folder is the test's own, and a
+  // stand-in `xdg-settings` answers for desktops (KDE) that keep the default browser outside mimeapps.list.
+  fs.writeFileSync(path.join(bin, "xdg-settings"), `#!/bin/sh\n[ "$*" = "get default-web-browser" ] && echo ${B.launcher}.desktop\n`, { mode: 0o755 });
   fs.mkdirSync(path.join(h.profile, "config"), { recursive: true });
-  fs.writeFileSync(path.join(h.profile, "config", "mimeapps.list"), "[Default Applications]\nx-scheme-handler/http=brave-browser.desktop\nx-scheme-handler/https=brave-browser.desktop\ntext/html=brave-browser.desktop\n");
+  fs.writeFileSync(path.join(h.profile, "config", "mimeapps.list"), `[Default Applications]\nx-scheme-handler/http=${B.launcher}.desktop\nx-scheme-handler/https=${B.launcher}.desktop\ntext/html=${B.launcher}.desktop\n`);
 
-  // ============================================================ 2. first start
+  // ============================================================ 1. first start
   await h.launch();
   await waitFor(async () => (await text("header"))?.includes("VeloxFetch"), "the interface");
-  await waitFor(() => fs.existsSync(opened), "VeloxFetch to open the browser by itself on first start", 30000);
-  const args = fs.readFileSync(opened, "utf8").trim();
-  console.log("the browser was opened with:", args);
-  check("first start opened the default browser on the extension's Chrome Web Store page", args === `https://chromewebstore.google.com/detail/${ID}`, args);
+  await waitFor(() => fs.existsSync(manifest), "VeloxFetch to connect the default browser by itself on first start", 30000);
+  const first = await waitFor(async () => {
+    const s = (await invoke("get_browser_integration")).ok;
+    return s?.extensionAwaitedSince ? s : null;
+  }, "VeloxFetch to wait for the browser to add the extension", 10000);
+  await sleep(6000); // whatever the first start would open, it has opened by now
+  check("first start connected the browser and waits for it to add the extension by itself", first.extensionAwaitedSince > 0 && first.extensionContact === null);
+  check("no store page or any page was opened: nothing for the user to do", !fs.existsSync(opened), fs.existsSync(opened) ? fs.readFileSync(opened, "utf8") : "");
   check("no folder was opened", !fs.existsSync(folderOpened), fs.existsSync(folderOpened) ? fs.readFileSync(folderOpened, "utf8") : "");
-  check("not the extensions page", !/extensions/.test(args));
   check("no extension folder was prepared", !fs.existsSync(path.join(h.dataDir, "browser-extension", "chromium")));
   const m = JSON.parse(fs.readFileSync(manifest, "utf8"));
   check("the browser is connected: it may start the helper for the store extension", m.allowed_origins.includes(`chrome-extension://${ID}/`), JSON.stringify(m.allowed_origins));
-  browserPid = Number(fs.readFileSync(path.join(tmp, "browser.pid"), "utf8"));
+  await page(`document.querySelector("[data-testid=nav-settings]").click()`);
+  await waitFor(async () => (await page(`document.querySelector('[data-testid=extension-status]')?.dataset.state`)).ok === "waiting", "Settings to say the browser is adding the extension");
+  check("Settings says the browser adds the extension by itself", /by itself/.test(await text("[data-testid=extension-status]")));
 
-  // The store page, as the browser shows it.
+  // ============================================================ 2. the browser starts, as the user's does
+  spawn(path.join(bin, B.launcher), ["about:blank"], { stdio: "ignore", detached: true }).unref();
+  await waitFor(() => fs.existsSync(path.join(tmp, "browser.pid")), "the browser to start");
+  browserPid = Number(fs.readFileSync(path.join(tmp, "browser.pid"), "utf8"));
   const cdp = async () => {
     const list = await (await fetch(`http://127.0.0.1:${DBG}/json/list`)).json();
     return list;
   };
-  const tabs = await waitFor(async () => {
-    try {
-      const l = await cdp();
-      return l.some((t) => t.type === "page" && t.url.includes(ID) && /VeloxFetch/i.test(t.title)) ? l : null;
-    } catch {
-      return null;
-    }
-  }, "the store page to load", 60000).catch(async (e) => {
-    console.log("tabs:", JSON.stringify(await cdp().catch((x) => String(x))).slice(0, 2000));
-    console.log("browser log:", fs.existsSync(path.join(tmp, "browser.log")) ? fs.readFileSync(path.join(tmp, "browser.log"), "utf8").slice(-3000) : "none");
-    throw e;
-  });
-  const store = tabs.find((t) => t.type === "page" && t.url.includes(ID));
-  check("the Chrome Web Store page of VeloxFetch is open in the browser", /VeloxFetch/i.test(store.title), store.title);
   const shot = async (target, file) => {
     const ws = new WebSocket(target.webSocketDebuggerUrl);
     await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
@@ -144,10 +165,8 @@ exec '${REAL}' --user-data-dir='${profile}' --remote-debugging-port=${DBG} --ozo
     ws.close();
     fs.writeFileSync(file, Buffer.from(res.data, "base64"));
   };
-  await sleep(2500);
-  await shot(store, path.resolve("docs/screenshots/store-extension-page.png"));
 
-  // ============================================================ 1. the browser adds it by itself (the pointer)
+  // ============================================================ 2. the browser adds it by itself (the pointer)
   const worker = await waitFor(async () => {
     try {
       return (await cdp()).find((t) => t.type === "service_worker" && t.url.startsWith(`chrome-extension://${ID}/`)) ?? null;
@@ -169,6 +188,37 @@ exec '${REAL}' --user-data-dir='${profile}' --remote-debugging-port=${DBG} --ozo
   check("the browser added the extension from the Chrome Web Store by itself (the packages' pointer)", prefs?.from_webstore === true && prefs.location === 6, JSON.stringify(prefs?.manifest?.name));
   check("enabled at once, nothing for the user to do", (prefs?.disable_reasons ?? [1]).length === 0 && !(prefs?.state === 0), JSON.stringify(prefs?.disable_reasons));
   check("and it runs (enabled)", !!worker, "not running: the browser keeps it off until the user enables it");
+
+  // Nothing done by anyone yet: has the extension reached VeloxFetch by itself (its start-up ping)?
+  const auto = await waitFor(async () => (await invoke("get_browser_integration")).ok?.extensionContact ?? null, "the extension's own first contact", 60000).catch(() => null);
+  console.log("the extension's own first contact:", JSON.stringify(auto));
+  if (process.env.VELOX_DEBUG && worker) {
+    const fresh = (await cdp()).find((t) => t.type === "service_worker" && t.url.startsWith(`chrome-extension://${ID}/`));
+    console.log("worker now:", JSON.stringify(fresh?.url ?? null));
+    const ws = new WebSocket((fresh ?? worker).webSocketDebuggerUrl);
+    await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
+    const out = await new Promise((r) => {
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.id === 1) r(JSON.stringify(msg.result).slice(0, 500));
+      };
+      ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: `new Promise((r) => chrome.runtime.sendNativeMessage("app.velox.fetch", { command: "ping" }, (x) => r(JSON.stringify(x ?? chrome.runtime.lastError?.message))))`, awaitPromise: true, returnByValue: true } }));
+    });
+    ws.close();
+    console.log("direct ping:", out, "\nbrowser log:", fs.readFileSync(path.join(tmp, "browser.log"), "utf8").split("\n").filter((l) => /native|messag|host/i.test(l)).slice(-10).join("\n"));
+  }
+  // ============================================================ 3. VeloxFetch sees it arrive
+  const arrived = await waitFor(
+    async () => (await page(`document.querySelector('[data-testid=extension-banner]')?.dataset.state`)).ok === "arrived",
+    "the window to say the extension is installed and connected",
+    60000,
+  ).catch(() => false);
+  check("the window says: browser extension installed and connected", !!arrived && /installed/.test(await text("[data-testid=extension-banner]")));
+  const after = (await invoke("get_browser_integration")).ok;
+  check("the contact is from the store extension, and the wait is over", after.extensionContact?.fromStore === true && after.extensionAwaitedSince === null, JSON.stringify(after.extensionContact));
+  await waitFor(async () => (await page(`document.querySelector('[data-testid=extension-status]')?.dataset.state`)).ok === "ok", "Settings to show the extension working");
+  check("Settings shows: extension installed and working", /installed and working/.test(await text("[data-testid=extension-status]")));
+  if (arrived) await h.screenshot(path.resolve("docs/screenshots/extension-arrived.png"));
 
   if (worker) {
     // ============================================================ 3. the store extension and VeloxFetch

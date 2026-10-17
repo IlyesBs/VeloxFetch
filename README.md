@@ -83,7 +83,8 @@ node tests/e2e/desktop-gaming.mjs   # gaming policy with a stand-in game process
 node tests/e2e/desktop-game-mode.mjs  # Game mode in one click: status bar, banner, Ctrl+G, Settings, pause policy, restart, 8 languages fit
 node tests/e2e/desktop-perf.mjs     # start-up time and frame rate with downloads running (see docs/ui-performance.md)
 node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if none is installed)
-node tests/e2e/real-store-extension.mjs  # by hand, internet, Linux + Brave: the Chrome Web Store extension added by the packages' pointer, first start opens its store page, it reaches the app
+node tests/e2e/desktop-extension-wait.mjs  # first start with the store extension: nothing opens, the wait, the fallback banner, "installed and connected" on its first contact, AppImage opens the store page
+VELOX_REAL_BROWSER=chrome node tests/e2e/real-store-extension.mjs  # by hand, internet, Linux + Chrome / Edge / Brave: the browser adds the Chrome Web Store extension by itself through the packages' pointer, the first start opens nothing, the extension reaches the app
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
 node tests/e2e/real-throttle-switch.mjs target/debug/velox-desktop.exe  # by hand, internet: Fast / Smart / Manual switched every few seconds with the sidebar's buttons on a real download; the longest stop per step
 node tests/e2e/real-game-mode.mjs target/debug/velox-desktop.exe  # by hand, internet: a kernel.org download held by Game mode (give way, low speed, pause) and given its speed back
@@ -92,8 +93,9 @@ node tests/e2e/real-network-usage.mjs target/debug/velox-desktop.exe  # by hand,
 ```
 
 Browser extension: Chrome, Edge and Brave get it from the **Chrome Web Store**. Installing VeloxFetch (Windows setup,
-deb / rpm) asks them to add it, and the first start opens its store page; Settings > Browser shows the Chrome Web Store
-badge and never asks for Developer mode (Firefox: a temporary add-on until its add-on is published).
+deb / rpm) asks them to add it and the browser does it by itself; VeloxFetch says **Browser extension installed** when
+it first reaches the app, and offers the store page only if it has not come after 3 minutes. Settings > Browser shows
+the Chrome Web Store badge and never asks for Developer mode (Firefox: a temporary add-on until its add-on is published).
 See `docs/store-extension.md`.
 
 Videos: with the browser extension installed, a **Download video** bar appears over videos

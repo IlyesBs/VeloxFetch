@@ -2605,6 +2605,10 @@ mod event_tests {
             p.note_retry_kind(&e);
         }
         assert_eq!(p.total_retries(), 4, "every retry is shown in the diagnostics");
-        assert_eq!(p.server_retries(), 1, "only the server's own count for the connection count (a quiet connection is not the server's fault)");
+        assert_eq!(
+            p.server_retries(),
+            1,
+            "only the server's own count for the connection count (a quiet connection is not the server's fault)"
+        );
     }
 }

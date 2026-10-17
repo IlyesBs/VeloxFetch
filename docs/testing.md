@@ -843,9 +843,21 @@ stop once on kernel.org, and on Hetzner 45 s without a byte or an error until "e
 * `desktop-browser.mjs`: an older registration is brought up to date at start; the store id passes the real helper; the
   Chrome Web Store badges show; Install extension gives the store steps and no folder; Firefox keeps its folder. Writes
   `docs/screenshots/settings-browser-store.png`.
-* `real-store-extension.mjs` (by hand, internet, Linux with Brave): first start opens exactly the store page (never a
-  folder); Brave adds the extension from the store by itself through the packages' pointer, switched on; the store
-  extension reaches this test's VeloxFetch and a link it hands over arrives intact. It needs no root: without
-  `/usr/share/chromium/extensions/<id>.json` it uses a private copy of Brave, whose `extensions` folder Chromium reads
-  the same way. Result on 17 October 2026: 3 runs out of 3 passed (`docs/store-extension.md`).
+* Unit tests: `link.rs` (a contact reaches the app only after a passed handshake), `bridge.rs` (`ContactLog`: the first
+  contact announced, saved and remembered; the awaited one ends the wait; damaged files ignored), `store_extension.rs`
+  (`system_pointer`).
+* `desktop-extension-wait.mjs` (Linux; stand-in default browser, a real helper as the store extension): first start
+  with the packages' pointer connects the browser and opens nothing; Settings says the browser adds it; after the
+  wait (`VELOX_EXTENSION_WAIT_MS`, debug builds) the banner offers the store page, Later hides it; the first contact
+  gives the green banner and "installed and working" with the badge, ends the wait, keeps only `at` / `fromStore`; a
+  restart keeps it without the banner; without the pointer (AppImage) the first start opens the store page. Writes
+  `extension-waiting.png`, `settings-extension-working.png`.
+* `real-store-extension.mjs` (by hand, internet, Linux with Chrome, Edge or Brave; `VELOX_REAL_BROWSER`,
+  `VELOX_REAL_BROWSER_DIR` for one unpacked from its .deb): first start connects the browser and opens nothing; the
+  browser adds the extension from the store by itself through the packages' pointer, switched on; the extension
+  reaches VeloxFetch by itself (green banner, Settings "installed and working"); a link it hands over arrives intact.
+  It uses the installed pointers when VeloxFetch's package is installed, else a private copy of the browser whose
+  `extensions` folder Chromium reads the same way (no root). Result on 17 October 2026: Chrome 155, Edge 155 and
+  Brave 1.97 all passed with the pointers the real .deb wrote (`docs/store-extension.md`). Writes
+  `extension-arrived.png`.
 * NSIS hooks: compiled with makensis 3.11 (`~/.local/e2e-tools/nsis`) for x64 and x86.

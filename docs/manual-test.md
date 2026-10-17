@@ -27,8 +27,13 @@ Data: `%APPDATA%\app.velox.fetch\`. Downloads: `Downloads\VeloxFetch\`.
      Open Chrome: it shows **New extension added (VeloxFetch)** → **Enable extension**.
    * Linux: `/usr/share/chromium/extensions/keobnkoppcchnbpmmfodidkcedglbhnn.json` exists. Open Brave / Chrome: VeloxFetch is in
      the extensions, switched on.
-2. **Start VeloxFetch once.** Your default browser opens on the VeloxFetch page in the Chrome Web Store (if the extension is not added
-   yet: **Add to Chrome** / **Add to Brave** / **Get**). No folder and no extensions page open.
+2. **Start VeloxFetch once.** Nothing opens: VeloxFetch connects your default browser and waits for it to add the extension.
+   Settings > Browser integration says "Your browser is adding the extension by itself". Open (or keep using) the browser: within a
+   minute VeloxFetch shows a green banner **Browser extension installed** and Settings says **Extension installed and working** with
+   the Chrome Web Store badge (Windows / macOS: press **Enable extension** in the browser first).
+   If the extension has not come after 3 minutes, a banner offers **Install from the Chrome Web Store** (the store page opens) or
+   **Later**. AppImage (no pointer): the first start opens the store page instead (**Add to Chrome** / **Add to Brave** / **Get**).
+   No folder and no extensions page ever open.
 3. In VeloxFetch open **Settings > Browser integration**: Chrome, Edge and Brave carry a **Chrome Web Store** badge. **Install extension**
    on another browser's line connects it and opens the store page there; the steps show the store's, with the page's address and
    **Copy link** if no browser could be opened. **Firefox** (until its add-on is published): *Load Temporary Add-on*, pick

@@ -74,6 +74,18 @@ pub fn support(browser: Browser, platform: Platform, home: Option<&Path>, id: &s
     }
 }
 
+/// Linux: where the deb / rpm packages put this browser's pointer (the folder compiled into the browser: Brave and
+/// other Chromium browsers read Chromium's), under `root` (`/` outside tests). `None` for Firefox.
+pub fn system_pointer(browser: Browser, root: &Path, id: &str) -> Option<PathBuf> {
+    let dir = match browser {
+        Browser::Chrome => LINUX_SYSTEM_FOLDERS[0],
+        Browser::Brave => LINUX_SYSTEM_FOLDERS[1],
+        Browser::Edge => LINUX_SYSTEM_FOLDERS[2],
+        Browser::Firefox => return None,
+    };
+    valid_id(id).then(|| root.join(dir.trim_start_matches('/')).join(format!("{id}.json")))
+}
+
 /// A Chromium extension id: 32 letters a to p.
 pub fn valid_id(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
@@ -184,6 +196,22 @@ mod tests {
         );
         assert_eq!(support(Browser::Chrome, Platform::Linux, Some(home), ID), Support::None, "no per-user way on Linux");
         assert_eq!(support(Browser::Firefox, Platform::Windows, None, ID), Support::None);
+    }
+
+    #[test]
+    fn the_packages_pointer_is_looked_for_in_each_browsers_own_folder() {
+        let root = Path::new("/");
+        assert_eq!(
+            system_pointer(Browser::Chrome, root, ID),
+            Some(PathBuf::from(format!("/usr/share/google-chrome/extensions/{ID}.json")))
+        );
+        assert_eq!(system_pointer(Browser::Brave, root, ID), Some(PathBuf::from(format!("/usr/share/chromium/extensions/{ID}.json"))));
+        assert_eq!(
+            system_pointer(Browser::Edge, Path::new("/scratch"), ID),
+            Some(PathBuf::from(format!("/scratch/usr/share/microsoft-edge/extensions/{ID}.json")))
+        );
+        assert_eq!(system_pointer(Browser::Firefox, root, ID), None);
+        assert_eq!(system_pointer(Browser::Chrome, root, "../../etc/passwd"), None);
     }
 
     #[test]
