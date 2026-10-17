@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-playlist"
+description = "Enables the start_playlist command without any pre-configured scope."
+commands.allow = ["start_playlist"]
+
+[[permission]]
+identifier = "deny-start-playlist"
+description = "Denies the start_playlist command without any pre-configured scope."
+commands.deny = ["start_playlist"]

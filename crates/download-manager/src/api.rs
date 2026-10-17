@@ -712,6 +712,34 @@ pub struct MediaRequest {
     pub pending: Option<u64>,
 }
 
+/// Download videos of a playlist read by `analyze_media` (`MediaAnalysisDto::playlist_key`). The UI chooses videos by
+/// their position in that playlist: it never supplies a link, a path or a command.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlaylistRequest {
+    pub key: String,
+    /// Positions (`PlaylistEntry::index`) of the videos to download, in any order; each at most once.
+    pub items: Vec<u32>,
+    /// One of `media_engine::PLAYLIST_QUALITIES` (`None` = the best), for every video.
+    pub quality: Option<String>,
+    /// `mp4`, `mkv`, `webm`, `mp3`, `m4a` or `opus`; `None` = MP4 (MP3 for "audio").
+    pub format: Option<String>,
+    /// Sub-folder inside the download folder; `None` = the playlist's name inside the videos folder.
+    pub subdir: Option<String>,
+    /// The browser's waiting video the playlist was read from: it leaves the waiting list.
+    pub pending: Option<u64>,
+}
+
+/// Where a video job comes from when it is one video of a playlist.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistTag {
+    pub title: String,
+    /// Its position in the playlist, and how many were chosen with it.
+    pub index: u32,
+    pub count: u32,
+}
+
 /// What `analyze_media` tells the UI.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -720,6 +748,8 @@ pub struct MediaAnalysisDto {
     pub analysis: media_engine::Analysis,
     /// ffmpeg was found, so separate video and audio can be joined.
     pub combine_available: bool,
+    /// The link is a playlist: the key `start_playlist` takes to download its videos (kept 30 minutes).
+    pub playlist_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -733,6 +763,8 @@ pub enum MediaStatus {
     Cancelled,
     /// Stopped by the user; Resume continues from what is already downloaded.
     Paused,
+    /// Waiting for a free place (a few video downloads run at once): starts on its own, in order.
+    Queued,
 }
 
 impl MediaStatus {
@@ -796,6 +828,8 @@ pub struct MediaJobDto {
     pub file_size: Option<u64>,
     /// How many times the app tried again on its own after the site or the network failed part-way.
     pub retries: u32,
+    /// One video of a playlist.
+    pub playlist: Option<PlaylistTag>,
 }
 
 /// Smart throttle: slow downloads down while a game or a call runs (see `manager/smart_throttle.rs`).

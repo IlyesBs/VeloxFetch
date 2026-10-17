@@ -90,6 +90,20 @@ Windows and browser versions; the step number; what you saw versus what you expe
 5. Copy a `.m3u8` link with Clipboard detection on (Settings): the notice offers **Download...**, which opens the stream dialog.
 6. Ordinary downloads still work as before (add any `.zip`). Stream jobs are not remembered after a restart (the finished files are).
 
+## D2. Playlists (v2.0.0)
+1. In YouTube, open a video from a playlist (the address has `&list=`). With the extension, press **Download video**; or in
+   VeloxFetch use Downloads > Add Download ▾ > **Download a video** and paste the address. The dialog shows the video and
+   *This video is part of a playlist*.
+2. Press **Download the whole playlist**: the title becomes **Download a playlist**, a card shows the playlist's name and
+   "Videos: N", and every video is listed with its number, title and length, all ticked. Private or live ones are greyed
+   out. **All** clears and ticks them; untick a few: "Chosen: n of N" and **Download videos (n)** follow.
+3. Choose 360p and MP4 (or Audio only and MP3), leave Folder empty, press **Download videos**. Each video gets a card with
+   a chip "playlist name · no. N". Three run; the others say **Waiting its turn** and start by themselves. Pause a waiting
+   one: it no longer starts by itself until Resume.
+4. When done, the files are in a folder named after the playlist (inside `Video` when sorting by type is on), named
+   `01 - …`, `02 - …` in the playlist's order, and each one plays.
+5. Paste a playlist address (`youtube.com/playlist?list=…`) directly: the list opens without the "Only this video" button.
+
 ## E. Filesystem security (Phase 10)
 1. Downloads > Add: try a **file name** of `..`, `CON`, `a:b`, or one ending in a dot: each is refused with a reason and nothing is created.
    A **sub-folder** of `..\x`, `C:\x` or `/etc` is refused too. A normal one such as `movies/2026` works and is created inside the download folder.

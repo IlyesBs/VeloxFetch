@@ -60,7 +60,7 @@ export function ActiveView({ onOpen, onQueue, onAdd }: { onOpen: (id: number) =>
   const speed = useStore((s) => s.metrics.speedBps);
   const history = useStore((s) => s.speedHistory);
   const [conns, left, unknown] = JSON.parse(useStore(live)) as [number, number, boolean];
-  const videos = useStore((s) => s.media.filter((j) => ["preparing", "downloading", "combining", "paused"].includes(j.status)).length);
+  const videos = useStore((s) => s.media.filter((j) => ["queued", "preparing", "downloading", "combining", "paused"].includes(j.status)).length);
   const list = (ids: number[]) => ids.map((id) => store.getState().byId[id]).filter((d): d is Download => !!d);
   const running = groups.active.length;
   const eta = speed > 0 && !unknown && left > 0 ? formatEta(Math.round(left / speed)) : "—";

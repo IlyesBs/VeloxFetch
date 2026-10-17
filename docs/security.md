@@ -302,6 +302,12 @@ the user's data folder. The uninstaller removes them (not during an update).
   inside the validated download folder, the link last after `--`; the quality and the file type (MP4 / MKV / WebM / MP3 / M4A / Opus)
   are closed sets mapped to constant options; referrer and user agent are passed, **cookies never are**. The result
   is published like a stream download (no overwrite, sandbox re-checked, Mark of the Web).
+* **Playlists** (v2.0.0, `docs/playlist-download.md`): read with the same fixed arguments plus `--flat-playlist`, which only lists.
+  An entry is kept only if its link is a page of the known video sites (no other host, local address, `file:`, playlist,
+  channel, DRM service or link with credentials), at most 500. The links stay in Rust: the window chooses by position
+  (`start_playlist`, `deny_unknown_fields`, main window only), and every position, the quality, the file type and the folder
+  are checked again. From a video of a playlist only the `list` id is taken (`[A-Za-z0-9_-]{2,64}`). Three video downloads run
+  at once, the others wait (in memory).
 * **DRM**: Netflix, Shahid, STC tv, Prime Video, Disney+, OSN+, Max, Apple TV+, STARZPLAY, TOD and a few others are recognised by address
   and refused everywhere (extension, browser hand-over, typed link, download) with a plain sentence; formats yt-dlp marks as DRM are
   never offered, and encrypted HLS / DASH streams stay refused as before. VeloxFetch never tries to get around copy protection.

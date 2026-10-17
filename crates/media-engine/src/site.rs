@@ -32,7 +32,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::download::{confine, publish, Outcome, Phase, Progress, Scratch};
-use crate::{sanitize_stem, Analysis, MediaError, OutputFormat, Result, StreamKind, StreamOption};
+use crate::{limits, sanitize_stem, Analysis, MediaError, OutputFormat, Playlist, PlaylistEntry, Result, StreamKind, StreamOption};
 
 /// Sites whose video pages VeloxFetch hands to yt-dlp: `(host suffix, path parts that mark a video page)`.
 /// An empty path list means any page except the home page. Kept in sync with the extension's
@@ -57,6 +57,11 @@ pub const VIDEO_SITES: &[(&str, &[&str])] = &[
     ("bilibili.com", &["/video/"]),
     ("soundcloud.com", &[]),
 ];
+
+/// Playlist pages of those sites (no video on the page itself: the browser's bar never shows there, so the extension
+/// does not need them). Their videos are listed and each is downloaded on its own. Kept in sync with the UI's
+/// `PLAYLIST_PAGES` (a test compares them). Vimeo showcases and SoundCloud sets are already in `VIDEO_SITES`.
+pub const PLAYLIST_PAGES: &[(&str, &[&str])] = &[("youtube.com", &["/playlist"]), ("dailymotion.com", &["/playlist/"])];
 
 /// Services that protect their videos with DRM (Widevine / PlayReady / FairPlay). Nothing can be
 /// downloaded from them, by design: VeloxFetch says so instead of failing halfway. Kept in sync with
@@ -115,7 +120,25 @@ pub fn is_site_page(url: &Url) -> bool {
     VIDEO_SITES
         .iter()
         .any(|(h, paths)| host_matches(&host, h) && if paths.is_empty() { path.len() > 1 } else { paths.iter().any(|p| path.contains(p)) })
+        || PLAYLIST_PAGES.iter().any(|(h, paths)| host_matches(&host, h) && paths.iter().any(|p| path.starts_with(p)))
 }
+
+/// The playlist a video link belongs to (`youtube.com/watch?v=...&list=<id>`), as the playlist's own page. Only the id
+/// is taken from the link (letters, digits, `-` and `_`); everything else is dropped.
+pub fn playlist_link(url: &Url) -> Option<Url> {
+    let host = url.host_str()?.to_ascii_lowercase();
+    if !matches!(url.scheme(), "http" | "https") || !(host_matches(&host, "youtube.com") || host_matches(&host, "youtu.be")) {
+        return None;
+    }
+    let id = url.query_pairs().find(|(k, _)| k == "list").map(|(_, v)| v.into_owned())?;
+    if !(2..=64).contains(&id.len()) || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return None;
+    }
+    Url::parse(&format!("https://www.youtube.com/playlist?list={id}")).ok()
+}
+
+/// The qualities offered for every video of a playlist (each video gets the closest it has, never more).
+pub const PLAYLIST_QUALITIES: &[&str] = &["best", "h2160", "h1440", "h1080", "h720", "h480", "h360", "audio"];
 
 /// Where yt-dlp is: next to the app first, else the first absolute `PATH` entry that has one.
 pub fn find_ytdlp(app_dir: Option<&Path>) -> Option<PathBuf> {
@@ -218,7 +241,13 @@ pub(crate) fn analyze_args(url: &Url, headers: &SiteHeaders, deno: Option<&Path>
     let mut a = base_args(headers, deno);
     // `--verbose`: what yt-dlp was doing goes to stderr, so a page that never answers can be explained
     // in the log (see `analyze_site`). stdout stays the JSON alone.
-    a.extend(["--dump-single-json", "--skip-download", "--verbose"].map(OsString::from));
+    // A playlist link: only its list (titles, lengths, links), not every video, and at most one more than is
+    // kept, to know there are more. A single video is read in full as before (`--flat-playlist` does not change
+    // it, and `--no-playlist` keeps `watch?v=...&list=...` to the one video).
+    let items = format!("1:{}", limits::MAX_PLAYLIST_VIDEOS + 1);
+    a.extend(
+        ["--flat-playlist", "--playlist-items", items.as_str(), "--dump-single-json", "--skip-download", "--verbose"].map(OsString::from),
+    );
     push_url(&mut a, url)?;
     Ok(a)
 }
@@ -399,7 +428,7 @@ const DRM_TEXT: &str = "This video is protected with DRM (copy protection), so i
 /// What can be downloaded from yt-dlp's JSON for one video.
 pub(crate) fn analysis_from_json(json: &Value, with_ffmpeg: bool) -> Result<Analysis> {
     if text(json, "_type").is_some_and(|t| t == "playlist" || t == "multi_video") {
-        return Err(MediaError::unsupported("this link is a playlist or a channel; open one video and try again"));
+        return playlist_from_json(json);
     }
     if json.get("is_live").and_then(Value::as_bool) == Some(true)
         || text(json, "live_status").is_some_and(|s| s == "is_live" || s == "is_upcoming" || s == "post_live")
@@ -489,7 +518,92 @@ pub(crate) fn analysis_from_json(json: &Value, with_ffmpeg: bool) -> Result<Anal
         return Err(MediaError::unsupported("no downloadable video was found on this page"));
     }
     let title = text(json, "title").map(sanitize_stem).unwrap_or_else(|| "video".into());
-    Ok(Analysis { kind: StreamKind::Site, title, duration_secs: num(json, "duration"), streams, audio: Vec::new(), subtitles: Vec::new() })
+    Ok(Analysis {
+        kind: StreamKind::Site,
+        title,
+        duration_secs: num(json, "duration"),
+        streams,
+        audio: Vec::new(),
+        subtitles: Vec::new(),
+        playlist: None,
+        part_of_playlist: false,
+    })
+}
+
+/// A playlist from yt-dlp's flat list. Only videos of the sites VeloxFetch reads (`is_site_page`) are kept: a
+/// playlist cannot point the app anywhere else, nor at another playlist or a channel.
+pub(crate) fn playlist_from_json(json: &Value) -> Result<Analysis> {
+    let empty = Vec::new();
+    let all = json.get("entries").and_then(Value::as_array).unwrap_or(&empty);
+    let mut entries = Vec::new();
+    for (i, e) in all.iter().enumerate().take(limits::MAX_PLAYLIST_VIDEOS) {
+        let Some(url) =
+            text(e, "url").or_else(|| text(e, "webpage_url")).filter(|u| u.len() <= limits::MAX_URL_LEN).and_then(|u| Url::parse(u).ok())
+        else {
+            continue;
+        };
+        if text(e, "_type").is_some_and(|t| t == "playlist")
+            || !is_site_page(&url)
+            || protected_service(&url).is_some()
+            || playlist_page(&url)
+        {
+            continue;
+        }
+        if !url.username().is_empty() || url.password().is_some() {
+            continue;
+        }
+        let raw_title = text(e, "title").unwrap_or("");
+        let gone = raw_title.starts_with('[') && raw_title.ends_with(" video]"); // "[Private video]", "[Deleted video]"
+        let closed = text(e, "availability").is_some_and(|a| matches!(a, "private" | "needs_auth" | "premium_only" | "subscriber_only"));
+        let live = e.get("is_live").and_then(Value::as_bool) == Some(true)
+            || text(e, "live_status").is_some_and(|s| matches!(s, "is_live" | "is_upcoming" | "post_live"));
+        let title: String = raw_title.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_string();
+        entries.push(PlaylistEntry {
+            index: (i + 1) as u32,
+            title: if title.is_empty() { format!("{}", i + 1) } else { title },
+            duration_secs: num(e, "duration"),
+            available: !(gone || closed || live),
+            url,
+        });
+    }
+    if entries.is_empty() {
+        return Err(MediaError::unsupported("no downloadable video was found in this playlist"));
+    }
+    let total = num(json, "playlist_count").map(|n| n.min(u32::MAX as f64) as u32);
+    let truncated = all.len() > limits::MAX_PLAYLIST_VIDEOS || total.is_some_and(|t| t as usize > limits::MAX_PLAYLIST_VIDEOS);
+    let title = text(json, "title").map(sanitize_stem).filter(|t| !t.is_empty()).unwrap_or_else(|| "playlist".into());
+    let streams = PLAYLIST_QUALITIES
+        .iter()
+        .map(|id| StreamOption {
+            id: id.to_string(),
+            label: match *id {
+                "best" => "Best available".into(),
+                "audio" => "Audio only".into(),
+                h => format!("{}p", &h[1..]),
+            },
+            bandwidth: None,
+            width: None,
+            height: id.strip_prefix('h').and_then(|n| n.parse().ok()),
+            codecs: None,
+            group: None,
+        })
+        .collect();
+    Ok(Analysis {
+        kind: StreamKind::Site,
+        title: title.clone(),
+        duration_secs: None,
+        streams,
+        audio: Vec::new(),
+        subtitles: Vec::new(),
+        playlist: Some(Playlist { title, total, entries, truncated }),
+        part_of_playlist: false,
+    })
+}
+
+/// A link that is itself a playlist or a list of playlists (never downloaded as one video).
+fn playlist_page(url: &Url) -> bool {
+    let path = url.path();
+    path.starts_with("/playlist") || (url.query_pairs().any(|(k, _)| k == "list") && !url.query_pairs().any(|(k, _)| k == "v"))
 }
 
 /// A short, single-line reason from yt-dlp's error output (its own `ERROR:` line when there is one).
@@ -670,7 +784,9 @@ pub async fn analyze_site(tool: &SiteTool, url: &Url, headers: &SiteHeaders) -> 
         return Err(MediaError::limit("the page description is larger than 32 MiB"));
     }
     let json: Value = serde_json::from_slice(&stdout).map_err(|_| MediaError::site("the video page could not be read"))?;
-    analysis_from_json(&json, tool.ffmpeg.is_some())
+    let mut a = analysis_from_json(&json, tool.ffmpeg.is_some())?;
+    a.part_of_playlist = a.playlist.is_none() && playlist_link(url).is_some();
+    Ok(a)
 }
 
 /// What to download from a page.
@@ -1055,8 +1171,111 @@ mod tests {
         let live = serde_json::json!({"title": "x", "is_live": true, "formats": []});
         assert!(matches!(analysis_from_json(&live, true), Err(MediaError::Unsupported(m)) if m.contains("live")));
         let list = serde_json::json!({"_type": "playlist", "entries": []});
-        assert!(matches!(analysis_from_json(&list, true), Err(MediaError::Unsupported(_))));
+        assert!(matches!(analysis_from_json(&list, true), Err(MediaError::Unsupported(m)) if m.contains("playlist")), "an empty playlist");
         assert!(analysis_from_json(&serde_json::json!({"title": "x", "formats": []}), true).is_err());
+    }
+
+    /// yt-dlp's flat list of a real YouTube playlist (2026-10-17, trimmed), plus the entries a hostile or odd
+    /// page could add.
+    fn flat_playlist() -> Value {
+        serde_json::json!({
+            "_type": "playlist", "id": "PLa1F2ddGya_8I8QCMCKlQUOQpgOga2nZ-", "title": "BLENDERHEADS / best: of", "playlist_count": 13,
+            "webpage_url": "https://www.youtube.com/playlist?list=PLa1F2ddGya_8I8QCMCKlQUOQpgOga2nZ-",
+            "entries": [
+                {"_type": "url", "ie_key": "Youtube", "id": "6d5rI5y8hqQ", "url": "https://www.youtube.com/watch?v=6d5rI5y8hqQ",
+                 "title": "The end of an era | Blenderheads Ep. 11", "duration": 780, "live_status": null, "availability": null},
+                {"_type": "url", "ie_key": "Youtube", "id": "h8rauHRo1CY", "url": "https://www.youtube.com/watch?v=h8rauHRo1CY",
+                 "title": "BLENDERHEADS - Ep. 05\u{7}", "duration": 984},
+                {"_type": "url", "id": "x", "url": "http://192.168.1.1/admin", "title": "not a video site"},
+                {"_type": "url", "id": "y", "url": "file:///etc/passwd", "title": "not a web link"},
+                {"_type": "url", "ie_key": "YoutubeTab", "url": "https://www.youtube.com/playlist?list=PLother", "title": "another playlist"},
+                {"_type": "playlist", "url": "https://www.youtube.com/watch?v=nested", "title": "nested"},
+                {"_type": "url", "url": "https://www.netflix.com/watch/1", "title": "DRM service"},
+                {"_type": "url", "url": "https://user:pw@www.youtube.com/watch?v=creds", "title": "credentials"},
+                {"_type": "url", "url": "https://www.youtube.com/watch?v=priv", "title": "[Private video]", "duration": null},
+                {"_type": "url", "url": "https://www.youtube.com/watch?v=live", "title": "On air", "live_status": "is_live"},
+                {"_type": "url", "url": "https://www.youtube.com/watch?v=memb", "title": "Members", "availability": "subscriber_only"},
+                {"_type": "url", "url": "https://www.youtube.com/watch?v=notitle"}
+            ]
+        })
+    }
+
+    #[test]
+    fn a_playlist_lists_its_videos_of_known_sites_only_never_their_links_to_the_window() {
+        let a = analysis_from_json(&flat_playlist(), true).unwrap();
+        let p = a.playlist.as_ref().expect("a playlist");
+        assert_eq!(a.kind, StreamKind::Site);
+        assert_eq!(p.title, "BLENDERHEADS _ best_ of", "safe for a folder name");
+        assert_eq!(a.title, p.title);
+        assert_eq!((p.total, p.truncated), (Some(13), false));
+        let got: Vec<(u32, &str, Option<f64>, bool)> =
+            p.entries.iter().map(|e| (e.index, e.title.as_str(), e.duration_secs, e.available)).collect();
+        assert_eq!(
+            got,
+            [
+                (1, "The end of an era | Blenderheads Ep. 11", Some(780.0), true),
+                (2, "BLENDERHEADS - Ep. 05", Some(984.0), true),
+                (9, "[Private video]", None, false),
+                (10, "On air", None, false),
+                (11, "Members", None, false),
+                (12, "12", None, true),
+            ],
+            "positions are the playlist's; other hosts, other playlists, DRM services and links with credentials are dropped"
+        );
+        assert_eq!(p.entries[0].url.as_str(), "https://www.youtube.com/watch?v=6d5rI5y8hqQ");
+        let shown = serde_json::to_string(&a).unwrap();
+        assert!(!shown.contains("watch?v=") && !shown.contains("192.168"), "links never go to the window: {shown}");
+        let ids: Vec<&str> = a.streams.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, PLAYLIST_QUALITIES);
+        for id in PLAYLIST_QUALITIES {
+            assert!(selector(Some(id), true).is_ok() && selector(Some(id), false).is_ok(), "{id} is a quality downloads accept");
+        }
+        assert!(!a.part_of_playlist);
+    }
+
+    #[test]
+    fn a_long_playlist_is_cut_at_the_limit_and_says_so() {
+        let entries: Vec<Value> = (0..limits::MAX_PLAYLIST_VIDEOS + 1)
+            .map(|i| serde_json::json!({"_type": "url", "url": format!("https://www.youtube.com/watch?v=v{i}"), "title": format!("v{i}")}))
+            .collect();
+        let a = analysis_from_json(&serde_json::json!({"_type": "playlist", "title": "big", "entries": entries}), false).unwrap();
+        let p = a.playlist.unwrap();
+        assert_eq!(p.entries.len(), limits::MAX_PLAYLIST_VIDEOS);
+        assert!(p.truncated);
+        assert_eq!(p.entries.last().unwrap().index, limits::MAX_PLAYLIST_VIDEOS as u32);
+        let only_hostile = serde_json::json!({"_type": "playlist", "entries": [{"url": "http://127.0.0.1/x"}]});
+        assert!(matches!(analysis_from_json(&only_hostile, true), Err(MediaError::Unsupported(_))));
+    }
+
+    #[test]
+    fn a_video_of_a_playlist_leads_to_the_playlist_page_by_its_id_only() {
+        assert_eq!(
+            playlist_link(&u("https://www.youtube.com/watch?v=bLojKyJx7fA&list=PLa1F2ddGya_8I8QCMCKlQUOQpgOga2nZ-&index=3&t=10"))
+                .unwrap()
+                .as_str(),
+            "https://www.youtube.com/playlist?list=PLa1F2ddGya_8I8QCMCKlQUOQpgOga2nZ-"
+        );
+        assert_eq!(
+            playlist_link(&u("https://music.youtube.com/watch?v=a&list=RDabc")).unwrap().as_str(),
+            "https://www.youtube.com/playlist?list=RDabc"
+        );
+        assert!(playlist_link(&u("https://youtu.be/abc?list=PL123")).is_some());
+        for no in [
+            "https://www.youtube.com/watch?v=abc",
+            "https://www.youtube.com/watch?v=abc&list=",
+            "https://www.youtube.com/watch?v=abc&list=PL%2F..%2Fx",
+            "https://www.youtube.com/watch?v=abc&list=a%20b",
+            "https://vimeo.com/1?list=PL123",
+            "https://evil.test/watch?v=a&list=PL123",
+            "ftp://www.youtube.com/watch?v=a&list=PL123",
+        ] {
+            assert_eq!(playlist_link(&u(no)), None, "{no}");
+        }
+        assert!(is_site_page(&u("https://www.youtube.com/playlist?list=PL123")), "a playlist page is read through yt-dlp");
+        let s = strings(&analyze_args(&u("https://www.youtube.com/playlist?list=PL123"), &SiteHeaders::default(), None).unwrap());
+        assert!(s.contains(&"--flat-playlist".to_string()), "only the list, not every video");
+        assert!(s.windows(2).any(|w| w[0] == "--playlist-items" && w[1] == "1:501"), "one more than kept, to know there are more");
+        assert!(s.contains(&"--no-playlist".to_string()), "a video of a playlist stays one video");
     }
 
     #[test]

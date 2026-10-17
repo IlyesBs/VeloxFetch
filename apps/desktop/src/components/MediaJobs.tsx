@@ -12,6 +12,7 @@ import { ProgressBar, Section } from "../ui/primitives";
 import { DeleteConfirm } from "./DeleteConfirm";
 
 const LABEL: Record<MediaStatus, Key> = {
+  queued: "mj.queued",
   preparing: "mj.preparing",
   downloading: "status.downloading",
   combining: "mj.finishing",
@@ -39,6 +40,7 @@ export function localNote(note: string): string {
 }
 
 const TONE: Record<MediaStatus, "accent" | "ok" | "bad" | "warn"> = {
+  queued: "accent",
   preparing: "accent",
   downloading: "accent",
   combining: "accent",
@@ -87,7 +89,7 @@ export function MediaControls({ job, watching, onWatch, size = "sm" }: { job: Me
           <Icon name="play" size={ic} /> {watching ? t("mj.hidePlayer") : done ? t("prev.play") : t("mj.watchNow")}
         </button>
       )}
-      {active && (
+      {(active || job.status === "queued") && (
         <button className={b} data-testid="media-pause" onClick={() => void act(() => api.pauseMediaJob(job.id))}>
           <Icon name="pause" size={ic} /> {t("mj.pause")}
         </button>
@@ -107,7 +109,7 @@ export function MediaControls({ job, watching, onWatch, size = "sm" }: { job: Me
           <Icon name="folder" size={ic} /> {t("mj.showFolder")}
         </button>
       )}
-      {active || job.status === "paused" || (job.status === "failed" && job.resumable) ? (
+      {active || job.status === "queued" || job.status === "paused" || (job.status === "failed" && job.resumable) ? (
         <button className={b} data-testid="media-cancel-job" onClick={() => void act(() => api.cancelMediaJob(job.id))}>
           <Icon name="x" size={ic} /> {t("common.cancel")}
         </button>
@@ -148,6 +150,17 @@ export function MediaPlayer({ job }: { job: MediaJob }) {
   );
 }
 
+/** "Playlist · My list · 3 of 12": which playlist a video download belongs to (its position in the playlist). */
+export function PlaylistChip({ tag }: { tag: { title: string; index: number; count: number } }) {
+  const t = useT();
+  return (
+    <span className="chip mt-1 max-w-full gap-1 bg-accent-soft text-accent" data-testid="media-playlist" title={tag.title}>
+      <Icon name="queue" size={12} className="shrink-0" />
+      <span className="truncate">{t("mj.playlistTag", { title: tag.title, n: tag.index })}</span>
+    </span>
+  );
+}
+
 const Row = memo(function Row({ job }: { job: MediaJob }) {
   const t = useT();
   const [watching, setWatching] = useState(false);
@@ -182,6 +195,7 @@ const Row = memo(function Row({ job }: { job: MediaJob }) {
               {t(LABEL[job.status])}
             </span>
           </div>
+          {job.playlist && <PlaylistChip tag={job.playlist} />}
           <p className="truncate text-xs text-dim" title={job.folder}>
             {job.host} · {job.site ? t("mj.video") : t("mj.stream")}
           </p>
@@ -223,7 +237,7 @@ const Row = memo(function Row({ job }: { job: MediaJob }) {
   );
 });
 
-const RUNNING: MediaStatus[] = ["preparing", "downloading", "combining", "paused"];
+const RUNNING: MediaStatus[] = ["queued", "preparing", "downloading", "combining", "paused"];
 
 /**
  * Video downloads (YouTube and similar sites, HLS / DASH streams). A separate list: they are not rows of the

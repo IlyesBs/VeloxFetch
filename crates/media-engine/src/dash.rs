@@ -476,6 +476,8 @@ pub(crate) fn parse(base: &Url, text: &str) -> Result<Catalog> {
         }
     }
     let analysis = Analysis {
+        playlist: None,
+        part_of_playlist: false,
         kind: StreamKind::Dash,
         title: title_from_url(base),
         duration_secs: duration,

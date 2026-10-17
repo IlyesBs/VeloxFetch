@@ -318,6 +318,8 @@ pub(crate) fn catalog_from_master(base: &Url, m: Master) -> Catalog {
         }
     }
     let analysis = Analysis {
+        playlist: None,
+        part_of_playlist: false,
         kind: StreamKind::Hls,
         title: title_from_url(base),
         duration_secs: None,
@@ -342,6 +344,8 @@ pub(crate) fn catalog_from_media(base: &Url, plan: TrackPlan) -> Catalog {
     let option =
         StreamOption { id: "v0".into(), label: "Video".into(), bandwidth: None, width: None, height: None, codecs: None, group: None };
     let analysis = Analysis {
+        playlist: None,
+        part_of_playlist: false,
         kind: StreamKind::Hls,
         title: title_from_url(base),
         duration_secs: (plan.duration > 0.0).then_some(plan.duration),

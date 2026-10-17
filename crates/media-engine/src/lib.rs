@@ -31,7 +31,8 @@ use url::Url;
 pub use download::{analyze, download, sweep_stale_scratch, work_dir_name, DownloadSpec, Outcome, Pacer, Phase, Progress, Selection};
 pub use ffmpeg::{find_ffmpeg, Remux};
 pub use site::{
-    analyze_site, download_site, find_ytdlp, is_site_page, protected_service, SiteHeaders, SiteSpec, SiteTool, PROTECTED_SITES, VIDEO_SITES,
+    analyze_site, download_site, find_ytdlp, is_site_page, playlist_link, protected_service, SiteHeaders, SiteSpec, SiteTool,
+    PLAYLIST_PAGES, PLAYLIST_QUALITIES, PROTECTED_SITES, VIDEO_SITES,
 };
 
 /// Hard limits. Every one of them is enforced in Rust whatever the UI says.
@@ -57,6 +58,8 @@ pub mod limits {
     pub const SEGMENT_TRIES: u32 = 3;
     /// ffmpeg gets this long; then it is killed.
     pub const REMUX_TIMEOUT_SECS: u64 = 2 * 60 * 60;
+    /// Videos read from one playlist (the window says when a playlist has more).
+    pub const MAX_PLAYLIST_VIDEOS: usize = 500;
 }
 
 pub type Result<T> = std::result::Result<T, MediaError>;
@@ -242,6 +245,40 @@ pub struct Analysis {
     pub streams: Vec<StreamOption>,
     pub audio: Vec<TrackOption>,
     pub subtitles: Vec<TrackOption>,
+    /// The link is a playlist (YouTube, Vimeo showcase, SoundCloud set...): its videos, each downloaded on its own.
+    /// `streams` then holds the qualities offered for all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playlist: Option<Playlist>,
+    /// The link is one video of a playlist (`watch?v=...&list=...`): the whole playlist can be read instead.
+    pub part_of_playlist: bool,
+}
+
+/// A playlist read from a page (yt-dlp's flat list: titles and lengths, no video is read yet).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Playlist {
+    /// Made safe for a folder name.
+    pub title: String,
+    /// How many videos the site says the playlist has (may be more than `entries`).
+    pub total: Option<u32>,
+    /// At most [`limits::MAX_PLAYLIST_VIDEOS`], in the playlist's order.
+    pub entries: Vec<PlaylistEntry>,
+    /// The playlist has more videos than were read.
+    pub truncated: bool,
+}
+
+/// One video of a playlist. Its link stays in Rust: the window chooses videos by `index`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistEntry {
+    /// 1-based position in the playlist.
+    pub index: u32,
+    pub title: String,
+    pub duration_secs: Option<f64>,
+    /// False for a private, deleted, members-only or live video: shown, but it cannot be downloaded.
+    pub available: bool,
+    #[serde(skip)]
+    pub url: Url,
 }
 
 /// How a quality's bytes are obtained.

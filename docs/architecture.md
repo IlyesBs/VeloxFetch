@@ -645,6 +645,27 @@ Full description: `docs/new-link-recovery.md`.
   * `PendingDialog.tsx` (continue a stopped duplicate with the browser's link).
 * **IPC:** `use_new_link` (main window only).
 
+## Playlist downloads (v2.0.0)
+
+```text
+playlist link ─ analyze_media(url, pending, playlist) ─▶ yt-dlp --flat-playlist -J ─▶ playlist_from_json
+                                                                                       (known video sites only, ≤ 500)
+                MediaAnalysisDto { analysis.playlist (titles, lengths, positions; no links), playlist_key }
+window ─ start_playlist { key, items, quality, format, subdir, pending } ─▶ one Work::Site job per video, Queued
+                                                                          start_queued(): 3 at once, list order
+```
+
+* `media_engine::site`: `PLAYLIST_PAGES` (YouTube `/playlist`, Dailymotion `/playlist/`) are read through yt-dlp like
+  `VIDEO_SITES`; `playlist_link` turns `watch?v=…&list=<id>` into the playlist's page (the id only);
+  `PLAYLIST_QUALITIES` is the closed set of qualities for all the videos. `PlaylistEntry.url` is `#[serde(skip)]`.
+* `manager/media.rs`: the playlists just read are kept (`KeptPlaylist`, 8, 30 min) with the browser's headers.
+  `MediaStatus::Queued` is new; `add_job` queues and `start_queued` starts while fewer than `MAX_ACTIVE_JOBS` (3) run.
+  It is called on add, at the end of `run_media`, on Resume (`requeue_media`) and when a game ends. `MediaState.held`
+  keeps the queue still while the pause policy holds downloads. `MediaJobDto.playlist` (`PlaylistTag`) names the
+  playlist and the position.
+* Window: `MediaDialog` (playlist card, `PlaylistPicker`, "Download the whole playlist" / "Only this video"),
+  `MediaJobs` (`queued` label, `PlaylistChip`), `format.ts` `PLAYLIST_PAGES`. More: `docs/playlist-download.md`.
+
 ## Video download details
 
 Full description: `docs/video-details.md`.

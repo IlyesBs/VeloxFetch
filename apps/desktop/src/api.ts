@@ -45,6 +45,7 @@ import type {
   MediaAnalysis,
   MediaJob,
   MediaRequest,
+  PlaylistRequest,
   Metrics,
   NewDownload,
   PowerAction,
@@ -137,8 +138,9 @@ export const api = {
   /** Look for the publisher's checksum next to each file and check the file against it (default on). */
   getPublisherCheck: () => call<boolean>("get_publisher_check"),
   setPublisherCheck: (enabled: boolean) => call<boolean>("set_publisher_check", { enabled }),
-  analyzeMedia: (url: string, pending?: number) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null }),
+  analyzeMedia: (url: string, pending?: number, playlist?: boolean) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null, playlist: playlist ?? null }),
   startMedia: (request: MediaRequest) => call<MediaJob>("start_media", { request }),
+  startPlaylist: (request: PlaylistRequest) => call<MediaJob[]>("start_playlist", { request }),
   listMediaJobs: () => call<MediaJob[]>("list_media_jobs"),
   cancelMediaJob: (id: number) => call<void>("cancel_media_job", { id }),
   pauseMediaJob: (id: number) => call<void>("pause_media_job", { id }),

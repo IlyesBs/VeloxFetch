@@ -5,6 +5,8 @@
 //! * `...jshang...` -> hangs whenever it is given a JavaScript runtime (`--js-runtimes`), like Deno on some
 //!   computers; works with `--no-js-runtimes`;
 //! * `...flaky...` -> the first download in a work folder fails like a refused request, the next one works;
+//! * `.../playlist?list=<id>` -> lists a playlist (`--flat-playlist`): videos `watch?v=<id>-1`.. (5 when the id has
+//!   `slow`, else 4), a private one and a link to another host; titles are very long when the id has `long`;
 //! * anything else -> describes a video (`--dump-single-json`) or "downloads" it into `--paths`.
 //!
 //! Every call appends its arguments (separated by U+001F) to `velox-fake-ytdlp.log` in the temporary
@@ -28,6 +30,24 @@ fn main() {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
+    }
+    if args.iter().any(|a| a == "--dump-single-json") && url.contains("/playlist?list=") {
+        let list = url.split("list=").nth(1).unwrap_or_default();
+        let n = if list.contains("slow") { 5 } else { 4 };
+        let mut entries: Vec<String> = (1..=n)
+            .map(|i| {
+                let title = if list.contains("long") {
+                    format!("Clip {i}: a very long title that goes on and on, the way real ones do on YouTube | Channel name Ep. {i}")
+                } else {
+                    format!("Clip {i}: part/{i}")
+                };
+                format!(r#"{{"_type":"url","ie_key":"Youtube","url":"https://www.youtube.com/watch?v={list}-{i}","title":"{title}","duration":{}}}"#, i * 10)
+            })
+            .collect();
+        entries.push(format!(r#"{{"_type":"url","url":"https://www.youtube.com/watch?v={list}-p","title":"[Private video]"}}"#));
+        entries.push(format!(r#"{{"_type":"url","url":"http://127.0.0.1/{list}","title":"local"}}"#));
+        println!(r#"{{"_type":"playlist","title":"My list: best/of","playlist_count":{},"entries":[{}]}}"#, n + 2, entries.join(","));
+        return;
     }
     if args.iter().any(|a| a == "--dump-single-json") {
         println!(

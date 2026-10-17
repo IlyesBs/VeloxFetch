@@ -806,6 +806,39 @@ export interface MediaAnalysis {
   subtitles: TrackOption[];
   /** ffmpeg was found, so separate video and audio can be joined into one file. */
   combineAvailable: boolean;
+  /** The link is a playlist: its videos (links stay in the app), `streams` holds the qualities for all of them. */
+  playlist?: Playlist;
+  /** The key `startPlaylist` takes (a playlist only). */
+  playlistKey?: string | null;
+  /** The link is one video of a playlist: the whole playlist can be read instead. */
+  partOfPlaylist?: boolean;
+}
+
+export interface Playlist {
+  title: string;
+  /** How many videos the site says it has (may be more than `entries`). */
+  total: number | null;
+  entries: PlaylistEntry[];
+  /** It has more videos than were read (at most 500). */
+  truncated: boolean;
+}
+
+export interface PlaylistEntry {
+  /** Position in the playlist (1-based): what `startPlaylist` takes. */
+  index: number;
+  title: string;
+  durationSecs: number | null;
+  /** False for a private, deleted, members-only or live video. */
+  available: boolean;
+}
+
+export interface PlaylistRequest {
+  key: string;
+  items: number[];
+  quality?: string;
+  format?: string;
+  subdir?: string;
+  pending?: number;
 }
 
 export interface MediaRequest {
@@ -823,7 +856,8 @@ export interface MediaRequest {
   pending?: number;
 }
 
-export type MediaStatus = "preparing" | "downloading" | "combining" | "completed" | "failed" | "cancelled" | "paused";
+/** `queued`: waiting for a free place (a few video downloads run at once); it starts on its own. */
+export type MediaStatus = "queued" | "preparing" | "downloading" | "combining" | "completed" | "failed" | "cancelled" | "paused";
 
 export interface MediaJob {
   id: number;
@@ -868,6 +902,8 @@ export interface MediaJob {
   fileSize?: number | null;
   /** Times the app tried again on its own. */
   retries?: number;
+  /** One video of a playlist: its name, its position in it, and how many were chosen with it. */
+  playlist?: { title: string; index: number; count: number } | null;
 }
 
 /** What a downloaded file is, for sorting it into a folder. */
