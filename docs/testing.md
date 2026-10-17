@@ -815,3 +815,17 @@ the same read. 0 failures in 60 and 15 runs. No app code changed.
 | `tests/e2e/desktop-game-mode.mjs` (new suite, port 9395) | status bar button and pill, the banner on every screen, +1 hour, Turn off, the amber window and gauge, the real speed held and given back, Settings card and usual time, the shortcut list, Ctrl+G, the pause policy and the queue's words, kept after a restart, all 8 languages fit from 1360×860 to 640×480 with nothing pushed out of the status bar, refused requests, no JavaScript errors |
 | `tests/e2e/real-game-mode.mjs` (by hand, internet, port 9399) | a kernel.org download held to a quarter of its speed, to 256 KB/s, paused with progress kept, and back to full speed |
 | By hand: the real tray (KDE Plasma, D-Bus menu) | the "Game mode" item's tick on / off by click, unticked by itself when the time ends, the desktop notification |
+
+## Smooth Smart throttle switches: a connection that goes quiet (October 2026)
+
+Reported again: switching Smart throttle's levels (or turning it on) left downloads at 0 for 10–20 s. Measured with
+`tests/e2e/real-throttle-switch.mjs` (new, by hand, internet, port 9402: the sidebar's buttons every 8 s, progress read
+every 200 ms, the longest stretch without a byte per step) on kernel.org and Hetzner (allows ~2 connections): a 20 s
+stop once on kernel.org, and on Hetzner 45 s without a byte or an error until "error decoding response body", then 429s.
+
+| Where | Test | Fails without |
+|---|---|---|
+| `tests/integration/tests/phase3.rs` | `a_connection_that_goes_quiet_under_a_cap_is_replaced_within_seconds_not_after_the_read_timeout` (a server allowing 2 connections, under a cap, every connection goes quiet at once: the download goes on within 7 s, the file intact) | the quiet limit (stopped the whole 14 s window) |
+| `downloader-core` `engine.rs` | `a_network_that_lost_a_transfer_is_not_counted_against_the_server` (+ `Quiet`) | counting it against the server |
+| `tests/integration/src/lib.rs` | the test server's `quiet_gen`: every answer under way goes quiet and holds its place until the client closes it | |
+

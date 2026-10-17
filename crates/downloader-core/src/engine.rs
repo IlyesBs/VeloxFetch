@@ -373,7 +373,7 @@ impl ProgressHandle {
 
     /// A retry because one of several networks lost its transfer (see [`server_retries`](Self::server_retries)).
     fn note_retry_kind(&self, e: &DownloadError) {
-        if matches!(e, DownloadError::Http(HttpError::NetworkLost)) {
+        if matches!(e, DownloadError::Http(HttpError::NetworkLost | HttpError::Quiet)) {
             self.0.network_switches.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -2598,12 +2598,13 @@ mod event_tests {
         for e in [
             DownloadError::Http(HttpError::NetworkLost),
             DownloadError::Http(HttpError::NetworkLost),
+            DownloadError::Http(HttpError::Quiet),
             DownloadError::Http(HttpError::Stalled),
         ] {
             p.bump_retry(0);
             p.note_retry_kind(&e);
         }
-        assert_eq!(p.total_retries(), 3, "every retry is shown in the diagnostics");
-        assert_eq!(p.server_retries(), 1, "only the server's own count for the connection count");
+        assert_eq!(p.total_retries(), 4, "every retry is shown in the diagnostics");
+        assert_eq!(p.server_retries(), 1, "only the server's own count for the connection count (a quiet connection is not the server's fault)");
     }
 }

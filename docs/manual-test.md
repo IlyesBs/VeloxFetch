@@ -320,6 +320,10 @@ The automated tests run "Show in folder" / "Open" as a dry run and never use a r
    line's speed.
 6. With the program running, switch modes on the card every few seconds: the download never stops, the window never
    flashes.
+7. Without a program: click Fast, Smart, Manual and Manual's three modes in turn every few seconds, then the switch off
+   and on, on a 1 GB file from a server that allows only two connections: the speed shown never sits at 0 for more than
+   a few seconds (before: 10–20 s). `node tests/e2e/real-throttle-switch.mjs` does the same and reports the longest
+   stop for each step.
 
 ## U. Smart Duplicate Detection (once per OS)
 1. Download a small document. Paste the same link and press Add: "You already downloaded this file" (or "appears to
