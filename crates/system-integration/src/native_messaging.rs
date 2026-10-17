@@ -366,9 +366,9 @@ mod tests {
         assert!(needs_refresh(Browser::Chrome, &now, &target));
 
         // Not ours (another program's host under the same file), or not JSON: never touched.
-        std::fs::write(&target_path(&target), r#"{"name":"com.other.app","path":"/nope"}"#).unwrap();
+        std::fs::write(target_path(&target), r#"{"name":"com.other.app","path":"/nope"}"#).unwrap();
         assert!(!needs_refresh(Browser::Chrome, &now, &target));
-        std::fs::write(&target_path(&target), "garbage").unwrap();
+        std::fs::write(target_path(&target), "garbage").unwrap();
         assert!(!needs_refresh(Browser::Chrome, &now, &target));
     }
 

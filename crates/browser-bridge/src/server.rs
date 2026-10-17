@@ -46,6 +46,8 @@ pub trait Handler: Send + Sync + 'static {
         true
     }
     fn download(&self, req: DownloadRequest, caller: Caller) -> BoxFuture<'_, Result<DownloadAccepted, HandlerError>>;
+    /// An allowed extension reached the app (after the handshake): it is installed and working.
+    fn contacted(&self, _caller: &Caller) {}
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +155,7 @@ async fn connection<H: Handler>(mut s: BoxStream, token: &Token, handler: &H, cf
     let caller = tokio::time::timeout(cfg.handshake_timeout, handshake(&mut s, token, cfg))
         .await
         .map_err(|_| "handshake timed out".to_string())??;
+    handler.contacted(&caller);
 
     let (max, window) = cfg.rate_limit;
     let mut recent: VecDeque<Instant> = VecDeque::new();

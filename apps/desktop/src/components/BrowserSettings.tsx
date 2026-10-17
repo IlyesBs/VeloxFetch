@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { actions } from "../actions";
-import { api, normalizeError } from "../api";
+import { api, normalizeError, onExtensionEvent } from "../api";
+import { formatRelative } from "../format";
 import { act, store } from "../hooks";
 import type { BrowserIntegration, BrowserName, ExtensionInstall } from "../types";
 import { useT, type Key } from "../i18n";
@@ -31,6 +32,16 @@ export function BrowserSettings() {
     }
   }, []);
   useEffect(() => void refresh(), [refresh]);
+  // The extension reaching the app (or the first start's wait) while this page is open shows at once.
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let cancelled = false;
+    onExtensionEvent(() => void refresh()).then((u) => (cancelled ? u() : (off = u)));
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [refresh]);
 
   const install = async (browser: BrowserName) => {
     setBusy(browser);
@@ -63,6 +74,11 @@ export function BrowserSettings() {
   };
 
   const label = (b: BrowserName) => t(LABEL[b]);
+  /** The browser the store button is for: the default one when it takes the store extension, else one that is found. */
+  const storeBrowser = (): BrowserName => {
+    const list = state?.browsers.filter((b) => b.supported && b.browser !== "firefox") ?? [];
+    return (list.find((b) => b.isDefault) ?? list.find((b) => b.found) ?? list[0])?.browser ?? "chrome";
+  };
   const fromStore = (b: BrowserName) => !!state?.chromeStoreId && b !== "firefox";
   if (!state) {
     return (
@@ -77,6 +93,39 @@ export function BrowserSettings() {
       <p className="mb-3 text-xs text-dim" data-testid="extension-intro">
         <Rich text={state.chromeStoreId ? t("br.introStore") : t("br.intro")} />
       </p>
+
+      {/* Is the extension really there? Only its own contact says so: "installed and working", the first start's
+          wait (the browser adds it by itself), or not yet. */}
+      {state.extensionContact ? (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-ok/40 bg-ok/10 px-3 py-2 text-[13px]" data-testid="extension-status" data-state="ok">
+          <Icon name="check" size={15} className="shrink-0 text-ok" />
+          <span className="min-w-0 flex-1">
+            <Rich text={t("br.extOk", { when: formatRelative(state.extensionContact.at / 1000) })} />
+          </span>
+          {state.extensionContact.fromStore && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-accent px-2 py-0.5 text-[11px] font-medium text-accent">
+              <Icon name="shield" size={11} />
+              {t("br.storeBadge")}
+            </span>
+          )}
+        </div>
+      ) : (
+        <div
+          className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-raised px-3 py-2 text-[13px]"
+          data-testid="extension-status"
+          data-state={state.extensionAwaitedSince !== null ? "waiting" : "none"}
+        >
+          <Icon name="shield" size={15} className="shrink-0 text-accent" />
+          <span className="min-w-0 flex-1">
+            <Rich text={state.extensionAwaitedSince !== null ? t("br.extWaiting") : t("br.extNone")} />
+          </span>
+          {state.chromeStoreId && state.hostPresent && (
+            <button className="btn h-8" data-testid="extension-status-install" disabled={busy !== null} onClick={() => void install(storeBrowser())}>
+              {t("extb.install")}
+            </button>
+          )}
+        </div>
+      )}
 
       <ul className="space-y-2" data-testid="browser-list">
         {state.browsers.map((b) => (

@@ -399,10 +399,8 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         if is_data_get && st.quiet_gen.load(Ordering::SeqCst) != gen {
             // Open and silent until the client closes it (it still counts against `max_concurrent` meanwhile).
             let mut buf = [0u8; 512];
-            let _ = tokio::time::timeout(Duration::from_secs(600), async {
-                while matches!(s.read(&mut buf).await, Ok(n) if n > 0) {}
-            })
-            .await;
+            let _ =
+                tokio::time::timeout(Duration::from_secs(600), async { while matches!(s.read(&mut buf).await, Ok(n) if n > 0) {} }).await;
             ok = false;
             break;
         }

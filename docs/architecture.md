@@ -373,7 +373,12 @@ The diagnosis of a failure (full description: `docs/download-doctor.md`).
   per-user pointer where the system has one (`store_way`) and opens the store page (`method: "store"`, never a
   folder); Firefox keeps the developer folder. At start `refresh_registrations` rewrites a registration of ours that
   an older version wrote (`native_messaging::needs_refresh`), so the store extension can reach the app after an
-  update. See `docs/store-extension.md`.
+  update. The first start (`auto_install_once`) opens nothing when the browser adds the extension by itself
+  (`browser_adds_it_itself`: the packages' pointer on Linux, `store_extension::system_pointer`; the per-user one on
+  Windows / macOS): it connects the browser and waits. The server's `Handler::contacted` (after every handshake that
+  passed) feeds `ContactLog` (`browser-extension/contact.json`, `.awaiting`), which tells the main window
+  (`velox://extension`: `contact` / `waiting`); `ExtensionBanner` and Settings show "installed and working", or after
+  `extensionWaitMs` the store page as the fallback. See `docs/store-extension.md`.
 
 ## Batch downloads and clipboard (Phase 8)
 
