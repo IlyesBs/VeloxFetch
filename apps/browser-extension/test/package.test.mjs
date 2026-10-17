@@ -30,6 +30,15 @@ test("the Firefox add-on id equals the id the host trusts", () => {
   assert.equal(manifest("firefox").browser_specific_settings.gecko.id, trusted);
 });
 
+test("Firefox: what goes to the app is declared (Firefox's built-in data consent), exactly that", () => {
+  // Firefox counts what an add-on hands to a native application. The link and the page it came from
+  // (browsingActivity, websiteContent) and, if allowed, that site's cookies (authenticationInfo) go to the
+  // VeloxFetch app on the same computer; nothing goes anywhere else, so nothing is optional and nothing more.
+  assert.deepEqual(manifest("firefox").browser_specific_settings.gecko.data_collection_permissions, {
+    required: ["browsingActivity", "websiteContent", "authenticationInfo"],
+  });
+});
+
 test("the host name matches the one the app registers", () => {
   const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "caller.rs"), "utf8");
   const host = /HOST_NAME: &str = "([^"]+)"/.exec(rust)?.[1];
