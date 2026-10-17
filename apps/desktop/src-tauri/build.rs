@@ -46,6 +46,7 @@ const COMMANDS: &[&str] = &[
     "set_clipboard_watch",
     "analyze_media",
     "start_media",
+    "start_playlist",
     "list_media_jobs",
     "cancel_media_job",
     "pause_media_job",

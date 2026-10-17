@@ -77,6 +77,7 @@ node tests/e2e/desktop-card-flash.mjs # starting downloads never makes the cards
 node tests/e2e/desktop-usability.mjs  # icons, open / show in folder, search, sign-in, network, shortcuts, paste / drop
 node tests/e2e/desktop-diagnostics.mjs  # diagnostics card, Settings > Diagnostics, log file, no secret anywhere
 node tests/e2e/desktop-video.mjs  # video bar hand-over -> video dialog -> file (stand-in yt-dlp), DRM refusals, 64 connections
+node tests/e2e/desktop-playlist.mjs  # playlist from a video of it / typed: list, choose, numbered files, 3 at once + waiting, 8 languages
 node tests/e2e/desktop-preview.mjs  # live preview through the velox-preview protocol, smart throttle with the real process scan
 node tests/e2e/desktop-throttle.mjs # Smart throttle card / Settings / status bar: clicks, modes, a capped download that never stops
 node tests/e2e/desktop-gaming.mjs   # gaming policy with a stand-in game process: pause / resume only what it paused, low speed, off
@@ -86,6 +87,7 @@ node tests/e2e/real-browser.mjs  # the built extension in a real Brave (skips if
 node tests/e2e/desktop-extension-wait.mjs  # first start with the store extension: nothing opens, the wait, the fallback banner, "installed and connected" on its first contact, AppImage opens the store page
 VELOX_REAL_BROWSER=chrome node tests/e2e/real-store-extension.mjs  # by hand, internet, Linux + Chrome / Edge / Brave: the browser adds the Chrome Web Store extension by itself through the packages' pointer, the first start opens nothing, the extension reaches the app
 node tests/e2e/real-youtube-ui.mjs target/debug/velox-desktop.exe <tools folder>  # by hand, internet: a real YouTube video in the app window (dashboard, Watch now, Pause / Resume, History)
+node tests/e2e/real-playlist.mjs target/debug/velox-desktop <tools folder>  # by hand, internet: a real YouTube playlist, 3 videos chosen, checked with ffprobe
 node tests/e2e/real-throttle-switch.mjs target/debug/velox-desktop.exe  # by hand, internet: Fast / Smart / Manual switched every few seconds with the sidebar's buttons on a real download; the longest stop per step
 node tests/e2e/real-game-mode.mjs target/debug/velox-desktop.exe  # by hand, internet: a kernel.org download held by Game mode (give way, low speed, pause) and given its speed back
 node tests/e2e/real-publisher-checksum.mjs target/debug/velox-desktop.exe  # by hand, internet: the Linux kernel and a Debian image verified with their publisher's checksum
@@ -100,7 +102,9 @@ See `docs/store-extension.md`.
 
 Videos: with the browser extension installed, a **Download video** bar appears over videos
 (files, HLS / DASH streams, and video pages on YouTube, Vimeo and similar sites); click it and choose the quality and the file type
-(MP4 by default, MKV or WebM; MP3, M4A or Opus for only the sound). The
+(MP4 by default, MKV or WebM; MP3, M4A or Opus for only the sound). **Whole playlists**, too: open a playlist link, or press
+**Download the whole playlist** on one of its videos, tick the videos you want, and they download into a folder named after the
+playlist, numbered in its order, three at a time (`docs/playlist-download.md`). The
 programs video sites need (yt-dlp, Deno, and ffmpeg for HD) are downloaded by the installer itself (Windows setup, Linux
 deb / rpm; on macOS and if the installer had no internet, by VeloxFetch at its first start, continuing where it stopped if it is
 closed in the middle) and kept up to date: nothing to install (Settings > Browser & clipboard > Video tools shows them).

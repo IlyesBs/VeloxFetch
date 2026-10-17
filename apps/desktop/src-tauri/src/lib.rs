@@ -27,8 +27,8 @@ use download_manager::relink::{NewLinkOutcome, UseNewLink};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
     FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, MultiNetworkDto,
-    NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PreviewDto, QueueAction,
-    QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetGameMode, SetMultiNetwork, SetNetwork,
+    NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PlaylistRequest, PreviewDto,
+    QueueAction, QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetGameMode, SetMultiNetwork, SetNetwork,
     SetPowerAction, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
 };
 use std::sync::Arc;
@@ -206,8 +206,9 @@ command!(check_duplicate, CheckDuplicate, (request: CheckDuplicate) -> Option<Du
 
 // Stream (HLS / DASH) downloads: the UI sends a link and track ids from an earlier analysis, never a
 // segment address, a path, or anything for a command line.
-command!(analyze_media, AnalyzeMedia, (url: String, pending: Option<u64>) -> MediaAnalysisDto, |m| m.analyze_media_for(url, pending));
+command!(analyze_media, AnalyzeMedia, (url: String, pending: Option<u64>, playlist: Option<bool>) -> MediaAnalysisDto, |m| m.analyze_media_with(url, pending, playlist.unwrap_or(false)));
 command!(start_media, StartMedia, (request: MediaRequest) -> MediaJobDto, |m| m.start_media(request));
+command!(start_playlist, StartPlaylist, (request: PlaylistRequest) -> Vec<MediaJobDto>, |m| m.start_playlist(request));
 command!(list_media_jobs, ListMediaJobs, () -> Vec<MediaJobDto>, |m| async { Ok::<_, download_manager::ManagerError>(m.list_media()) });
 command!(cancel_media_job, CancelMediaJob, (id: u64) -> (), |m| m.cancel_media(id));
 command!(pause_media_job, PauseMediaJob, (id: u64) -> (), |m| m.pause_media(id));
@@ -1054,6 +1055,7 @@ pub fn run() {
             set_clipboard_watch,
             analyze_media,
             start_media,
+            start_playlist,
             list_media_jobs,
             cancel_media_job,
             pause_media_job,

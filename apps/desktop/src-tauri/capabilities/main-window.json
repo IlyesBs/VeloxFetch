@@ -52,6 +52,7 @@
     "allow-set-clipboard-watch",
     "allow-analyze-media",
     "allow-start-media",
+    "allow-start-playlist",
     "allow-list-media-jobs",
     "allow-cancel-media-job",
     "allow-pause-media-job",

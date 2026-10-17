@@ -53,6 +53,7 @@ pub enum Command {
     SetClipboardWatch,
     AnalyzeMedia,
     StartMedia,
+    StartPlaylist,
     ListMediaJobs,
     CancelMediaJob,
     PauseMediaJob,
@@ -109,7 +110,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 93] = [
+    pub const ALL: [Command; 94] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -151,6 +152,7 @@ impl Command {
         Command::SetClipboardWatch,
         Command::AnalyzeMedia,
         Command::StartMedia,
+        Command::StartPlaylist,
         Command::ListMediaJobs,
         Command::CancelMediaJob,
         Command::PauseMediaJob,
@@ -249,6 +251,7 @@ impl Command {
             Command::SetClipboardWatch => "set_clipboard_watch",
             Command::AnalyzeMedia => "analyze_media",
             Command::StartMedia => "start_media",
+            Command::StartPlaylist => "start_playlist",
             Command::ListMediaJobs => "list_media_jobs",
             Command::CancelMediaJob => "cancel_media_job",
             Command::PauseMediaJob => "pause_media_job",
@@ -407,6 +410,7 @@ mod tests {
             Command::SetClipboardWatch,
             Command::AnalyzeMedia,
             Command::StartMedia,
+            Command::StartPlaylist,
             Command::ListMediaJobs,
             Command::CancelMediaJob,
             Command::PauseMediaJob,

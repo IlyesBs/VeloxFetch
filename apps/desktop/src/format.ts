@@ -110,14 +110,22 @@ const VIDEO_SITES: [string, string[]][] = [
   ["soundcloud.com", []],
 ];
 
-/** A video page on YouTube, Vimeo and similar sites (downloaded through yt-dlp). */
+/** Playlist pages of those sites (their videos are listed in the video dialog). Mirrors `PLAYLIST_PAGES` in site.rs. */
+const PLAYLIST_PAGES: [string, string[]][] = [
+  ["youtube.com", ["/playlist"]],
+  ["dailymotion.com", ["/playlist/"]],
+];
+
+/** A video page (or a playlist page) on YouTube, Vimeo and similar sites (downloaded through yt-dlp). */
 export function isVideoPage(url: string): boolean {
   try {
     const u = new URL(url.trim());
     if (u.protocol !== "http:" && u.protocol !== "https:") return false;
     const host = u.hostname.toLowerCase();
-    return VIDEO_SITES.some(
-      ([h, paths]) => (host === h || host.endsWith("." + h)) && (paths.length === 0 ? u.pathname.length > 1 : paths.some((p) => u.pathname.includes(p))),
+    const on = (h: string) => host === h || host.endsWith("." + h);
+    return (
+      VIDEO_SITES.some(([h, paths]) => on(h) && (paths.length === 0 ? u.pathname.length > 1 : paths.some((p) => u.pathname.includes(p)))) ||
+      PLAYLIST_PAGES.some(([h, paths]) => on(h) && paths.some((p) => u.pathname.startsWith(p)))
     );
   } catch {
     return false;

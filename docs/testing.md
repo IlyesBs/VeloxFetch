@@ -869,3 +869,17 @@ stop once on kernel.org, and on Hetzner 45 s without a byte or an error until "e
   Brave 1.97 all passed with the pointers the real .deb wrote (`docs/store-extension.md`). Writes
   `extension-arrived.png`.
 * NSIS hooks: compiled with makensis 3.11 (`~/.local/e2e-tools/nsis`) for x64 and x86.
+
+## Playlist downloads (feature, October 2026)
+
+* `cargo test -p media-engine` (+3): a real YouTube flat list (trimmed) and hostile entries; the 500 limit; `playlist_link`
+  and the analysis arguments.
+* `cargo test -p velox-integration-tests --test video` (+5, fake yt-dlp, which now lists playlists; long titles when the
+  id has `long`): order and folder, refusals, three at once and the queue, a video of a playlist and the browser's request,
+  the game hold (it found that the jobs a game paused went back behind the waiting ones; they now go back in line first).
+* `node tests/e2e/desktop-playlist.mjs` (new): the real window and native host; all 8 languages with long titles (it found
+  the list pushing the dialog sideways: a fieldset's default minimum width; fixed with `min-w-0`).
+* `node tests/e2e/real-playlist.mjs target/debug/velox-desktop <tools>` (by hand, internet): a real YouTube playlist,
+  3 of 13 videos at 360p MP4, checked with ffprobe. 17 October 2026: passed twice (13 videos read in 1.4 s, 3 downloaded
+  in 41–50 s).
+* Vitest (+1): playlist pages open the video dialog; `messages.test.ts` covers the 8 new refusals.

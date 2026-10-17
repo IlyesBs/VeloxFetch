@@ -130,4 +130,9 @@ test("the site lists are the same in the extension, the app and the UI", async (
   const ui = readFileSync(join(root, "..", "desktop", "src", "format.ts"), "utf8");
   const uiSites = [...between(ui, "const VIDEO_SITES", "];").matchAll(/\["([^"]+)", \[([^\]]*)\]\]/g)].map((m) => [m[1], [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1])]);
   assert.deepEqual(uiSites, rustSites);
+  // Playlist pages (no video on the page: only the app needs them, the extension's bar never shows there).
+  const rustLists = [...between(rust, "pub const PLAYLIST_PAGES", "];").matchAll(/\("([^"]+)", &\[([^\]]*)\]\)/g)].map((m) => [m[1], [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1])]);
+  const uiLists = [...between(ui, "const PLAYLIST_PAGES", "];").matchAll(/\["([^"]+)", \[([^\]]*)\]\]/g)].map((m) => [m[1], [...m[2].matchAll(/"([^"]+)"/g)].map((x) => x[1])]);
+  assert.ok(rustLists.length >= 2);
+  assert.deepEqual(uiLists, rustLists);
 });

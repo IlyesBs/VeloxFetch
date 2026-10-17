@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { api, normalizeError } from "../api";
 import { act, store } from "../hooks";
 import { t as tr, useT, type Key } from "../i18n";
-import type { MediaAnalysis, MediaRequest } from "../types";
+import type { MediaAnalysis, MediaRequest, Playlist } from "../types";
+import { Icon } from "../ui/icons";
 
 function duration(secs: number | null): string {
   if (!secs || secs <= 0) return "";
@@ -66,21 +67,27 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
   const [subdir, setSubdir] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  /** A playlist: the videos chosen (positions in it). */
+  const [picks, setPicks] = useState<number[]>([]);
+  /** The playlist was read from a video of it ("Download the whole playlist"): "Only this video" goes back. */
+  const [whole, setWhole] = useState(false);
 
-  const look = async (u = url) => {
+  const look = async (u = url, wholePlaylist = false) => {
     if (!u.trim()) return;
+    setWhole(wholePlaylist);
     setLooking(true);
     setSlow(false);
     setError(null);
     setAnalysis(null);
     const hint = setTimeout(() => setSlow(true), 3000);
     try {
-      const a = await api.analyzeMedia(u.trim(), pending);
+      const a = await api.analyzeMedia(u.trim(), pending, wholePlaylist);
       setAnalysis(a);
       setStream(a.streams[0]?.id ?? "");
       setAudio("");
       setSubs([]);
       setName(a.title);
+      setPicks(a.playlist ? a.playlist.entries.filter((e) => e.available).map((e) => e.index) : []);
     } catch (e) {
       setError(normalizeError(e).message);
     } finally {
@@ -116,8 +123,29 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
     }
   };
 
+  const playlist = analysis?.playlist ?? null;
+  const startPlaylist = async () => {
+    if (!analysis?.playlistKey || !playlist) return;
+    setBusy(true);
+    const jobs = await act(() =>
+      api.startPlaylist({
+        key: analysis.playlistKey!,
+        items: picks,
+        ...(stream && { quality: stream }),
+        format: fileType,
+        ...(subdir.trim() && { subdir: subdir.trim() }),
+        ...(pending !== undefined && { pending }),
+      }),
+    );
+    setBusy(false);
+    if (!jobs) return;
+    store.toast("info", t("mdl.playlistStarted", { n: jobs.length, title: playlist.title }));
+    onClose();
+  };
+
   const start = async () => {
     if (!analysis) return;
+    if (playlist) return startPlaylist();
     const req: MediaRequest = {
       url: url.trim(),
       stream,
@@ -146,7 +174,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/45 p-4" data-testid="media-overlay">
       <div className="card rise flex max-h-[92vh] w-full max-w-xl flex-col p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="media-title" data-testid="media-dialog">
         <h2 id="media-title" className="text-[15px] font-semibold">
-          {pending !== undefined ? t("mdl.titlePending") : t("mdl.title")}
+          {analysis?.playlist ? t("mdl.titlePlaylist") : pending !== undefined ? t("mdl.titlePending") : t("mdl.title")}
         </h2>
         <p className="mt-1 text-xs text-dim">
           {t("mdl.intro")}
@@ -189,10 +217,24 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
 
         {analysis && (
           <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1" data-testid="media-options">
-            <p className="text-xs text-dim">
-              {analysis.kind === "site" ? t("mdl.page") : analysis.kind === "hls" ? t("mdl.hls") : t("mdl.dash")}
-              {duration(analysis.durationSecs) ? ` · ${duration(analysis.durationSecs)}` : ""}
-            </p>
+            {playlist ? (
+              <PlaylistHeader playlist={playlist} onlyThis={whole ? () => void look(url, false) : undefined} />
+            ) : (
+              <p className="text-xs text-dim">
+                {analysis.kind === "site" ? t("mdl.page") : analysis.kind === "hls" ? t("mdl.hls") : t("mdl.dash")}
+                {duration(analysis.durationSecs) ? ` · ${duration(analysis.durationSecs)}` : ""}
+              </p>
+            )}
+
+            {analysis.partOfPlaylist && !playlist && (
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent-soft p-3" data-testid="media-part-of-playlist">
+                <Icon name="queue" size={16} className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 text-[13px]">{t("mdl.partOfPlaylist")}</span>
+                <button type="button" className="btn btn-primary h-8" data-testid="media-whole-playlist" disabled={looking} onClick={() => void look(url, true)}>
+                  {t("mdl.wholePlaylist")}
+                </button>
+              </div>
+            )}
 
             <label className="block space-y-1">
               <span className="label">{t("mdl.quality")}</span>
@@ -240,6 +282,8 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
               </label>
             )}
 
+            {playlist && <PlaylistPicker playlist={playlist} picks={picks} setPicks={setPicks} />}
+
             {tracks.length > 0 && (
               <label className="block space-y-1">
                 <span className="label">{t("mdl.audio")}</span>
@@ -275,16 +319,24 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
               </fieldset>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              <label className="space-y-1">
-                <span className="label">{t("addd.filename")}</span>
-                <input data-testid="media-name" className="input h-9" value={name} onChange={(e) => setName(e.target.value)} />
+            {playlist ? (
+              <label className="block space-y-1">
+                <span className="label">{t("mdl.playlistFolder")}</span>
+                <input data-testid="media-subdir" className="input h-9" value={subdir} onChange={(e) => setSubdir(e.target.value)} placeholder={playlist.title} />
+                <span className="block text-xs text-dim">{t("mdl.playlistFolderHint")}</span>
               </label>
-              <label className="space-y-1">
-                <span className="label">{t("mdl.subdir")}</span>
-                <input data-testid="media-subdir" className="input h-9" value={subdir} onChange={(e) => setSubdir(e.target.value)} placeholder={t("mdl.subdirEg")} />
-              </label>
-            </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-1">
+                  <span className="label">{t("addd.filename")}</span>
+                  <input data-testid="media-name" className="input h-9" value={name} onChange={(e) => setName(e.target.value)} />
+                </label>
+                <label className="space-y-1">
+                  <span className="label">{t("mdl.subdir")}</span>
+                  <input data-testid="media-subdir" className="input h-9" value={subdir} onChange={(e) => setSubdir(e.target.value)} placeholder={t("mdl.subdirEg")} />
+                </label>
+              </div>
+            )}
 
             {separateAudio && (
               <label className="flex cursor-pointer items-start gap-2 text-[13px]">
@@ -306,11 +358,77 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
           <button className="btn" data-testid="media-cancel" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </button>
-          <button className="btn btn-primary" data-testid="media-start" disabled={!analysis || busy || !stream} onClick={() => void start()}>
-            {t("mdl.download")}
+          <button className="btn btn-primary" data-testid="media-start" disabled={!analysis || busy || !stream || (!!playlist && picks.length === 0)} onClick={() => void start()}>
+            {playlist ? t("mdl.downloadVideos", { n: picks.length }) : t("mdl.download")}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+/** The playlist's name and size, highlighted: what the window is about to download. */
+function PlaylistHeader({ playlist, onlyThis }: { playlist: Playlist; onlyThis?: () => void }) {
+  const t = useT();
+  const shown = playlist.entries.length;
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-accent/40 bg-accent-soft p-3" data-testid="media-playlist-header">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent text-white">
+        <Icon name="queue" size={17} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-accent">{t("mdl.playlist")}</p>
+        <p className="truncate text-[14px] font-semibold" title={playlist.title} data-testid="media-playlist-title">
+          {playlist.title}
+        </p>
+        <p className="text-xs text-dim" data-testid="media-playlist-count">
+          {t("mdl.playlistCount", { n: shown })}
+          {playlist.truncated ? ` · ${t("mdl.playlistMore", { total: playlist.total ?? `${shown}+`, n: shown })}` : ""}
+        </p>
+      </div>
+      {onlyThis && (
+        <button type="button" className="btn h-8 shrink-0 text-xs" data-testid="media-only-this" onClick={onlyThis}>
+          {t("mdl.onlyThis")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The playlist's videos with a box each (all chosen at first; private, deleted and live ones cannot be). */
+function PlaylistPicker({ playlist, picks, setPicks }: { playlist: Playlist; picks: number[]; setPicks: (p: number[]) => void }) {
+  const t = useT();
+  const usable = playlist.entries.filter((e) => e.available).map((e) => e.index);
+  const all = usable.length > 0 && picks.length === usable.length;
+  const toggle = (i: number, on: boolean) => setPicks(on ? [...picks, i].sort((a, b) => a - b) : picks.filter((x) => x !== i));
+  return (
+    // min-w-0: a fieldset is as wide as its longest title by default, which pushed the dialog sideways.
+    <fieldset className="min-w-0 space-y-1.5">
+      <div className="flex items-center gap-2">
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] font-medium">
+          <input type="checkbox" data-testid="media-pick-all" checked={all} onChange={(e) => setPicks(e.target.checked ? usable : [])} />
+          {t("mdl.selectAll")}
+        </label>
+        <span className="num ms-auto text-xs text-dim" data-testid="media-picked">
+          {t("mdl.chosen", { n: picks.length, total: usable.length })}
+        </span>
+      </div>
+      <div className="max-h-56 overflow-y-auto rounded-xl border border-line" data-testid="media-playlist-items">
+        {playlist.entries.map((e) => (
+          <label
+            key={e.index}
+            className={`flex items-center gap-2.5 border-b border-line px-3 py-1.5 text-[13px] last:border-b-0 ${e.available ? "cursor-pointer hover:bg-accent-soft/50" : "opacity-55"}`}
+            data-testid={`media-item-${e.index}`}
+          >
+            <input type="checkbox" disabled={!e.available} checked={picks.includes(e.index)} onChange={(ev) => toggle(e.index, ev.target.checked)} />
+            <span className="num w-8 shrink-0 text-end text-xs text-dim">{e.index}</span>
+            <span className="min-w-0 flex-1 truncate" title={e.title}>
+              {e.title}
+            </span>
+            <span className="num shrink-0 text-xs text-dim">{e.available ? duration(e.durationSecs) : t("mdl.unavailable")}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
   );
 }
