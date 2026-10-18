@@ -265,6 +265,7 @@
   "upd.available": "Доступна версия {v} ({size}).",
   "upd.elsewhere": "Версия {v} доступна на странице выпусков.",
   "upd.download": "Скачать обновление",
+  "upd.updateNow": "Обновить сейчас",
   "upd.downloading": "Скачивание обновления: {pct}% ({got} из {total})",
   "upd.ready": "Версия {v} скачана и проверена.",
   "upd.installRestart": "Установить и перезапустить",

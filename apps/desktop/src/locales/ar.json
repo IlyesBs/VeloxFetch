@@ -265,6 +265,7 @@
   "upd.available": "الإصدار {v} متاح ({size}).",
   "upd.elsewhere": "الإصدار {v} متاح في صفحة الإصدارات.",
   "upd.download": "تنزيل التحديث",
+  "upd.updateNow": "حدّث الآن",
   "upd.downloading": "جارٍ تنزيل التحديث: {pct}% ({got} من {total})",
   "upd.ready": "تم تنزيل الإصدار {v} والتحقق منه.",
   "upd.installRestart": "التثبيت وإعادة التشغيل",
