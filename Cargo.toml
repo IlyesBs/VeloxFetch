@@ -21,3 +21,6 @@ tracing = "0.1"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Drop debug symbols and the symbol table from every release binary (the CLI and the native host too,
+# not only the app the bundler already strips): smaller binaries, no debug metadata shipped to users.
+strip = "symbols"
