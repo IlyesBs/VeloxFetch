@@ -19,13 +19,13 @@ function idFromKey(b64) {
 
 test("the Chrome extension id equals the id the native host and the app trust", () => {
   const id = idFromKey(manifest("chrome").key);
-  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "caller.rs"), "utf8");
+  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "generated", "identity.rs"), "utf8");
   const trusted = /CHROME_EXTENSION_ID: &str = "([a-p]{32})"/.exec(rust)?.[1];
   assert.equal(id, trusted, "manifest key and CHROME_EXTENSION_ID have drifted apart");
 });
 
 test("the Firefox add-on id equals the id the host trusts", () => {
-  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "caller.rs"), "utf8");
+  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "generated", "identity.rs"), "utf8");
   const trusted = /FIREFOX_EXTENSION_ID: &str = "([^"]+)"/.exec(rust)?.[1];
   assert.equal(manifest("firefox").browser_specific_settings.gecko.id, trusted);
 });
@@ -40,7 +40,7 @@ test("Firefox: what goes to the app is declared (Firefox's built-in data consent
 });
 
 test("the host name matches the one the app registers", () => {
-  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "caller.rs"), "utf8");
+  const rust = readFileSync(join(root, "..", "..", "crates", "browser-bridge", "src", "generated", "identity.rs"), "utf8");
   const host = /HOST_NAME: &str = "([^"]+)"/.exec(rust)?.[1];
   assert.match(readFileSync(join(root, "src", "background.js"), "utf8"), new RegExp(`HOST = "${host.replace(/\./g, "\\.")}"`));
 });

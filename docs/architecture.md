@@ -721,6 +721,11 @@ lib.rs install_update   -> system_integration::update::install(kind, path, size,
                         -> Restart: app.exit(0) (normal shutdown)  |  Opened: the system's installer
 ```
 
+The feed address, the package-URL prefix and the product name come from `src/generated/identity.rs`, generated at
+build time from `config/veloxfetch.yaml` (the single source of truth, shared with the installers and publish
+scripts; `docs/configuration.md`). They are compiled in, never read from a file at run time, so the set of places
+an update may come from is fixed in the signed binary.
+
 * `crates/update-verify`: pure checks (no network, no writes): trusted keys, the signed manifest, versions, the
   package for a target, a file's exact size and SHA-256. Used by the manager, `system-integration` and its tests.
 * `download-manager/src/manager/update.rs`: the state machine (`idle`, `checking`, `upToDate`, `available`,

@@ -285,9 +285,12 @@ test("updates are only our own signed design (Phase 19, docs/auto-update.md)", (
   // The public download repository (the source one is private): the app, the manifest tool and the publish script
   // all name the same one, or the manifest would list packages the app refuses.
   const PUBLIC = "IlyesBs/VeloxFetch-releases";
-  assert.match(lib, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
-  assert.match(lib, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
-  assert.match(lib, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
+  // The update addresses are generated into identity.rs from config/veloxfetch.yaml (config.test.mjs checks they
+  // are in step); they are still what the built binary trusts, so the invariant is asserted on the compiled values.
+  const ids = read("apps", "desktop", "src-tauri", "src", "generated", "identity.rs");
+  assert.match(ids, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
+  assert.match(ids, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
+  assert.match(ids, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
   assert.match(tool, new RegExp(`const REPO = "${PUBLIC}"`));
   assert.match(read("scripts", "publish-release.sh"), new RegExp(`^PUBLIC_REPO="${PUBLIC}"$`, "m"));
   assert.doesNotMatch(lib, /fn (download_update|install_update|check_for_updates)\([^)]*(url|path|String)/);
@@ -967,7 +970,7 @@ test("Game mode: main window only, bounded, strict requests, nothing new looked 
 });
 
 test("the installers point the browsers at the store extension the app trusts, at the documented places only, and remove it", () => {
-  const id = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(read("crates/browser-bridge/src/caller.rs"))?.[1];
+  const id = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(read("crates/browser-bridge/src/generated/identity.rs"))?.[1];
   assert.ok(id, "CHROME_STORE_ID is set");
   const store = read("crates/system-integration/src/store_extension.rs");
   const folders = [.../LINUX_SYSTEM_FOLDERS: \[&str; 3\] =\s*\[([^\]]+)\]/.exec(store)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);

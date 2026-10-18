@@ -148,6 +148,11 @@ manifest, and writes the release text, the public README with its screenshots, a
 Releases go to the **public** repository `IlyesBs/VeloxFetch-releases`; this one stays private. Details:
 `docs/publishing.md`.
 
+That repository, and the browser-extension ids and host name, are set once in `config/veloxfetch.yaml`. To move
+the project to a different download repository or change an extension id, edit that file and run
+`node scripts/gen-config.mjs` (it regenerates the compiled-in constants and names the two install scripts and the
+NSIS hook to update by hand); a test fails the build if anything drifts from it. See `docs/configuration.md`.
+
 ## Updates (Phase 19)
 
 The app updates itself only from a manifest signed with the owner's **offline** Ed25519 key (`docs/auto-update.md`).
