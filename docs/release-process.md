@@ -48,6 +48,12 @@ extension), and `scripts/package-release.mjs` collects `release/`:
 | Linux | `.deb`, `.rpm`, `.AppImage`, `VeloxFetch-portable-linux-x64.zip` |
 | all | `VeloxFetch-extension-chromium.zip`, `-chrome-store.zip`, `-firefox.zip`, `SHA256SUMS.txt` |
 
+**Stripped release binaries.** `[profile.release]` in the workspace `Cargo.toml` sets `strip = "symbols"`, so every
+release binary ships without debug symbols or a symbol table. The Tauri bundler already stripped the app binary; this
+extends it to the whole workspace, so the `velox` CLI and `velox-native-host` are stripped too (about −43 % and −53 %
+in size). It is a size and hygiene measure — less debug metadata handed to users — not obfuscation: the real binary
+integrity guarantees are OS code signing (Authenticode, Apple notarisation) and the `SHA256SUMS.txt` checksums.
+
 **Linux AppImage and its media bundle (October 2026).** The AppImage carries GStreamer and its plugins
 (`bundleMediaFramework`), so live preview plays without system packages. linuxdeploy's GStreamer plugin needs
 `patchelf`, the plugins (base, good, libav) and `gst-plugin-scanner`.
