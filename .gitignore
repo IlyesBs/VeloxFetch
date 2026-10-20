@@ -21,3 +21,6 @@ apps/browser-extension/dist/
 .vscode/
 # private working notes, never published
 /nextStep.md
+# internal docs and overview kept locally only, not published
+/docs/
+/VELOXFETCH-OVERVIEW.md
