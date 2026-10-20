@@ -87,7 +87,11 @@ function openMenu(select: HTMLSelectElement) {
     }
     menu.appendChild(row);
   }
-  document.body.appendChild(menu);
+  // A modal <dialog> (showModal) is painted in the browser's top layer, above everything in document.body, so a
+  // menu left on body would open *under* the dialog (its `position: fixed` and z-index cannot reach the top layer).
+  // Put the menu inside the open dialog that holds the field, when there is one, so it shares that layer; the menu
+  // stays viewport-positioned because the dialog sets no transform. Otherwise it goes on the body as before.
+  (select.closest("dialog[open]") ?? document.body).appendChild(menu);
 
   const place = () => {
     const r = select.getBoundingClientRect();
