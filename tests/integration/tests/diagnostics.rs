@@ -130,7 +130,7 @@ async fn a_download_reports_status_retries_http_status_connections_and_speed_and
         assert!(g.report.contains(want), "{want} missing from:\n{}", g.report);
     }
 
-    // The log: one line when the run starts and one when it ends, with every number the roadmap names.
+    // The log: one line when the run starts and one when it ends, with every number we expect.
     let all = lines(&e.log);
     let id = format!("id={}", d.id);
     assert!(line_with(&all, &["INFO", "download started", &id, "attempt=1"]).is_some(), "{all:#?}");
