@@ -24,7 +24,6 @@ VeloxFetch is free and developed by one person. If it is useful to you, a small 
 entirely optional, and the app is never limited for not donating.
 
 * **Crypto:** [![Donate](https://img.shields.io/badge/Donate-Crypto-blue?style=for-the-badge)](https://link.depay.com/4VnYyZSV7h526UxFEVDIvO)
-* **Card / Payoneer:** coming soon.
 
 Thank you.
 
