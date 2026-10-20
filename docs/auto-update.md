@@ -45,12 +45,18 @@ the `.deb`, else `rpm` for the `.rpm`. macOS: a program inside `*.app/Contents/M
 ### What the user sees
 
 * **Settings > Updates:** the installed version, the state (up to date, a version available with its size, the
-  download's progress, ready, or why a check failed), **Check now**, **Download the update**, **Install and
-  restart** / **Open the installer**, **Open the release page**, **Check for updates automatically** (on by
-  default), and when the last check happened.
+  download's progress, ready, or why a check failed), and a **single button that flips**: **Check now** until a
+  newer version is found, then **Update now**. One click of **Update now** does the whole thing — it downloads the
+  verified package and then installs it, with no separate download step, no file downloaded by hand and no web page
+  opened. Also **Check for updates automatically** (on by default) and when the last check happened. (**Open the
+  release page** appears only for the portable copy, which replaces nothing.)
+* **How the install runs:** silent where it safely can be — the Linux AppImage and the portable copy replace
+  themselves and relaunch with no prompt; on Windows and the `.deb` / `.rpm` the one click hands off to the system
+  installer, which asks for permission (UAC / the administrator password), as installing system-wide must.
 * **Status bar:** "Up to date" (wide windows) or "Update x.y.z available / ready", which opens Settings > Updates.
-* The app checks 60 seconds after start, then every 12 hours, when the setting is on. It **never downloads or
-  installs on its own**: the user presses the button.
+* The app checks 60 seconds after start, then every 12 hours, when the setting is on. It **checks** on its own but
+  **never downloads or installs on its own**: downloading and installing happen only on the one **Update now**
+  click (there is no unattended auto-install mode).
 
 Error texts never pass on anything from the network: each is chosen by a short code (`network`, `signature`,
 `malformed`, `stale`, `corrupt`, `disk`, `install`).

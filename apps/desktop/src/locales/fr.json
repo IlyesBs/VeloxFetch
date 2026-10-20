@@ -265,6 +265,7 @@
   "upd.available": "La version {v} est disponible ({size}).",
   "upd.elsewhere": "La version {v} est disponible sur la page des versions.",
   "upd.download": "Télécharger la mise à jour",
+  "upd.updateNow": "Mettre à jour maintenant",
   "upd.downloading": "Téléchargement de la mise à jour : {pct} % ({got} sur {total})",
   "upd.ready": "La version {v} est téléchargée et vérifiée.",
   "upd.installRestart": "Installer et redémarrer",

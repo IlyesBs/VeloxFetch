@@ -265,6 +265,7 @@
   "upd.available": "{v} sürümü hazır ({size}).",
   "upd.elsewhere": "{v} sürümü sürüm sayfasında hazır.",
   "upd.download": "Güncellemeyi indir",
+  "upd.updateNow": "Şimdi güncelle",
   "upd.downloading": "Güncelleme indiriliyor: %{pct} ({total} içinden {got})",
   "upd.ready": "{v} sürümü indirildi ve doğrulandı.",
   "upd.installRestart": "Kur ve yeniden başlat",

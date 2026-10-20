@@ -265,6 +265,7 @@
   "upd.available": "Version {v} ist verfügbar ({size}).",
   "upd.elsewhere": "Version {v} ist auf der Release-Seite verfügbar.",
   "upd.download": "Update herunterladen",
+  "upd.updateNow": "Jetzt aktualisieren",
   "upd.downloading": "Update wird heruntergeladen: {pct} % ({got} von {total})",
   "upd.ready": "Version {v} ist heruntergeladen und geprüft.",
   "upd.installRestart": "Installieren und neu starten",
