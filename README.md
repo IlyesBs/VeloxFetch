@@ -13,7 +13,7 @@ eight languages, with a right-to-left interface in Arabic.
 ## Download
 
 Get the latest build for **Windows** and **Linux** from the releases page:
-**https://github.com/IlyesBs/VeloxFetch-releases/releases** (macOS: in progress).
+**https://github.com/IlyesBs/VeloxFetch/releases** (macOS: in progress).
 
 Browser extension: **Chrome / Edge / Brave** from the Chrome Web Store, **Firefox** from
 [Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/). Installing VeloxFetch points your browser to it.
