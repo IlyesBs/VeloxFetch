@@ -28,8 +28,11 @@ ignore = [
 [licenses]
 version = 2
 confidence-threshold = 0.9
-# Permissive licences only. MPL-2.0 is file-level copyleft (cssparser / selectors via Tauri's HTML
-# handling, unmodified). Nothing GPL/AGPL/LGPL-only may enter.
+# VeloxFetch's own crates are GPL-3.0-or-later (see LICENSE) and all `publish = false`; this skips
+# them so the allow-list below governs third-party dependencies only.
+private = { ignore = true }
+# Permissive licences only, for dependencies. MPL-2.0 is file-level copyleft (cssparser / selectors
+# via Tauri's HTML handling, unmodified). No GPL/AGPL/LGPL-only dependency may enter.
 allow = [
     "MIT",
     "MIT-0",
