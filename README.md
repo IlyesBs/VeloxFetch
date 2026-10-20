@@ -5,7 +5,7 @@ open-source alternative to commercial download managers, built on a Rust downloa
 desktop app (React + TypeScript + Tailwind).
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Download latest release](https://img.shields.io/github/v/release/IlyesBs/VeloxFetch-release?label=download)](https://github.com/IlyesBs/VeloxFetch/releases)
+[![Download latest release](https://img.shields.io/github/v/release/IlyesBs/VeloxFetch?label=download)](https://github.com/IlyesBs/VeloxFetch/releases)
 [![GitHub stars](https://img.shields.io/github/stars/IlyesBs/VeloxFetch?style=flat)](https://github.com/IlyesBs/VeloxFetch/stargazers)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-informational)
 
