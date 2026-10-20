@@ -9,6 +9,7 @@ import { Icon } from "../ui/icons";
 import { t as tr, useT } from "../i18n";
 import { EmptyState, Menu } from "../ui/primitives";
 import { FOCUS_SEARCH } from "./DownloadsView";
+import { VerifyBadge } from "../components/VerifyBadge";
 
 /** "Today", "Yesterday", "Earlier this week", "Earlier" for a unix time. */
 export function dayGroup(unixSecs: number, now = new Date()): string {
@@ -28,13 +29,14 @@ function Row({ h, onRemoved }: { h: HistoryEntry; onRemoved: (id: number) => voi
   return (
     <li className="card card-hover flex items-center gap-3 p-3" data-testid="history-row" data-exists={h.exists}>
       <FileIcon kind={h.kind} size={36} />
-      <div className="min-w-0 flex-1">
+      <div className="@container min-w-0 flex-1">
         <p className="truncate text-[13px] font-semibold" title={h.destination}>
           {h.filename}
         </p>
-        <p className="truncate text-xs text-dim">
-          {hostOf(h.url)}
-          {!h.exists && <span className="ms-2 rounded-full bg-line px-1.5 py-px text-[10px] font-medium">{t("hist.moved")}</span>}
+        <p className="flex min-w-0 items-center gap-2 text-xs text-dim">
+          <span className="truncate">{hostOf(h.url)}</span>
+          {!h.exists && <span className="shrink-0 rounded-full bg-line px-1.5 py-px text-[10px] font-medium">{t("hist.moved")}</span>}
+          {h.verify && <VerifyBadge verify={h.verify} narrow className="shrink-0" />}
         </p>
       </div>
       <span className="num hidden text-xs text-dim sm:inline">{formatBytes(h.size)}</span>

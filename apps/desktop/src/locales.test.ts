@@ -14,8 +14,12 @@ const holes = (s: string) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort
 describe("locale files", () => {
   const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
 
-  it("ships English, French and Arabic", () => {
-    expect(files).toEqual(expect.arrayContaining(["en.json", "fr.json", "ar.json"]));
+  it("ships English, French, Arabic, Spanish, Portuguese (Brazil), German, Russian and Turkish", () => {
+    expect(files).toEqual(expect.arrayContaining(["en.json", "fr.json", "ar.json", "es.json", "pt-br.json", "de.json", "ru.json", "tr.json"]));
+  });
+
+  it("names every file by a code the app accepts for the tray and notifications (crates/download-manager desktop.rs)", () => {
+    for (const f of files) expect(f, f).toMatch(/^[a-z]{2,3}(-[a-z0-9]{2,8})*\.json$/);
   });
 
   for (const f of files) {

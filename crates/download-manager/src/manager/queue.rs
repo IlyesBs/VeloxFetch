@@ -11,7 +11,7 @@
 //!   the queue. Only downloads holding a run slot are paused, and only when asked to be.
 //! * Downloads paused by the queue are remembered (`held`, persisted) and resumed when it reopens;
 //!   downloads the user paused themselves are never resumed by the queue (pausing a held one takes it off the list).
-//! * Smart throttle's "pause" policy closes the gate while a listed program runs (`game_hold`, in memory only: a
+//! * Smart throttle's "pause" policy closes the gate while a listed program runs or Game mode is on (`game_hold`, in memory only: a
 //!   restart never leaves it closed; what it paused is in `held` and resumes at the next launch).
 //! * A power action is armed only by an explicit request, is in-memory only (a restart disarms it),
 //!   fires once, and is preceded by a cancellable countdown.
@@ -84,6 +84,11 @@ impl QueueState {
             applied_open: None,
             power: PowerRuntime::default(),
         })
+    }
+
+    /// Game mode still on at start, with the pause policy: the gate stays closed from the first evaluation.
+    pub(super) fn set_game_hold(&mut self, hold: bool) {
+        self.game_hold = hold;
     }
 
     pub(super) fn max_active(&self) -> usize {
@@ -214,6 +219,9 @@ impl DownloadManager {
                 let mgr = DownloadManager { inner };
                 mgr.reconcile().await;
                 mgr.evaluate_queues().await;
+                let (online, seen_offline) = mgr.judged_online();
+                mgr.recovery_turn(online, seen_offline).await;
+                mgr.refresh_networks(false).await;
                 mgr.update_keep_awake();
                 mgr.check_power().await;
             }

@@ -20,6 +20,18 @@ const MAX_JOBS: usize = 100;
 const ANALYZE_TIMEOUT: Duration = Duration::from_secs(60);
 /// yt-dlp has its own limit (90 s); this one only guards against a program that ignores it.
 const SITE_ANALYZE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Playlists read lately, kept for `start_playlist` (the newest first), and for how long.
+const KEPT_PLAYLISTS: usize = 8;
+const PLAYLIST_TTL: Duration = Duration::from_secs(30 * 60);
+
+/// A playlist `analyze_media` read: the videos' links stay here, the window chooses them by position.
+struct KeptPlaylist {
+    key: String,
+    at: Instant,
+    playlist: media_engine::Playlist,
+    /// The browser's headers it was read with (referrer, user agent), for its videos too.
+    headers: Vec<(String, String)>,
+}
 
 /// What a job runs: a stream description, or a video page through yt-dlp.
 #[derive(Clone)]
@@ -66,6 +78,10 @@ pub(super) struct MediaState {
     jobs: Vec<Job>,
     /// Video jobs Smart throttle's pause policy paused (a game runs), to resume when it closes. In memory, like the jobs.
     game_held: Vec<u64>,
+    /// The pause policy holds video downloads: queued ones do not start meanwhile.
+    held: bool,
+    playlists: Vec<KeptPlaylist>,
+    next_playlist: u64,
 }
 
 pub(super) fn client(cfg: &http_client::ClientConfig) -> Result<HttpClient, ManagerError> {
@@ -205,9 +221,9 @@ impl DownloadManager {
         }
     }
 
-    /// Any stream job still working (counts as "busy" for the power trigger).
+    /// Any stream job still working or waiting its turn (counts as "busy" for the power trigger).
     pub(super) fn media_busy(&self) -> bool {
-        self.inner.media.lock().unwrap().jobs.iter().any(|j| j.dto.status.is_active())
+        self.inner.media.lock().unwrap().jobs.iter().any(|j| j.dto.status.is_active() || j.dto.status == MediaStatus::Queued)
     }
 
     /// Look at a stream link: which qualities, audio tracks and subtitles it offers. Nothing is
@@ -219,7 +235,21 @@ impl DownloadManager {
     /// `analyze_media`, for a typed link or (with `pending`) a video the browser handed over. Video pages
     /// (YouTube...) are read through yt-dlp; DRM services are refused before anything is asked.
     pub async fn analyze_media_for(&self, url: String, pending: Option<u64>) -> Result<MediaAnalysisDto, ManagerError> {
-        let (url, headers) = self.media_source(&url, pending)?;
+        self.analyze_media_with(url, pending, false).await
+    }
+
+    /// `analyze_media_for`; with `whole_playlist`, the playlist the video link belongs to (`watch?v=...&list=...`)
+    /// is read instead of the video. A playlist's videos are kept for `start_playlist`.
+    pub async fn analyze_media_with(
+        &self,
+        url: String,
+        pending: Option<u64>,
+        whole_playlist: bool,
+    ) -> Result<MediaAnalysisDto, ManagerError> {
+        let (mut url, headers) = self.media_source(&url, pending)?;
+        if whole_playlist {
+            url = media_engine::playlist_link(&url).ok_or_else(|| ManagerError::invalid("this link is not part of a playlist"))?;
+        }
         drm_refusal(&url)?;
         let analysis = if media_engine::is_site_page(&url) {
             let (mut tool, ffmpeg_coming) = self.site_tool().await?;
@@ -284,7 +314,8 @@ impl DownloadManager {
                 .map_err(|e| ManagerError::invalid(e.to_string()))?
         };
         let combine_available = self.ffmpeg().is_some() || self.tool_installing(Tool::Ffmpeg) || self.can_fetch(Tool::Ffmpeg);
-        Ok(MediaAnalysisDto { analysis, combine_available })
+        let playlist_key = analysis.playlist.as_ref().map(|p| self.keep_playlist(p.clone(), headers));
+        Ok(MediaAnalysisDto { analysis, combine_available, playlist_key })
     }
 
     pub async fn start_media(&self, req: MediaRequest) -> Result<MediaJobDto, ManagerError> {
@@ -341,11 +372,8 @@ impl DownloadManager {
             stem.clone()
         };
         let page = url.to_string();
-        let (id, dto, work_dir) = {
+        let (dto, work_dir) = {
             let mut m = self.inner.media.lock().unwrap();
-            if m.jobs.iter().filter(|j| j.dto.status.is_active()).count() >= MAX_ACTIVE_JOBS {
-                return Err(ManagerError::invalid(format!("at most {MAX_ACTIVE_JOBS} video downloads can run at once")));
-            }
             m.next += 1;
             let id = m.next;
             // The job's own work folder: kept while it is paused or failed, so Resume / Retry continues.
@@ -380,8 +408,9 @@ impl DownloadManager {
                 running_since_ms: Some(now_ms()),
                 file_size: None,
                 retries: 0,
+                playlist: None,
             };
-            (id, dto, work_dir)
+            (dto, work_dir)
         };
         let work = match tool {
             Some((tool, wait_ffmpeg)) => Work::Site(
@@ -417,12 +446,24 @@ impl DownloadManager {
                 stream_waits,
             ),
         };
-        let cancel = CancellationToken::new();
+        let dto = self.add_job(dto, work, work_dir, page);
+        // The browser's request is answered: it leaves the waiting list.
+        if let Some(token) = req.pending {
+            let _ = self.take_pending(token);
+        }
+        self.start_queued();
+        Ok(self.with_job(dto.id, |j| j.dto.clone()).unwrap_or(dto))
+    }
+
+    /// Put a new job in the list, queued (`start_queued` starts it when there is a free place).
+    fn add_job(&self, mut dto: MediaJobDto, work: Work, work_dir: PathBuf, page: String) -> MediaJobDto {
+        dto.status = MediaStatus::Queued;
+        dto.running_since_ms = None;
         {
             let mut m = self.inner.media.lock().unwrap();
             m.jobs.push(Job {
                 dto: dto.clone(),
-                cancel: cancel.clone(),
+                cancel: CancellationToken::new(),
                 work: Some(work),
                 work_dir: Some(work_dir),
                 progress: Arc::new(Progress::default()),
@@ -430,9 +471,13 @@ impl DownloadManager {
                 saved: Vec::new(),
                 page,
             });
-            // Keep the list bounded: drop the oldest finished jobs.
+            // Keep the list bounded: drop the oldest finished jobs (never one waiting, paused or running).
             while m.jobs.len() > MAX_JOBS {
-                match m.jobs.iter().position(|j| !j.dto.status.is_active() && j.dto.status != MediaStatus::Paused) {
+                match m
+                    .jobs
+                    .iter()
+                    .position(|j| !j.dto.status.is_active() && !matches!(j.dto.status, MediaStatus::Paused | MediaStatus::Queued))
+                {
                     Some(i) => {
                         let old = m.jobs.remove(i);
                         remove_work_dir(&old);
@@ -442,14 +487,184 @@ impl DownloadManager {
             }
         }
         self.emit(ManagerEvent::Media { job: dto.clone() });
+        dto
+    }
 
-        // The browser's request is answered: it leaves the waiting list.
+    /// Start queued jobs, oldest first, while fewer than [`MAX_ACTIVE_JOBS`] run (none while the pause policy holds
+    /// video downloads). Called whenever a job is added or one stops.
+    pub(super) fn start_queued(&self) {
+        let started: Vec<(MediaJobDto, CancellationToken)> = {
+            let mut m = self.inner.media.lock().unwrap();
+            if m.held {
+                return;
+            }
+            let free = MAX_ACTIVE_JOBS.saturating_sub(m.jobs.iter().filter(|j| j.dto.status.is_active()).count());
+            let now = now_ms();
+            let mut out = Vec::new();
+            for j in m.jobs.iter_mut().filter(|j| j.dto.status == MediaStatus::Queued).take(free) {
+                j.cancel = CancellationToken::new();
+                j.pausing = false;
+                j.dto.status = MediaStatus::Preparing;
+                track_time(&mut j.dto, now);
+                out.push((j.dto.clone(), j.cancel.clone()));
+            }
+            out
+        };
+        for (dto, cancel) in started {
+            self.emit(ManagerEvent::Media { job: dto.clone() });
+            let mgr = self.clone();
+            tokio::spawn(async move { mgr.run_media(dto.id, cancel).await });
+        }
+    }
+
+    /// Keep a playlist just read; its key for `start_playlist`.
+    fn keep_playlist(&self, playlist: media_engine::Playlist, headers: Vec<(String, String)>) -> String {
+        let mut m = self.inner.media.lock().unwrap();
+        m.next_playlist += 1;
+        let key = format!("p{}", m.next_playlist);
+        m.playlists.retain(|p| p.at.elapsed() < PLAYLIST_TTL);
+        m.playlists.insert(0, KeptPlaylist { key: key.clone(), at: Instant::now(), playlist, headers });
+        m.playlists.truncate(KEPT_PLAYLISTS);
+        key
+    }
+
+    /// Download the chosen videos of a playlist `analyze_media` read: one video job each, in the playlist's order, in
+    /// one folder (the playlist's name), named by position. A few run at once; the others wait their turn.
+    pub async fn start_playlist(&self, req: PlaylistRequest) -> Result<Vec<MediaJobDto>, ManagerError> {
+        let (playlist, headers) = {
+            let m = self.inner.media.lock().unwrap();
+            let kept = m
+                .playlists
+                .iter()
+                .find(|p| p.key == req.key && p.at.elapsed() < PLAYLIST_TTL)
+                .ok_or_else(|| ManagerError::invalid("this playlist is no longer known: read the link again"))?;
+            (kept.playlist.clone(), kept.headers.clone())
+        };
+        if req.items.is_empty() {
+            return Err(ManagerError::invalid("choose at least one video"));
+        }
+        if req.items.len() > media_engine::limits::MAX_PLAYLIST_VIDEOS {
+            return Err(ManagerError::invalid("too many videos"));
+        }
+        let mut items = req.items.clone();
+        items.sort_unstable();
+        items.dedup();
+        if items.len() != req.items.len() {
+            return Err(ManagerError::invalid("a video was chosen twice"));
+        }
+        let mut chosen = Vec::with_capacity(items.len());
+        for i in &items {
+            let e = playlist.entries.iter().find(|e| e.index == *i).ok_or_else(|| ManagerError::invalid("unknown video"))?;
+            if !e.available {
+                return Err(ManagerError::invalid("this video cannot be downloaded (private, members only or live)"));
+            }
+            chosen.push(e.clone());
+        }
+        let quality = req.quality.clone().filter(|q| q != "best");
+        if let Some(q) = &quality {
+            if !media_engine::PLAYLIST_QUALITIES.contains(&q.as_str()) {
+                return Err(ManagerError::invalid("unknown quality"));
+            }
+        }
+        let format = match req.format.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+            None => None,
+            Some(f) => Some(OutputFormat::parse(f).ok_or_else(|| ManagerError::invalid("unknown file type"))?),
+        };
+        let format = format.or_else(|| (quality.as_deref() == Some("audio")).then_some(OutputFormat::Mp3));
+
+        // The folder: the user's, else the playlist's name inside the videos folder.
+        let root = self.download_root();
+        let named = match req.subdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => s.to_string(),
+            None => {
+                let mut name = media_engine::sanitize_stem(&playlist.title);
+                if validate::filename(&name).is_err() {
+                    name = "playlist".into();
+                }
+                match self.sorted_subfolder(downloader_core::FileKind::Video) {
+                    Some(v) => format!("{v}/{name}"),
+                    None => name,
+                }
+            }
+        };
+        let dest_dir = validate::subdir(&root, Some(&named))?;
+        tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| ManagerError::Internal(format!("cannot create the folder: {e}")))?;
+        validate::ensure_within(&root, &dest_dir)?;
+
+        let (tool, wait_ffmpeg) = self.site_tool().await?;
+        let width = items.last().map_or(1, |n| n.to_string().len()).max(2);
+        let count = chosen.len() as u32;
+        let mut jobs = Vec::with_capacity(chosen.len());
+        for e in chosen {
+            drm_refusal(&e.url)?;
+            // "07 - Title": the playlist's order in any file list. A title that is not a safe name keeps the number.
+            let mut stem = format!("{:0width$} - {}", e.index, media_engine::sanitize_stem(&e.title));
+            stem = stem.chars().take(150).collect::<String>().trim_end().to_string();
+            if validate::filename(&stem).is_err() {
+                stem = format!("{:0width$}", e.index);
+            }
+            let id = {
+                let mut m = self.inner.media.lock().unwrap();
+                m.next += 1;
+                m.next
+            };
+            let work_dir = dest_dir.join(media_engine::work_dir_name(id));
+            let dto = MediaJobDto {
+                id,
+                title: stem.clone(),
+                host: e.url.host_str().unwrap_or("").to_string(),
+                status: MediaStatus::Queued,
+                bytes: 0,
+                segments_done: 0,
+                segments_total: 0,
+                percent: None,
+                folder: dest_dir.to_string_lossy().into_owned(),
+                files: Vec::new(),
+                notes: Vec::new(),
+                error: None,
+                error_code: None,
+                site: true,
+                speed_bps: 0,
+                eta_secs: None,
+                resumable: false,
+                playable: false,
+                url: e.url.to_string(),
+                quality: quality.clone(),
+                format: format.map(|f| f.extension().to_string()),
+                audio_only: format.is_some_and(OutputFormat::is_audio),
+                subtitles: 0,
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                active_ms: 0,
+                running_since_ms: None,
+                file_size: None,
+                retries: 0,
+                playlist: Some(PlaylistTag { title: playlist.title.clone(), index: e.index, count }),
+            };
+            let work = Work::Site(
+                tool.clone(),
+                SiteSpec {
+                    url: e.url.clone(),
+                    quality: quality.clone(),
+                    format,
+                    dest_dir: dest_dir.clone(),
+                    sandbox_root: Some(root.clone()),
+                    mark_of_the_web: self.inner.cfg.download.mark_of_the_web,
+                    stem,
+                    headers: site_headers(&headers),
+                    work_dir: Some(work_dir.clone()),
+                    rate_limit: None,
+                },
+                wait_ffmpeg,
+            );
+            jobs.push(self.add_job(dto, work, work_dir, e.url.to_string()));
+        }
         if let Some(token) = req.pending {
             let _ = self.take_pending(token);
         }
-        let mgr = self.clone();
-        tokio::spawn(async move { mgr.run_media(id, cancel).await });
-        Ok(dto)
+        tracing::info!(videos = jobs.len(), "playlist videos added");
+        self.start_queued();
+        Ok(jobs.into_iter().map(|d| self.with_job(d.id, |j| j.dto.clone()).unwrap_or(d)).collect())
     }
 
     /// Run a job (again, after a pause or a failure: from what is already in its work folder). Tries up to
@@ -601,6 +816,8 @@ impl DownloadManager {
             }
             _ => {}
         }
+        // Its place is free: the next queued video starts.
+        self.start_queued();
     }
 
     /// Stream jobs pace every piece through the app's shared limits (the user's global limit and the
@@ -797,25 +1014,42 @@ impl DownloadManager {
         (speed, running, paused, held)
     }
 
-    /// Pause a running video job: it stops now and keeps what it downloaded; Resume continues from there.
+    /// Pause a running video job: it stops now and keeps what it downloaded; Resume continues from there. A queued
+    /// one is set aside (it does not start on its own any more).
     pub async fn pause_media(&self, id: u64) -> Result<(), ManagerError> {
-        let token = self
+        enum Act {
+            Stop(CancellationToken),
+            Aside(Box<MediaJobDto>),
+        }
+        let act = self
             .with_job(id, |j| {
+                if j.dto.status == MediaStatus::Queued {
+                    j.dto.status = MediaStatus::Paused;
+                    j.dto.resumable = true;
+                    return Ok(Act::Aside(Box::new(j.dto.clone())));
+                }
                 if !j.dto.status.is_active() {
                     return Err(ManagerError::invalid("only a running video download can be paused"));
                 }
                 j.pausing = true;
-                Ok(j.cancel.clone())
+                Ok(Act::Stop(j.cancel.clone()))
             })
             .ok_or_else(|| ManagerError::invalid("no such video download"))??;
-        token.cancel();
+        match act {
+            Act::Stop(token) => token.cancel(),
+            Act::Aside(job) => self.emit(ManagerEvent::Media { job: *job }),
+        }
         Ok(())
     }
 
     /// Smart throttle's pause policy (a game starts): pause the running video jobs and remember them. Waits until they
     /// have stopped (at most 15 s each), so letting go right after finds them paused.
     pub(super) async fn hold_media_for_game(&self) {
-        let ids: Vec<u64> = self.inner.media.lock().unwrap().jobs.iter().filter(|j| j.dto.status.is_active()).map(|j| j.dto.id).collect();
+        let ids: Vec<u64> = {
+            let mut m = self.inner.media.lock().unwrap();
+            m.held = true; // queued videos wait too
+            m.jobs.iter().filter(|j| j.dto.status.is_active()).map(|j| j.dto.id).collect()
+        };
         let mut paused = Vec::new();
         for id in ids {
             if self.pause_media(id).await.is_ok() {
@@ -836,14 +1070,20 @@ impl DownloadManager {
 
     /// The game closed: resume the video jobs the pause policy paused (only those still paused).
     pub(super) async fn release_media_for_game(&self) {
-        let ids = std::mem::take(&mut self.inner.media.lock().unwrap().game_held);
+        let ids = {
+            let mut m = self.inner.media.lock().unwrap();
+            m.held = false;
+            std::mem::take(&mut m.game_held)
+        };
         for (id, status) in ids.iter().zip(self.media_statuses(&ids)) {
             if status == Some(MediaStatus::Paused) {
-                if let Err(e) = self.resume_media_inner(*id).await {
+                // All back in line first, then started in order: those it paused before the ones that were waiting.
+                if let Err(e) = self.requeue_media(*id) {
                     tracing::warn!(id, error = %e, "could not resume a video download after the game");
                 }
             }
         }
+        self.start_queued();
     }
 
     fn media_statuses(&self, ids: &[u64]) -> Vec<Option<MediaStatus>> {
@@ -858,34 +1098,33 @@ impl DownloadManager {
         self.resume_media_inner(id).await
     }
 
+    /// Back in the queue: it starts at once when there is a free place, else in its turn.
     async fn resume_media_inner(&self, id: u64) -> Result<MediaJobDto, ManagerError> {
-        let cancel = CancellationToken::new();
+        let dto = self.requeue_media(id)?;
+        self.start_queued();
+        Ok(self.with_job(id, |j| j.dto.clone()).unwrap_or(dto))
+    }
+
+    /// A paused or failed job back in the queue (not started here).
+    fn requeue_media(&self, id: u64) -> Result<MediaJobDto, ManagerError> {
         let dto = {
             let mut m = self.inner.media.lock().unwrap();
-            let running = m.jobs.iter().filter(|j| j.dto.status.is_active()).count();
             let j = m.jobs.iter_mut().find(|j| j.dto.id == id).ok_or_else(|| ManagerError::invalid("no such video download"))?;
-            if j.dto.status.is_active() {
+            if j.dto.status.is_active() || j.dto.status == MediaStatus::Queued {
                 return Ok(j.dto.clone());
             }
             if !j.dto.resumable || j.work.is_none() {
                 return Err(ManagerError::invalid("this video download cannot be continued; start it again"));
             }
-            if running >= MAX_ACTIVE_JOBS {
-                return Err(ManagerError::invalid(format!("at most {MAX_ACTIVE_JOBS} video downloads can run at once")));
-            }
-            j.cancel = cancel.clone();
             j.pausing = false;
-            j.dto.status = MediaStatus::Preparing;
+            j.dto.status = MediaStatus::Queued;
             j.dto.error = None;
             j.dto.error_code = None;
             j.dto.notes.clear();
             j.dto.resumable = false;
-            track_time(&mut j.dto, now_ms());
             j.dto.clone()
         };
         self.emit(ManagerEvent::Media { job: dto.clone() });
-        let mgr = self.clone();
-        tokio::spawn(async move { mgr.run_media(id, cancel).await });
         Ok(dto)
     }
 
@@ -901,7 +1140,7 @@ impl DownloadManager {
                 if j.dto.status.is_active() {
                     j.pausing = false;
                     Act::Stop(j.cancel.clone())
-                } else if matches!(j.dto.status, MediaStatus::Paused | MediaStatus::Failed) {
+                } else if matches!(j.dto.status, MediaStatus::Paused | MediaStatus::Failed | MediaStatus::Queued) {
                     remove_work_dir(j);
                     j.work = None;
                     j.work_dir = None;
@@ -1174,6 +1413,7 @@ mod clock_tests {
             running_since_ms: Some(1_000),
             file_size: None,
             retries: 0,
+            playlist: None,
         }
     }
 

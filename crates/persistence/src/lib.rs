@@ -67,8 +67,16 @@ CREATE TABLE network_usage (
 );
 ";
 
+/// v9 (v2.0.0): the publisher's checksum (feature #6). `checksum_source`: where `downloads.checksum` came from, `NULL`
+/// for the user, `publisher:<list name>` for a list found next to the file (set once the file matched it).
+/// `history.verified`: how a finished file was proven (`user`, `publisher:<list name>`), `NULL` when it was not.
+const SCHEMA_V9: &str = "
+ALTER TABLE downloads ADD COLUMN checksum_source TEXT;
+ALTER TABLE history   ADD COLUMN verified        TEXT;
+";
+
 /// Applied in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8];
+const MIGRATIONS: &[&str] = &[SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9];
 const SCHEMA_VERSION: i32 = MIGRATIONS.len() as i32;
 
 const SCHEMA_V1: &str = "
@@ -153,6 +161,8 @@ pub struct HistoryEntry {
     pub size: Option<u64>,
     pub outcome: String,
     pub finished_at: i64,
+    /// How the file was proven: `user` (a checksum the user gave), `publisher:<list>` (the publisher's list), `None`.
+    pub verified: Option<String>,
 }
 
 /// Where a download sits in the Smart Download Queue (see `SCHEMA_V6`).
@@ -330,7 +340,7 @@ impl SqliteStore {
         let conn = self.conn();
         let mut st = conn
             .prepare(
-                "SELECT id, download_id, url, filename, destination, size, outcome, finished_at
+                "SELECT id, download_id, url, filename, destination, size, outcome, finished_at, verified
                  FROM history ORDER BY id DESC LIMIT ?1",
             )
             .map_err(db_err)?;
@@ -342,7 +352,7 @@ impl SqliteStore {
     pub fn history_entry(&self, id: i64) -> Result<Option<HistoryEntry>> {
         self.conn()
             .query_row(
-                "SELECT id, download_id, url, filename, destination, size, outcome, finished_at FROM history WHERE id = ?1",
+                "SELECT id, download_id, url, filename, destination, size, outcome, finished_at, verified FROM history WHERE id = ?1",
                 [id],
                 history_row,
             )
@@ -682,8 +692,8 @@ impl DownloadStore for SqliteStore {
                 tx.execute(
                     "INSERT INTO downloads (url, filename, destination, total_size, downloaded_size, status, etag,
                         last_modified, resumable, checksum, last_error, created_at, updated_at,
-                        priority, category, speed_limit, content_type, server, request_headers, part_stamp)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                        priority, category, speed_limit, content_type, server, request_headers, part_stamp, checksum_source)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
                     params![
                         rec.url,
                         rec.filename,
@@ -703,7 +713,8 @@ impl DownloadStore for SqliteStore {
                         rec.content_type,
                         rec.server,
                         headers,
-                        rec.part_stamp
+                        rec.part_stamp,
+                        rec.checksum_source
                     ],
                 )
                 .map_err(db_err)?;
@@ -715,7 +726,7 @@ impl DownloadStore for SqliteStore {
                         "UPDATE downloads SET url=?2, filename=?3, destination=?4, total_size=?5, downloaded_size=?6,
                             status=?7, etag=?8, last_modified=?9, resumable=?10, checksum=?11, last_error=?12,
                             updated_at=?13, priority=?14, category=?15, speed_limit=?16, content_type=?17, server=?18,
-                            request_headers=?19, part_stamp=?20 WHERE id=?1",
+                            request_headers=?19, part_stamp=?20, checksum_source=?21 WHERE id=?1",
                         params![
                             id,
                             rec.url,
@@ -736,7 +747,8 @@ impl DownloadStore for SqliteStore {
                             rec.content_type,
                             rec.server,
                             headers,
-                            rec.part_stamp
+                            rec.part_stamp,
+                            rec.checksum_source
                         ],
                     )
                     .map_err(db_err)?;
@@ -791,8 +803,9 @@ impl DownloadStore for SqliteStore {
         failpoint::hit("history.before");
         let conn = self.conn();
         conn.execute(
-            "INSERT INTO history (download_id, url, filename, destination, size, outcome, finished_at)
-             SELECT id, url, filename, destination, COALESCE(total_size, downloaded_size), 'completed', ?2
+            "INSERT INTO history (download_id, url, filename, destination, size, outcome, finished_at, verified)
+             SELECT id, url, filename, destination, COALESCE(total_size, downloaded_size), 'completed', ?2,
+                    CASE WHEN checksum IS NULL THEN NULL ELSE COALESCE(checksum_source, 'user') END
              FROM downloads WHERE id = ?1",
             params![id, now()],
         )
@@ -824,6 +837,7 @@ fn history_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
         size: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
         outcome: r.get(6)?,
         finished_at: r.get(7)?,
+        verified: r.get(8)?,
     })
 }
 
@@ -849,7 +863,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
         .query_row(
             "SELECT url, filename, destination, total_size, downloaded_size, status, etag, last_modified,
                     resumable, checksum, last_error, priority, category, speed_limit, content_type, server,
-                    request_headers, part_stamp
+                    request_headers, part_stamp, checksum_source
              FROM downloads WHERE id = ?1",
             [id],
             |r| {
@@ -874,6 +888,7 @@ fn load_locked(conn: &Connection, id: i64, sealer: Option<&secrets::Sealer>) -> 
                     server: r.get(15)?,
                     request_headers: decode_headers(r.get::<_, Option<String>>(16)?, sealer),
                     part_stamp: r.get(17)?,
+                    checksum_source: r.get(18)?,
                 })
             },
         )
@@ -935,6 +950,7 @@ mod tests {
             server: Some("nginx".into()),
             request_headers: vec![("referer".into(), "https://a.test/".into()), ("cookie".into(), "sid=1".into())],
             part_stamp: None,
+            checksum_source: None,
         }
     }
 
@@ -977,6 +993,27 @@ mod tests {
         let mut counts = s.status_counts().unwrap();
         counts.sort();
         assert_eq!(counts, vec![("downloading".to_string(), 1), ("paused".to_string(), 1)]);
+    }
+
+    #[test]
+    fn who_verified_a_file_is_kept_with_it_and_its_history_line() {
+        let d = tmp("verified");
+        let s = SqliteStore::open(d.join("v.db")).unwrap();
+        let mut a = rec(d.join("a"));
+        a.checksum = Some(format!("sha256:{}", "a".repeat(64)));
+        a.checksum_source = Some("publisher:SHA256SUMS".into());
+        let a = s.save(&a).unwrap();
+        let mut b = rec(d.join("b"));
+        b.checksum = Some(format!("sha256:{}", "b".repeat(64)));
+        let b = s.save(&b).unwrap();
+        let c = s.save(&DownloadRecord { checksum: None, ..rec(d.join("c")) }).unwrap();
+        assert_eq!(s.load(a).unwrap().unwrap().checksum_source.as_deref(), Some("publisher:SHA256SUMS"));
+        for id in [a, b, c] {
+            s.complete(id).unwrap();
+        }
+        let h = s.history(10).unwrap();
+        let by = |id: i64| h.iter().find(|x| x.download_id == Some(id)).unwrap().verified.clone();
+        assert_eq!((by(a).as_deref(), by(b).as_deref(), by(c)), (Some("publisher:SHA256SUMS"), Some("user"), None));
     }
 
     #[test]

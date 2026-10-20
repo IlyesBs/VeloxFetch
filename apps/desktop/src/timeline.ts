@@ -92,6 +92,10 @@ const RULES: Rule[] = [
   [/^New transfer over one connection$/, () => t("tl.plannedOne")],
   [/^The name was taken meanwhile: saved as (.+)$/, (m) => t("tl.renamed", { name: m[1]! })],
   [/^The server is preparing the file \(it answers when it is ready\): waiting for it$/, () => t("tl.waiting")],
+  [/^Checking the file against the publisher's checksum \((.+)\)$/, (m) => t("tl.verifyingPublisher", { list: m[1]! })],
+  [/^Checking the file against the checksum you gave$/, () => t("tl.verifyingYou")],
+  [/^The file matches the publisher's checksum \((.+)\)$/, (m) => t("tl.verifiedPublisher", { list: m[1]! })],
+  [/^The file matches the checksum you gave$/, () => t("tl.verifiedYou")],
   [
     /^The saved part changed since it was last saved \(a crash or an outside change\): (\d+) finished parts checked again, all intact(?:; (\d+) older parts could not be checked)?$/,
     (m) => t("tl.reverifiedOk", { n: m[1]! }) + (m[2] ? ` ${t("tl.reverifiedOld", { n: m[2] })}` : ""),
@@ -100,6 +104,7 @@ const RULES: Rule[] = [
     /^The saved part changed since it was last saved: (\d+) of (\d+) finished parts no longer match their check and are downloaded again \((.+)\)$/,
     (m) => t("tl.reverifiedBad", { bad: m[1]!, n: m[2]!, size: m[3]! }),
   ],
+  [/^Trying again on its own \(try (\d+) of (\d+)\)$/, (m) => t("tl.autoRetry", { n: m[1]!, total: m[2]! })],
   [/^New link: the download starts from it \(nothing was saved yet\)$/, () => t("tl.linkFresh")],
   [/^New link: the same file \(confirmed by the server and by the saved bytes\)\. Continuing from (\d+) bytes$/, (m) => t("tl.linkSame", { n: m[1]! })],
   [/^New link: likely the same file \(the saved bytes match; chosen by the user\)\. Continuing from (\d+) bytes$/, (m) => t("tl.linkLikely", { n: m[1]! })],

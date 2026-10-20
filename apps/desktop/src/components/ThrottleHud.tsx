@@ -9,6 +9,7 @@ import {
   THROTTLE_LEVELS,
   THROTTLE_MODES as MODES,
   throttleLevel,
+  gameOn,
   throttleOn,
   throttleStatus,
   throttleStore,
@@ -52,7 +53,11 @@ export function ThrottleHud({
   // The active profile sets the level (Fast, or Balanced's Smart): change the profile instead.
   const byProfile = s?.profileAdaptive === false || (s?.profileAdaptive === true && !s.enabled);
   const profileTip = s?.profileAdaptive === false ? t("prof.smartFast") : t("prof.smartByProfile");
-  const limiting = on && s?.limitBps != null;
+  // Several networks at once is on: Smart throttle stays off (every network at full speed) until it is turned off.
+  const held = !!s?.heldByNetworks;
+  const lockTip = held ? t("multi.smartHeld") : byProfile ? profileTip : undefined;
+  // Game mode applies whatever the level: the gauge shows its cap too.
+  const limiting = (on || gameOn(s)) && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
   // Live: the cap against the speed downloads usually get (the share they keep right now).
   const shown = gaugeShare(s);
@@ -144,8 +149,8 @@ export function ThrottleHud({
         className={`hud-core absolute grid place-items-center rounded-full text-accent ${side ? "inset-[30px]" : "inset-[26px] border border-line bg-raised"} ${limiting ? "hud-live" : ""}`}
         aria-pressed={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
-        title={byProfile ? profileTip : t("hud.gauge", { p: pct })}
-        disabled={!s || byProfile}
+        title={lockTip ?? t("hud.gauge", { p: pct })}
+        disabled={!s || byProfile || held}
         data-testid="hud-toggle"
         onClick={toggle}
       >
@@ -185,8 +190,8 @@ export function ThrottleHud({
           role="radio"
           aria-checked={level === l.level}
           className="mode-btn"
-          title={byProfile ? profileTip : t(`lvl.${l.level}Hint`)}
-          disabled={!s || byProfile}
+          title={lockTip ?? t(`lvl.${l.level}Hint`)}
+          disabled={!s || byProfile || held}
           data-testid={`hud-level-${l.level}`}
           onClick={() => choose(l.level)}
         >
@@ -211,7 +216,7 @@ export function ThrottleHud({
               name,
               k: keepWhileActive(m.share),
             })}
-            disabled={!s || byProfile}
+            disabled={!s || byProfile || held}
             data-testid={`hud-mode-${m.share}`}
             onClick={() => pick(m.share, name)}
           >
@@ -240,8 +245,8 @@ export function ThrottleHud({
         aria-checked={on}
         aria-label={on ? t("hud.toggleOff") : t("hud.toggleOn")}
         className="switch"
-        title={byProfile ? profileTip : undefined}
-        disabled={!s || byProfile}
+        title={lockTip}
+        disabled={!s || byProfile || held}
         data-testid="hud-switch"
         onClick={toggle}
       />

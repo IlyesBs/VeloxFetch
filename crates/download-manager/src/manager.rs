@@ -20,10 +20,14 @@ mod doctor;
 mod files;
 mod intelligence;
 mod media;
+mod multinet;
 mod network;
+mod recovery;
+pub(crate) use recovery::{DELAYS as RECOVERY_DELAYS, MAX_TRIES as RECOVERY_MAX_TRIES};
 mod pending;
 mod preview;
 mod profiles;
+mod publisher;
 mod queue;
 mod queues;
 mod relink;
@@ -121,6 +125,8 @@ struct Inner {
     session_bytes: AtomicU64,
     /// Network usage, saved per day (`usage.rs`).
     usage: usage::Usage,
+    /// The publisher's checksum lookups (`publisher.rs`).
+    publisher: publisher::Lookups,
     /// Ticks still to send after the last download stopped, so the UI settles on zeros.
     idle_ticks: AtomicU8,
     stats: Mutex<Stats>,
@@ -151,6 +157,10 @@ struct Inner {
     /// Seals secrets kept in the settings (the proxy password). `None`: they stay in memory only.
     sealer: Option<Arc<secrets::Sealer>>,
     network: Mutex<network::Network>,
+    /// Several networks at once (`multinet.rs`).
+    multinet: Mutex<multinet::MultiNet>,
+    /// Failed downloads tried again on their own (`recovery.rs`), in memory only.
+    recovery: Mutex<recovery::Recovery>,
     /// Serialises gate changes (pause/resume queue, schedule boundaries).
     queue_lock: tokio::sync::Mutex<()>,
     /// Serialises Smart throttle's pause policy holding / letting go of the queue.
@@ -276,6 +286,7 @@ impl DownloadManager {
         let (events, _) = broadcast::channel(1024);
         let media_http = std::sync::RwLock::new(media::client(&client_cfg)?);
         let smart = smart_throttle::SmartState::load(&store);
+        let multinet = multinet::MultiNet::load(&store);
         let inner = Arc::new(Inner {
             cfg,
             store,
@@ -288,6 +299,7 @@ impl DownloadManager {
             events,
             session_bytes: AtomicU64::new(0),
             usage: Default::default(),
+            publisher: Default::default(),
             idle_ticks: AtomicU8::new(0),
             stats: Mutex::new(Stats { dirty: true, ..Default::default() }),
             disk: Mutex::new(DiskStats::default()),
@@ -307,6 +319,8 @@ impl DownloadManager {
             media_http,
             sealer: settings_sealer,
             network: Mutex::new(network),
+            multinet: Mutex::new(multinet),
+            recovery: Mutex::new(Default::default()),
             queue_lock: tokio::sync::Mutex::new(()),
             game_hold_lock: tokio::sync::Mutex::new(()),
             diag_lock: tokio::sync::Mutex::new(()),
@@ -323,12 +337,19 @@ impl DownloadManager {
         // The active Download Profile's values over the user's settings, in force before anything starts.
         mgr.apply_profile();
         mgr.apply_saved_logging();
+        mgr.resume_game_mode();
         mgr.spawn_ticker();
         // First evaluation happens here, not in the background loop, so "what to do at launch" is
         // decided exactly once and can never race with the first user command.
         mgr.reconcile().await;
         mgr.evaluate_queues().await;
         mgr.spawn_queue_loop();
+        // The networks to spread over, read off the start (the queue loop reads them again while it is on).
+        if mgr.inner.multinet.lock().unwrap_or_else(|p| p.into_inner()).on {
+            mgr.hold_smart_for_networks(true);
+            let m = mgr.clone();
+            tokio::spawn(async move { m.refresh_networks(true).await });
+        }
         mgr.spawn_update_checks();
         Ok(mgr)
     }
@@ -437,6 +458,7 @@ impl DownloadManager {
             server: None,
             request_headers,
             part_stamp: None,
+            checksum_source: None,
         };
         let id = self.save(&rec).await?;
         self.place_new(id, req.queue_id, start_at).await;
@@ -471,6 +493,7 @@ impl DownloadManager {
 
     /// Start a queued, paused or failed download (idempotent if it is already running).
     pub async fn start_download(&self, id: i64) -> Result<DownloadDto, ManagerError> {
+        self.forget_recovery(id); // the user's try: its own tries count anew if it fails again
         self.user_took_over(id).await;
         let dto = self.start_inner(id).await?;
         self.inner.queue.lock().unwrap().note_user_start();
@@ -510,6 +533,7 @@ impl DownloadManager {
             return Err(e);
         }
         self.policy_for_new_run(id, rec.priority);
+        self.look_for_publisher_checksum(id, &rec, &control, &progress);
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Updated { download: dto.clone() });
         self.note_start(id, previous).await;
@@ -542,6 +566,8 @@ impl DownloadManager {
         self.inner.queue.lock().unwrap().note_user_pause();
         self.user_took_over(id).await;
         self.forget_held(id).await;
+        let was_recovering = self.auto_retry_of(id).is_some();
+        self.forget_recovery(id);
         match self.active_handle(id) {
             Some((control, mut done)) => {
                 control.pause();
@@ -552,7 +578,8 @@ impl DownloadManager {
                 match rec.status {
                     DownloadStatus::Paused => {}
                     // Added without starting: nothing runs, so pausing just keeps the schedule from starting it.
-                    DownloadStatus::Queued => {
+                    // Failed and waiting to be tried again on its own: pausing stops the tries, the bytes stay.
+                    DownloadStatus::Queued | DownloadStatus::Failed if rec.status == DownloadStatus::Queued || was_recovering => {
                         rec.status = DownloadStatus::Paused;
                         self.save(&rec).await?;
                         let dto = self.dto_for(id).await?;
@@ -568,6 +595,7 @@ impl DownloadManager {
 
     /// Cancel discards the partial file for good; the download cannot be resumed.
     pub async fn cancel_download(&self, id: i64) -> Result<DownloadDto, ManagerError> {
+        self.forget_recovery(id);
         match self.active_handle(id) {
             Some((control, mut done)) => {
                 control.cancel();
@@ -605,6 +633,7 @@ impl DownloadManager {
     /// gets a free name ("name (1).ext"). Any partial data is discarded; the record (queue, priority, limits)
     /// is kept. A download that is running, paused or waiting is refused: it already continues.
     pub async fn redownload(&self, id: i64) -> Result<DownloadDto, ManagerError> {
+        self.forget_recovery(id);
         let mut rec = self.load(id).await?;
         if self.is_active(id) || !matches!(rec.status, DownloadStatus::Completed | DownloadStatus::Cancelled | DownloadStatus::Failed) {
             return Err(ManagerError::InvalidState { action: "download again", status: rec.status });
@@ -633,6 +662,7 @@ impl DownloadManager {
     /// file is always removed; the finished file is only deleted when `delete_file` is set *and* it
     /// lies inside the download folder.
     pub async fn delete_download(&self, id: i64, delete_file: bool) -> Result<(), ManagerError> {
+        self.forget_recovery(id);
         if let Some((control, mut done)) = self.active_handle(id) {
             control.cancel();
             let _ = tokio::time::timeout(Duration::from_secs(15), done.wait_for(|d| *d)).await;
@@ -792,6 +822,7 @@ impl DownloadManager {
                 size: h.size,
                 outcome: h.outcome,
                 finished_at: h.finished_at,
+                verify: h.verified.as_deref().map(|v| VerifyDto::from_source("verified", None, (v != "user").then_some(v))),
             })
             .collect())
     }
@@ -848,6 +879,7 @@ impl DownloadManager {
             ended
         };
         let tracker = self.inner.trackers.lock().unwrap().remove(&id);
+        self.forget_publisher_lookup(id);
         let (last, peak) = tracker.map_or((0, 0), |t| (t.last_received, t.peak));
         if let Some(a) = &ended {
             self.count_received(a.progress.received().saturating_sub(last));
@@ -868,6 +900,11 @@ impl DownloadManager {
                     })
                     .await;
             }
+        }
+        // A failure the network or the server may get over: tried again on its own (`recovery.rs`).
+        match &res {
+            Err(e) if !matches!(e, DownloadError::Paused | DownloadError::Cancelled) => self.recover_later(id, &e.to_string()),
+            _ => self.recovered(id),
         }
         if let Ok(dto) = self.dto_for(id).await {
             self.emit(ManagerEvent::Updated { download: dto });
@@ -925,6 +962,7 @@ impl DownloadManager {
         };
         let retrying = retrying && rec.status == DownloadStatus::Downloading;
         let place = self.placement_of(id);
+        let auto_retry = if rec.status == DownloadStatus::Failed { self.auto_retry_of(id) } else { None };
         let speed = self.inner.trackers.lock().unwrap().get(&id).map_or(0.0, |t| t.speed);
         let (downloaded, total, connections) = match &live {
             Some(s) if !s.segments.is_empty() => {
@@ -963,9 +1001,38 @@ impl DownloadManager {
             start_at: place.start_at,
             retrying,
             held: rec.status == DownloadStatus::Paused && self.held_by_queue(id),
-            doctor: self.doctor_for(rec, progress.as_ref(), retrying),
+            doctor: self.doctor_for(rec, progress.as_ref(), retrying).map(|mut d| {
+                // Tried again on its own: the Doctor says when.
+                if let Some(a) = auto_retry.as_ref() {
+                    d.retry_at_ms = a.at_ms.or(d.retry_at_ms);
+                }
+                d
+            }),
             // A link counts as present (never followed); only an absent path is "missing".
             file_missing: rec.status == DownloadStatus::Completed && std::fs::symlink_metadata(&rec.destination).is_err(),
+            auto_retry,
+            verify: self.verify_of(rec, running),
+        }
+    }
+
+    /// What the card says about the file's integrity (feature #6).
+    fn verify_of(&self, rec: &DownloadRecord, running: bool) -> Option<VerifyDto> {
+        let own = || VerifyDto::from_source("ready", rec.checksum.as_deref(), None);
+        match rec.status {
+            DownloadStatus::Completed => {
+                rec.checksum.as_ref().map(|c| VerifyDto::from_source("verified", Some(c), rec.checksum_source.as_deref()))
+            }
+            _ if rec.checksum.is_some() && rec.checksum_source.is_none() => Some(own()),
+            _ if running => match self.publisher_lookup_of(rec.id.unwrap_or_default())? {
+                downloader_core::PublisherLookup::Looking => {
+                    Some(VerifyDto { state: "looking".into(), by: Some("publisher".into()), algo: None, list: None })
+                }
+                downloader_core::PublisherLookup::Found { checksum, list } => {
+                    Some(VerifyDto::from_source("ready", Some(&checksum.to_string()), Some(&format!("publisher:{list}"))))
+                }
+                downloader_core::PublisherLookup::None => None,
+            },
+            _ => None,
         }
     }
 
@@ -1120,6 +1187,7 @@ impl DownloadManager {
         let root = self.inner.storage.lock().unwrap_or_else(|p| p.into_inner()).root.clone();
         self.inner.sysio.refresh(root);
         let io = self.inner.sysio.rates();
+        let networks = self.network_speeds(media_speed, speed_bps + media_speed > 0 || count("downloading") > 0 || media_running > 0);
         let disk = self.inner.disk.lock().unwrap();
         MetricsDto {
             speed_bps: speed_bps + media_speed,
@@ -1142,6 +1210,7 @@ impl DownloadManager {
             disk_read_bps: io.disk_read,
             disk_write_bps: io.disk_write,
             io_sample: io.sample,
+            networks,
         }
     }
 

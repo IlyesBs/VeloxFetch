@@ -23,7 +23,7 @@ import { check, createHarness, exe, fail, finish, path, sleep, waitFor } from ".
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
 const HOST = path.join(path.dirname(APP), exe("velox-native-host"));
 const SHOTS = path.resolve("docs/screenshots");
-const ID = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(fs.readFileSync("crates/browser-bridge/src/caller.rs", "utf8"))[1];
+const ID = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(fs.readFileSync("crates/browser-bridge/src/generated/identity.rs", "utf8"))[1];
 const STORE_ORIGIN = `chrome-extension://${ID}/`;
 const WAIT_MS = 5000;
 

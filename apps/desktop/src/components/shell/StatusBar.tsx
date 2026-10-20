@@ -1,12 +1,14 @@
 import { formatBytes, formatSpeed } from "../../format";
 import { useStore } from "../../hooks";
 import { useT } from "../../i18n";
-import { throttleOn, throttleStatus, useThrottle } from "../../throttle";
+import { gameOn, throttleOn, throttleStatus, useThrottle } from "../../throttle";
 import { Icon } from "../../ui/icons";
+import { GameModeButton } from "../GameMode";
+import { MultiNetworkBadge } from "../MultiNetworkCard";
 import { ProfileSwitch } from "../ProfilesSettings";
 import { updateLine } from "../UpdateSettings";
 
-/** The footer across the window: engine state, counts, the total, live speed, Smart throttle, free space, updates. */
+/** The footer across the window: engine state, counts, the total, live speed, Game mode, Smart throttle, free space, updates. */
 export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
   const t = useT();
   const ready = useStore((s) => s.ready);
@@ -32,11 +34,12 @@ export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
       </span>
       <span className="sep" />
       <span className="num">{t("foot.inQueue", { n: m.queued })}</span>
-      <span className="sep hidden sm:block" />
-      <span className="num hidden sm:inline">
+      {/* Narrow windows keep what matters most (counts, speed, Game mode); long languages never push anything out. */}
+      <span className="sep hidden md:block" />
+      <span className="num hidden md:inline">
         {t("foot.downloaded", { size: formatBytes(m.totalDownloaded) })}
       </span>
-      <span className="sep hidden md:block" />
+      <span className="sep" />
       <span
         className="num ltr flex items-center gap-1 text-fg/80"
         data-testid="status-speed"
@@ -44,11 +47,19 @@ export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
         <Icon name="arrowDown" size={13} className="text-accent" />
         {formatSpeed(m.speedBps)}
       </span>
-      <span className="sep hidden sm:block" />
-      <span className="hidden sm:flex">
+      {m.networks && (
+        <>
+          <span className="sep hidden sm:block" />
+          <MultiNetworkBadge compact />
+        </>
+      )}
+      <span className="sep hidden md:block" />
+      <span className="hidden md:flex">
         <ProfileSwitch />
       </span>
-      {throttle && throttleOn(throttle) && (
+      <span className="sep" />
+      <GameModeButton />
+      {throttle && throttleOn(throttle) && !gameOn(throttle) && (
         <span
           className="flex min-w-0 items-center gap-1 truncate font-medium text-accent"
           data-testid="status-throttle"
@@ -90,7 +101,7 @@ export function StatusBar({ onUpdates }: { onUpdates?: () => void }) {
         title={t("foot.private")}
       >
         <Icon name="shield" size={17} className="text-ok" />
-        <span className="hidden md:inline">{t("foot.private")}</span>
+        <span className="hidden xl:inline">{t("foot.private")}</span>
       </span>
     </footer>
   );

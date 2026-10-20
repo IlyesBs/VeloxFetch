@@ -165,6 +165,50 @@ pub struct DownloadDto {
     pub doctor: Option<crate::doctor::Diagnosis>,
     /// Completed, but its file is no longer on disk (deleted or moved by hand): the UI offers "Download again".
     pub file_missing: bool,
+    /// Failed because of the network or a server's passing trouble: it is tried again on its own (`recovery.rs`).
+    pub auto_retry: Option<AutoRetryDto>,
+    /// Integrity (feature #6): the checksum it is (or was) checked against, and by whom. `None`: no checksum.
+    pub verify: Option<VerifyDto>,
+}
+
+/// A download's integrity check, for its card, the Completed list and the details page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyDto {
+    /// `looking` (the publisher's list is being looked for), `ready` (a checksum is known: the file is checked
+    /// before it is finished) or `verified` (finished, and it matched).
+    pub state: String,
+    /// `publisher` (the list next to the file on the site) or `you` (a checksum given when it was added).
+    pub by: Option<String>,
+    /// `SHA-256` / `SHA-512`.
+    pub algo: Option<String>,
+    /// The publisher's list's name (`SHA256SUMS`), never its address.
+    pub list: Option<String>,
+}
+
+impl VerifyDto {
+    /// From a stored checksum (`sha256:<hex>`) and where it came from (`None` the user, `publisher:<list>`).
+    pub fn from_source(state: &str, checksum: Option<&str>, source: Option<&str>) -> Self {
+        let algo = checksum
+            .and_then(|c| c.split_once(':'))
+            .map(|(a, _)| if a.eq_ignore_ascii_case("sha512") { "SHA-512" } else { "SHA-256" }.to_string());
+        let list = source.and_then(|s| s.strip_prefix("publisher:")).map(str::to_string);
+        let by = Some(if source.is_some_and(|s| s.starts_with("publisher")) { "publisher" } else { "you" }.to_string());
+        Self { state: state.to_string(), by, algo, list }
+    }
+}
+
+/// When a failed download is tried again on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRetryDto {
+    /// The next try (ms since 1970); `None` while waiting for the network.
+    pub at_ms: Option<u64>,
+    /// The computer is offline: the download starts as soon as it is back online.
+    pub waiting_for_network: bool,
+    /// Tries already made on its own, and the most it makes.
+    pub tries: u32,
+    pub max_tries: u32,
 }
 
 /// One chunk of a download, for the segment monitor.
@@ -215,6 +259,8 @@ pub struct HistoryDto {
     pub kind: downloader_core::FileKind,
     /// The file is still where it was saved.
     pub exists: bool,
+    /// Proven by a checksum (feature #6): `None` when it was not.
+    pub verify: Option<VerifyDto>,
 }
 
 /// A saved file to show in its folder or open: a download of the list, or a line of the history.
@@ -275,6 +321,46 @@ pub struct NetworkDto {
     pub default_user_agent: String,
     /// The proxy password is sealed on disk (false: it is kept in memory only, until the app closes).
     pub secrets_protected: bool,
+}
+
+/// Several networks at once, as shown in Settings > Network.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiNetworkDto {
+    pub enabled: bool,
+    /// On, but nothing is spread: `vpn` (the system's route to the internet goes through a VPN or another tunnel),
+    /// `proxy` (a proxy carries everything).
+    pub blocked: Option<String>,
+    /// The computer's networks now.
+    pub networks: Vec<NetworkLaneDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkLaneDto {
+    /// As the system calls it ("Wi-Fi", "enp5s0"...). Never an address. The key the user's choices are saved by.
+    pub name: String,
+    /// What it is: the UI names it by that ("Wi-Fi", "Phone (USB)"...), the system's name when `other`.
+    pub kind: system_integration::AdapterKind,
+    /// The system's own route to the internet leaves from it.
+    pub main: bool,
+    /// Not left out by the user.
+    pub chosen: bool,
+    /// What it is doing, while downloads are spread over it (`None`: not used now).
+    pub state: Option<http_client::LaneState>,
+    /// Connections open through it now.
+    pub active: usize,
+    /// Bytes received through it since the app started.
+    pub bytes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetMultiNetwork {
+    pub enabled: bool,
+    /// Names of the networks left out.
+    #[serde(default)]
+    pub skip: Vec<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -353,11 +439,24 @@ pub struct DiagnosticsDto {
     pub active_secs: u64,
     /// Bytes received from the network over every attempt (a restart counts again).
     pub transferred: u64,
+    /// Bytes received through each network, when several were used at once (else empty).
+    pub networks: Vec<NetworkShareDto>,
     pub events: Vec<DiagEventDto>,
     /// Download Doctor's diagnosis of the last failure (with every piece of evidence the failure left), while it is failed.
     pub doctor: Option<crate::doctor::Diagnosis>,
     /// Plain-text summary for a bug report.
     pub report: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkShareDto {
+    /// The system's name for it (shown when its kind is not known).
+    pub name: String,
+    pub bytes: u64,
+    /// What it is (Wi-Fi, a phone...), when the system says; the UI names it by that.
+    #[serde(default)]
+    pub kind: Option<system_integration::AdapterKind>,
 }
 
 /// A line of the application log (already redacted).
@@ -423,6 +522,41 @@ pub struct MetricsDto {
     pub disk_write_bps: Option<u64>,
     /// Number of the network / disk reading above (changes about once a second while someone looks).
     pub io_sample: u64,
+    /// Several networks at once is on: what each network brings now (`None` while it is off).
+    pub networks: Option<NetworkSpeedsDto>,
+}
+
+/// Several networks at once, live: the dashboard's indicator and card.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSpeedsDto {
+    /// On, but nothing is spread: `vpn`, `proxy` (as [`MultiNetworkDto::blocked`]).
+    pub blocked: Option<String>,
+    /// The chosen networks, and the usual one (the system's route) even when left out: downloads that are not spread
+    /// use it.
+    pub networks: Vec<NetworkSpeedDto>,
+    /// What downloads receive through the system's route when none of the networks carries it (a VPN), bytes/s.
+    pub other_bps: u64,
+    /// The sum of every network's speed (and `other_bps`), bytes/s.
+    pub total_bps: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkSpeedDto {
+    /// As in Settings: the system's name, never an address.
+    pub name: String,
+    pub kind: system_integration::AdapterKind,
+    /// The system's own route to the internet leaves from it.
+    pub main: bool,
+    /// Not left out by the user (the usual network is listed even when left out: what is not spread goes through it).
+    pub chosen: bool,
+    /// What it is doing (`None`: not used yet).
+    pub state: Option<http_client::LaneState>,
+    /// Connections open through it now.
+    pub connections: usize,
+    /// What downloads receive through it now, bytes/s (smoothed over about a second).
+    pub speed_bps: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -578,6 +712,34 @@ pub struct MediaRequest {
     pub pending: Option<u64>,
 }
 
+/// Download videos of a playlist read by `analyze_media` (`MediaAnalysisDto::playlist_key`). The UI chooses videos by
+/// their position in that playlist: it never supplies a link, a path or a command.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlaylistRequest {
+    pub key: String,
+    /// Positions (`PlaylistEntry::index`) of the videos to download, in any order; each at most once.
+    pub items: Vec<u32>,
+    /// One of `media_engine::PLAYLIST_QUALITIES` (`None` = the best), for every video.
+    pub quality: Option<String>,
+    /// `mp4`, `mkv`, `webm`, `mp3`, `m4a` or `opus`; `None` = MP4 (MP3 for "audio").
+    pub format: Option<String>,
+    /// Sub-folder inside the download folder; `None` = the playlist's name inside the videos folder.
+    pub subdir: Option<String>,
+    /// The browser's waiting video the playlist was read from: it leaves the waiting list.
+    pub pending: Option<u64>,
+}
+
+/// Where a video job comes from when it is one video of a playlist.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistTag {
+    pub title: String,
+    /// Its position in the playlist, and how many were chosen with it.
+    pub index: u32,
+    pub count: u32,
+}
+
 /// What `analyze_media` tells the UI.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -586,6 +748,8 @@ pub struct MediaAnalysisDto {
     pub analysis: media_engine::Analysis,
     /// ffmpeg was found, so separate video and audio can be joined.
     pub combine_available: bool,
+    /// The link is a playlist: the key `start_playlist` takes to download its videos (kept 30 minutes).
+    pub playlist_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -599,6 +763,8 @@ pub enum MediaStatus {
     Cancelled,
     /// Stopped by the user; Resume continues from what is already downloaded.
     Paused,
+    /// Waiting for a free place (a few video downloads run at once): starts on its own, in order.
+    Queued,
 }
 
 impl MediaStatus {
@@ -662,6 +828,8 @@ pub struct MediaJobDto {
     pub file_size: Option<u64>,
     /// How many times the app tried again on its own after the site or the network failed part-way.
     pub retries: u32,
+    /// One video of a playlist.
+    pub playlist: Option<PlaylistTag>,
 }
 
 /// Smart throttle: slow downloads down while a game or a call runs (see `manager/smart_throttle.rs`).
@@ -682,7 +850,7 @@ pub struct SmartThrottleDto {
     pub auto: bool,
     /// The least downloads keep, whatever happens (bytes/s): they never stop.
     pub min_bps: u64,
-    /// What it is doing now: `off`, `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`, `checking` (a
+    /// What it is doing now: `off`, `game` (Game mode), `fullIdle`, `fullFree`, `browsing`, `busy`, `app`, `easing`, `unknown`, `checking` (a
     /// few seconds slower to see whether another program wants the line), `programsOnly` (automatic mode off).
     pub reason: String,
     /// The computer's other download traffic (smoothed by nothing: the last reading), when known.
@@ -703,6 +871,35 @@ pub struct SmartThrottleDto {
     /// The active Download Profile sets the automatic mode (`true` also turns Smart throttle on); `None`: it leaves
     /// Smart throttle as the user set it (`enabled` / `auto` are always the user's own switches).
     pub profile_adaptive: Option<bool>,
+    /// Off because several networks at once is on (every network at full speed); the user's switch is kept.
+    pub held_by_networks: bool,
+    /// Game mode (turned on in one click; the gaming policy applies until it ends).
+    pub game_mode: GameModeDto,
+}
+
+/// Game mode: on in one click from the status bar, the banner, the tray or Ctrl+G; the gaming policy (`game_policy`)
+/// applies now, whatever level is chosen and whatever runs, until it ends.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameModeDto {
+    pub on: bool,
+    /// When it ends (Unix milliseconds); `None` while on: when the user turns it off.
+    pub until_ms: Option<i64>,
+    /// How long one click turns it on for (minutes; `0` = until turned off).
+    pub minutes: u32,
+}
+
+/// Turn Game mode on or off, make it longer, or set how long one click turns it on for.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetGameMode {
+    pub on: Option<bool>,
+    /// With `on: true`: for this long (minutes; `0` = until turned off); the usual time when left out.
+    pub minutes: Option<u32>,
+    /// Longer by this much (minutes); turns it on for that long when it was off.
+    pub add_minutes: Option<u32>,
+    /// How long one click turns it on for from now on (minutes; `0` = until turned off).
+    pub default_minutes: Option<u32>,
 }
 
 /// What downloads do while a listed program (a game, a call) runs. Nothing the user set is changed: the policy is
@@ -1243,6 +1440,16 @@ pub struct ManagerConfig {
     pub app_launcher: Option<PathBuf>,
     /// Updates (`None`: this copy never checks; tests and the command-line tool).
     pub update: Option<UpdateConfig>,
+    /// Waits before a failed download is tried again on its own (the last one repeats; `recovery.rs`).
+    pub recovery_delays: Vec<std::time::Duration>,
+    /// Tries on its own at most while the network is up (0: never).
+    pub recovery_max_tries: u32,
+    /// Tests only: these networks instead of the computer's for "several networks at once" (`multinet.rs`; the
+    /// first is the main one).
+    pub test_networks: Option<Vec<http_client::RouteSpec>>,
+    /// Tests only: the publisher's checksum is looked for next to plain `http` links too (the test servers are
+    /// local, plain http). Never set by a release build: there, `https` links only.
+    pub publisher_over_http: bool,
 }
 
 impl ManagerConfig {
@@ -1270,6 +1477,10 @@ impl ManagerConfig {
             log: None,
             app_launcher: None,
             update: None,
+            recovery_delays: crate::manager::RECOVERY_DELAYS.to_vec(),
+            recovery_max_tries: crate::manager::RECOVERY_MAX_TRIES,
+            test_networks: None,
+            publisher_over_http: false,
         }
     }
 }

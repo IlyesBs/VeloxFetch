@@ -77,7 +77,7 @@ try {
   await waitFor(async () => (await phase()) === "failed", "the first automatic check", 20000);
   const refused = await text("[data-testid=update-status]");
   check("a manifest signed by another key is refused, in words", /signature is not valid/.test(refused), refused);
-  check("nothing is offered for download then", !(await has("[data-testid=update-download]")));
+  check("nothing is offered to install then", !(await has("[data-testid=update-now]")));
   check("the status bar says nothing about an update then", !(await has("[data-testid=status-update]")));
 
   // The real signature: found.
@@ -89,17 +89,19 @@ try {
   check("the status bar tells it", (await text("[data-testid=status-update]")).includes(`Update ${VERSION} available`), await text("[data-testid=status-update]"));
   await h.screenshot(path.join(SHOTS, "settings-updates.png"), { width: 1100, height: 760 });
 
-  // Download and verify.
-  await click("[data-testid=update-download]");
-  await waitFor(async () => (await phase()) === "ready", "the download to be verified", 30000);
-  check("the update is downloaded and verified", (await text("[data-testid=update-status]")).includes("downloaded and verified"), await text("[data-testid=update-status]"));
-  check("the status bar says it is ready", (await text("[data-testid=status-update]")).includes(`Update ${VERSION} ready`));
+  // One button, one click: it downloads the verified package and then hands it to the installer. There is no
+  // separate "download" step and no "install" step, and no browser or file download by hand.
+  check(
+    "the button is a single Update now, with no separate download or install step",
+    (await text("[data-testid=update-now]")).includes("Update now") && !(await has("[data-testid=update-download]")) && !(await has("[data-testid=update-install]")),
+    await text("[data-testid=update-now]"),
+  );
+  await click("[data-testid=update-now]");
+  await waitFor(() => has("[data-testid=update-opened]"), "download, verify and the dry-run install", 40000);
   const saved = path.join(h.dataDir, "updates", KIND[2]);
-  check("the package is kept in the app's own folder, byte for byte", fs.existsSync(saved) && crypto.createHash("sha256").update(fs.readFileSync(saved)).digest("hex") === pkgSrv.sha, saved);
-  check("the install button names what happens", /Install and restart|Open the installer/.test(await text("[data-testid=update-install]")));
-  await click("[data-testid=update-install]");
-  await waitFor(() => has("[data-testid=update-opened]"), "the dry-run install", 10000);
-  check("installing is handed over (a dry run in tests: nothing installed)", true);
+  check("the package was downloaded and kept in the app's own folder, byte for byte", fs.existsSync(saved) && crypto.createHash("sha256").update(fs.readFileSync(saved)).digest("hex") === pkgSrv.sha, saved);
+  check("the status bar reflects the ready update", (await text("[data-testid=status-update]")).includes(`Update ${VERSION}`), await text("[data-testid=status-update]"));
+  check("installing is handed over by the one click (a dry run in tests: nothing installed)", true);
 
   // The status bar opens Settings > Updates.
   await click("[data-testid=nav-downloads]");

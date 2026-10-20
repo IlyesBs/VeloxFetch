@@ -1,0 +1,41 @@
+# VeloxFetch — build-time configuration (the single source of truth for the project's identity).
+#
+# These values identify the project to the outside world and are what the app *trusts*:
+#   * where it looks for its own updates (the public download repository), and
+#   * which browser extensions may drive the native messaging host.
+#
+# They are baked into the signed binary and the installers at BUILD time; the app never reads
+# this file at run time. That is deliberate: if the running app read these from a file on disk,
+# anyone on the machine (or malware) could repoint the update URL at a hostile server, or add a
+# rogue extension id to the trusted list. Keeping them compiled in is what protects an install on
+# an unknown computer.
+#
+# To change any of them: edit here, then run `node scripts/gen-config.mjs`. A test
+# (tests/security/config.test.mjs) fails the build if the generated files or the two install
+# scripts have drifted from this file, and names exactly what to update.
+
+# The product name (update feed query, window/report labels that use the bare product name).
+product: VeloxFetch
+
+# The PUBLIC download repository on GitHub (the source repository is private). The release page,
+# the update feed (latest.json) and the update packages are all derived from owner/repo below.
+releases_owner: IlyesBs
+releases_repo: VeloxFetch-releases
+
+# Browser extension identity.
+# The unpacked / developer-mode build, fixed by the public key in the extension's manifest.
+chrome_extension_id: gbcanjaaelioalfdggkhbbnbinmfgdbc
+# The Chrome Web Store item id (Chrome, Edge, Brave get the extension from the store). Empty = none
+# (browsers then only get it through Developer mode).
+chrome_store_id: keobnkoppcchnbpmmfodidkcedglbhnn
+# The Firefox add-on id (browser_specific_settings.gecko.id).
+firefox_extension_id: velox-fetch@velox.app
+# The Firefox Add-ons (AMO) listing the app opens so a Firefox user can install the add-on. Empty =
+# not published yet (the app then falls back to the temporary-add-on developer flow for Firefox).
+firefox_store_url: https://addons.mozilla.org/addon/veloxfetch/
+# The name the native messaging host is registered under with the browsers.
+native_host_name: app.velox.fetch
+
+# The Chrome Web Store update service a browser contacts to fetch the published extension
+# (written into the "external extension" pointer the installers create).
+chrome_store_update_url: https://clients2.google.com/service/update2/crx

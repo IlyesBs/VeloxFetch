@@ -147,6 +147,8 @@ impl DownloadManager {
         *self.inner.media_http.write().unwrap_or_else(|p| p.into_inner()) = media;
         *self.network() = next;
         tracing::info!(mode, "network settings changed");
+        // A proxy stops several networks at once; none starts it again.
+        self.refresh_networks(true).await;
         Ok(self.get_network())
     }
 }

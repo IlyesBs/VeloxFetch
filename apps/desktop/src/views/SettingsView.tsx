@@ -8,6 +8,7 @@ import { BrowserSettings } from "../components/BrowserSettings";
 import { ClipboardSettings } from "../components/ClipboardSettings";
 import { DesktopSettings } from "../components/DesktopSettings";
 import { DiagnosticsSettings } from "../components/DiagnosticsSettings";
+import { MultiNetworkSettings } from "../components/MultiNetworkSettings";
 import { NetworkSettings } from "../components/NetworkSettings";
 import { PowerSettings } from "../components/PowerSettings";
 import { ProfilesSettings } from "../components/ProfilesSettings";
@@ -17,6 +18,7 @@ import { SpeedSettings } from "../components/SpeedSettings";
 import { StorageSettings } from "../components/StorageSettings";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { VideoToolsSettings } from "../components/VideoToolsSettings";
+import { IntegritySettings } from "../components/IntegritySettings";
 
 const THEMES: { pref: ThemePref; label: Key; icon: IconName }[] = [
   { pref: "system", label: "theme.system", icon: "gauge" },
@@ -48,6 +50,7 @@ export const SHORTCUTS: { keys: string[]; what: Key }[] = [
   { keys: ["Ctrl", "2"], what: "nav.queue" },
   { keys: ["Ctrl", "3"], what: "nav.history" },
   { keys: ["Ctrl", ","], what: "nav.settings" },
+  { keys: ["Ctrl", "G"], what: "keys.game" },
   { keys: ["Esc"], what: "keys.esc" },
 ];
 
@@ -135,29 +138,21 @@ export function SettingsView() {
             </div>
           </Panel>
           <Panel title={t("set.language")} hint={t("set.languageHint")}>
-            <div role="radiogroup" aria-label={t("set.language")} className="inline-flex rounded-xl border border-line bg-raised p-1" data-testid="settings-lang">
+            {/* Each language named in itself, so anyone finds theirs whatever the current one. */}
+            <select className="input w-full max-w-xs" aria-label={t("set.language")} value={lang} data-testid="settings-lang" onChange={(e) => setLang(e.target.value)}>
               {LANGS.map((l) => (
-                <button
-                  key={l.lang}
-                  role="radio"
-                  aria-checked={lang === l.lang}
-                  lang={l.lang}
-                  data-testid={`settings-lang-${l.lang}`}
-                  onClick={() => setLang(l.lang)}
-                  className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors duration-150 ${
-                    lang === l.lang ? "bg-solid text-fg shadow-sm" : "text-dim hover:text-fg"
-                  }`}
-                >
+                <option key={l.lang} value={l.lang} lang={l.lang}>
                   {l.label}
-                </button>
+                </option>
               ))}
-            </div>
+            </select>
           </Panel>
           <DesktopSettings />
         </Group>
 
         <Group id="set-folders">
           <StorageSettings />
+          <IntegritySettings />
         </Group>
 
         <Group id="set-speed">
@@ -168,6 +163,7 @@ export function SettingsView() {
 
         <Group id="set-network">
           <NetworkSettings />
+          <MultiNetworkSettings />
         </Group>
 
         <Group id="set-schedule">

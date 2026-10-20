@@ -11,7 +11,7 @@ import { api, normalizeError } from "./api";
 import { store } from "./hooks";
 import { formatSpeed } from "./format";
 import type { Key } from "./i18n";
-import type { SetSmartThrottle, SmartThrottle } from "./types";
+import type { GameMode, SetGameMode, SetSmartThrottle, SmartThrottle } from "./types";
 
 /** Manual's three levels: how much of the connection downloads keep, all the time (`keepWhileActive`). */
 export const THROTTLE_MODES: {
@@ -54,9 +54,34 @@ export const levelName = (
 export const keepWhileActive = (share: number) =>
   Math.round(Math.min(0.9, Math.max(0.25, share / 100 + 0.25)) * 100);
 
-/** Smart throttle is on (Smart or Manual): the user's choice, or the active Download Profile's (Fast holds it off). */
+/** Smart throttle is on (Smart or Manual): the user's choice, or the active Download Profile's (Fast holds it off), and
+ * never while several networks at once is on. */
 export const throttleOn = (s: SmartThrottle | null): boolean =>
-  !!s && s.profileAdaptive !== false && (s.enabled || s.profileAdaptive === true);
+  !!s && !s.heldByNetworks && s.profileAdaptive !== false && (s.enabled || s.profileAdaptive === true);
+
+/** Game mode is on (one click; it applies whatever level is chosen). */
+export const gameOn = (s: SmartThrottle | null): boolean => !!s?.gameMode?.on;
+
+/** Seconds until Game mode ends (null: until the user turns it off), never negative. */
+export const gameSecondsLeft = (g: GameMode, nowMs: number): number | null =>
+  g.untilMs === null ? null : Math.max(0, Math.ceil((g.untilMs - nowMs) / 1000));
+
+/** Time left, short: "1 h 42 min", "42 min", "30 s". */
+export function formatLeft(t: (k: Key, v?: Record<string, string | number>) => string, secs: number): string {
+  if (secs < 60) return t("dur.s", { s: secs });
+  const m = Math.ceil(secs / 60);
+  return m < 60 ? t("dur.m", { m }) : t("dur.hm", { h: Math.floor(m / 60), m: m % 60 });
+}
+
+/** The usual times one click can turn Game mode on for (minutes; 0 = until turned off). */
+export const GAME_DURATIONS = [60, 120, 240, 0] as const;
+
+/** What downloads do in Game mode, in one line (the gaming policy). */
+export function gameLine(t: (k: Key, v?: Record<string, string | number>) => string, s: SmartThrottle): string {
+  if (s.gamePolicy === "pause") return t("gm.linePause");
+  if (s.gamePolicy === "low") return t("gm.lineLow", { speed: formatSpeed(s.gameLimitBps) });
+  return s.limitBps !== null ? t("gm.lineAdaptive", { speed: formatSpeed(s.limitBps) }) : t("gm.lineAdaptiveNoSpeed");
+}
 
 /** The one-line explanation of what Smart throttle is doing now. */
 export function throttleStatus(
@@ -64,6 +89,11 @@ export function throttleStatus(
   s: SmartThrottle | null,
 ): string {
   if (!s) return t("hud.unavailable");
+  // Game mode wins over every level (and over several networks at once): the user asked for it.
+  if (gameOn(s)) return `${t("gm.name")} · ${gameLine(t, s)}`;
+  // Held off by several networks at once: say so, not just "off" (the controls are greyed out meanwhile; their
+  // tooltip has the whole sentence). One short line, like the other states.
+  if (s.heldByNetworks) return t("thr.heldByNetworks");
   if (s.profileAdaptive === false) return t("thr.fastProfile");
   if (!throttleOn(s)) return t("thr.off");
   const speed = formatSpeed(s.limitBps ?? 0);
@@ -95,7 +125,7 @@ export function throttleStatus(
 
 /** How much of their usual speed downloads may use now (0.04-1): the cap against the reference speed. */
 export function gaugeShare(s: SmartThrottle | null): number {
-  if (!throttleOn(s) || !s || s.limitBps === null) return 1;
+  if (!(throttleOn(s) || gameOn(s)) || !s || s.limitBps === null) return 1;
   const ref = s.referenceBps ?? s.peakBps;
   if (!ref) {
     // No speed seen yet: the share the mode keeps (a game or a call: the mode's share; browsing: a little more).
@@ -126,11 +156,17 @@ const subs = new Set<() => void>();
 function apply(next: SmartThrottle | null) {
   state = next;
   const root = document.documentElement;
-  const mark = throttleOn(next) && next
+  const mark = (throttleOn(next) || gameOn(next)) && next
     ? next.limitBps !== null
       ? "limiting"
       : "on"
     : undefined;
+  // Game mode: the whole window says so (the banner, the status bar, the accent).
+  const game = gameOn(next) ? "on" : undefined;
+  if (root.dataset.game !== game) {
+    if (game) root.dataset.game = game;
+    else delete root.dataset.game;
+  }
   // Only a real change touches <html>: writing the same value every poll still told the theme watchers that the
   // colours changed, and the whole window background was painted again every 3 s (it flashed).
   if (root.dataset.throttle !== mark) {
@@ -181,6 +217,42 @@ export const throttleStore = {
     queue = run.catch(() => undefined);
     return run;
   },
+  /**
+   * Game mode: on, off, longer, or how long one click turns it on for. Shown at once (on: for the usual time), then
+   * the app's answer replaces it; on an error the toast says why and the real state comes back.
+   */
+  game: (patch: SetGameMode, okText?: string): Promise<SmartThrottle | undefined> => {
+    const mine = ++version;
+    saving++;
+    if (state && patch.on !== undefined) {
+      const minutes = patch.minutes ?? state.gameMode.minutes;
+      const gameMode: GameMode = patch.on
+        ? { ...state.gameMode, on: true, untilMs: minutes === 0 ? null : Date.now() + minutes * 60_000 }
+        : { ...state.gameMode, on: false, untilMs: null };
+      apply({ ...state, gameMode, ...(patch.on ? { reason: "game" as const } : {}) });
+    }
+    const run = queue.then(async () => {
+      let failed = false;
+      try {
+        const next = await api.setGameMode(patch);
+        if (mine === version) apply(next);
+        if (okText) store.toast("info", okText);
+        return next;
+      } catch (e) {
+        store.toast("error", normalizeError(e).message);
+        failed = true;
+        return undefined;
+      } finally {
+        saving--;
+        if (failed) {
+          version++;
+          void throttleStore.refresh();
+        }
+      }
+    });
+    queue = run.catch(() => undefined);
+    return run;
+  },
   refresh: async () => {
     if (saving > 0) return;
     const asked = version;
@@ -191,7 +263,7 @@ export const throttleStore = {
         ...history,
         {
           speed: store.getState().metrics.speedBps,
-          cap: throttleOn(next) ? next.limitBps : null,
+          cap: throttleOn(next) || gameOn(next) ? next.limitBps : null,
         },
       ].slice(-HISTORY_LEN);
       apply(next);

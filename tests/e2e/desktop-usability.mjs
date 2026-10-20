@@ -122,6 +122,23 @@ try {
   check("after signing in the download finishes", (await invoke("get_download", { id: locked.id })).ok.status === "completed");
   check("the password never comes back to the UI", !JSON.stringify((await invoke("get_download_detail", { id: locked.id })).ok).includes("pass\""));
 
+  // ============================================================ never lose a download: tried again on its own
+  srv.busy = true;
+  const busy = (await invoke("create_download", { request: { url: `${srv.base}/busy/nightly.iso` } })).ok;
+  await waitFor(async () => (await invoke("get_download", { id: busy.id })).ok.autoRetry != null, "failed and waiting to be tried again", 60000);
+  const waiting = (await invoke("get_download", { id: busy.id })).ok;
+  check("a server in passing trouble: failed, and tried again on its own", waiting.status === "failed" && waiting.autoRetry.atMs > Date.now() - 2000 && !waiting.autoRetry.waitingForNetwork, JSON.stringify(waiting.autoRetry));
+  await waitFor(() => has(`[data-testid=download-${busy.id}] [data-testid=card-auto-retry]`), "auto-retry line");
+  check("the card counts down to the next try", /^Trying again on its own in \d+ s$|^Trying again now/.test((await text(`[data-testid=download-${busy.id}] [data-testid=card-auto-retry]`)).trim()), await text(`[data-testid=download-${busy.id}] [data-testid=card-auto-retry]`));
+  await page(`(() => { document.querySelector('[data-testid=download-${busy.id}]').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 200 })); return true; })()`);
+  await waitFor(() => has("[role=menu]"), "menu");
+  check("its menu offers Stop trying", (await ev(`[...document.querySelectorAll('[role=menu] [role=menuitem]')].map((b) => b.innerText.trim()).join('|')`)).includes("Stop trying (keep what is downloaded)"));
+  await key("Escape");
+  await page(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); return true; })()`);
+  srv.busy = false;
+  await waitFor(async () => (await invoke("get_download", { id: busy.id })).ok.status === "completed", "finished on its own", 60000);
+  check("once the server is fine it finishes on its own, no click needed", !(await has(`[data-testid=download-${busy.id}] [data-testid=card-auto-retry]`)));
+
   // ============================================================ Add dialog: sign-in and headers
   await clickText("button", "Options");
   await waitFor(() => ev("document.querySelector('dialog[open]') !== null"), "add dialog");

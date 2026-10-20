@@ -19,7 +19,8 @@ pub(super) fn failure_of(e: &DownloadError) -> Failure {
     match e {
         DownloadError::Http(h) => match h {
             HttpError::Status { status, .. } => Failure::Http(*status),
-            HttpError::SlowToAnswer | HttpError::Stalled => Failure::Timeout,
+            HttpError::SlowToAnswer | HttpError::Stalled | HttpError::Quiet => Failure::Timeout,
+            HttpError::NetworkLost => Failure::ConnectionReset,
             HttpError::RangeNotHonored(_) => Failure::RangeRejected,
             HttpError::SourceChanged(_) => Failure::SourceChanged,
             HttpError::InvalidUrl(_) | HttpError::UnsupportedScheme(_) | HttpError::InvalidHeader(_) => Failure::InvalidRequest,

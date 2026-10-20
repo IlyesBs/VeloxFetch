@@ -31,11 +31,14 @@ export async function quitOnClose(h) {
 export async function startFileServer(sizeBytes) {
   const FILE = crypto.randomBytes(sizeBytes);
   // `rateBps`: the whole server's speed, shared by every connection (like a real line), when set.
-  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, FILE, sha: sha256(FILE), base: "", headers: [] };
+  // `busy`: `/busy/..` answers 502 (a server in passing trouble) while it is set.
+  // `peers`: body bytes sent to each client address (which network a request came through).
+  const state = { delayMs: 0, rateBps: 0, next: 0, requests: 0, busy: false, FILE, sha: sha256(FILE), base: "", headers: [], peers: {} };
   const server = http.createServer(async (req, res) => {
     state.requests++;
     state.headers.push(req.headers); // lets a test check what the client sent
     if (req.url.startsWith("/404")) return void res.writeHead(404).end();
+    if (req.url.startsWith("/busy/") && state.busy) return void res.writeHead(502).end();
     // `/auth/..` wants user:pass (HTTP Basic), like a members-only file.
     if (req.url.startsWith("/auth/") && req.headers.authorization !== `Basic ${Buffer.from("user:pass").toString("base64")}`) {
       return void res.writeHead(401, { "WWW-Authenticate": 'Basic realm="e2e"' }).end();
@@ -55,7 +58,10 @@ export async function startFileServer(sizeBytes) {
     if (req.method === "HEAD") return void res.end();
     for (let pos = start; pos <= end; pos += 65536) {
       if (res.destroyed) return;
-      res.write(FILE.subarray(pos, Math.min(pos + 65536, end + 1)));
+      const chunk = FILE.subarray(pos, Math.min(pos + 65536, end + 1));
+      res.write(chunk);
+      const peer = req.socket.remoteAddress ?? "?";
+      state.peers[peer] = (state.peers[peer] ?? 0) + chunk.length;
       if (state.delayMs) await sleep(state.delayMs);
       if (state.rateBps) {
         const now = Date.now();
@@ -164,6 +170,11 @@ export function createHarness({ port, appPath, env = {}, captureStderr = false }
         // A private browser link: the app is single-instance by this link, so a test app must never meet a
         // VeloxFetch the user is running (or another test's app).
         VELOX_BRIDGE_ENDPOINT: h.endpoint,
+        // The interface follows the computer's language on first start: tests run in English unless they set it.
+        LANG: "en_US.UTF-8",
+        LC_ALL: "en_US.UTF-8",
+        LANGUAGE: "en_US",
+        VELOX_E2E_LANG: "en-US",
         ...env,
       },
       stdio: captureStderr ? ["ignore", "ignore", "pipe"] : "ignore",

@@ -5,6 +5,7 @@ import { useLiveIo, useStore } from "../hooks";
 import { useT } from "../i18n";
 import { Icon, type IconName } from "../ui/icons";
 import { canOpen } from "./FileIcon";
+import { MultiNetworkCard } from "./MultiNetworkCard";
 
 /**
  * Two real series over one scale: `main` filled (download / disk writes), `second` as a line (upload / disk
@@ -67,6 +68,7 @@ export function SidePanels({ onOpen, onQueue, onBatch, onStream, onSettings }: {
 
   return (
     <>
+      <MultiNetworkCard onSettings={onSettings} />
       <section className="panel" data-testid="panel-network" aria-labelledby="pn-title">
         <h2 id="pn-title" className="text-[15px] font-semibold">
           {t("side.network")}

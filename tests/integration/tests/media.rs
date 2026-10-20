@@ -543,7 +543,7 @@ async fn a_running_job_can_be_cancelled_and_cleans_up() {
 }
 
 #[tokio::test]
-async fn at_most_three_stream_jobs_run_at_once() {
+async fn at_most_three_stream_jobs_run_at_once_and_a_fourth_waits_its_turn() {
     let site = Site::start().await;
     hls_site(&site);
     for i in 0..5 {
@@ -554,13 +554,24 @@ async fn at_most_three_stream_jobs_run_at_once() {
     for _ in 0..3 {
         ids.push(e.m.start_media(MediaRequest { audio: Some("none".into()), ..req(site.url("/hls/master.m3u8")) }).await.unwrap().id);
     }
-    let err = e.m.start_media(req(site.url("/hls/master.m3u8"))).await.unwrap_err().to_string();
-    assert!(err.contains("at most 3"), "{err}");
-    for id in ids {
+    // A fourth waits its turn (it used to be refused) and starts by itself when a place frees up.
+    let fourth = e.m.start_media(MediaRequest { audio: Some("none".into()), ..req(site.url("/hls/master.m3u8")) }).await.unwrap();
+    assert_eq!(fourth.status, MediaStatus::Queued, "{fourth:?}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let status = |id: u64| e.m.list_media().into_iter().find(|j| j.id == id).unwrap().status;
+    assert_eq!(status(fourth.id), MediaStatus::Queued, "still waiting while three run");
+    e.m.cancel_media(ids[0]).await.unwrap();
+    finish(&e.m, ids[0]).await;
+    let t = Instant::now();
+    while !status(fourth.id).is_active() && status(fourth.id) != MediaStatus::Completed {
+        assert!(t.elapsed() < Duration::from_secs(10), "the fourth did not start: {:?}", status(fourth.id));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for id in ids.into_iter().skip(1).chain([fourth.id]) {
         e.m.cancel_media(id).await.unwrap();
         finish(&e.m, id).await;
     }
-    assert!(e.m.start_media(req(site.url("/hls/master.m3u8"))).await.is_ok(), "slots free up again");
+    assert!(e.m.start_media(req(site.url("/hls/master.m3u8"))).await.is_ok(), "places free up again");
     e.m.shutdown().await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!listing(&e.root).iter().any(|n| n.starts_with(".velox-media")), "shutdown stops jobs and removes scratch folders");

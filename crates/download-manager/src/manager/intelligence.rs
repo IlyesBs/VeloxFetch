@@ -27,6 +27,9 @@ use crate::intelligence::{
 /// The longest the quick check may take (a server that prepares the file before answering is reported as slow).
 pub(super) const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The longest the Add dialog's check waits for the publisher's checksum list.
+const PUBLISHER_IN_ANALYSIS: Duration = Duration::from_secs(4);
+
 /// History rows looked at for duplicates (the most recent ones).
 const HISTORY_LOOKBACK: u32 = 500;
 
@@ -51,15 +54,32 @@ impl DownloadManager {
     ) -> (Option<ResourceInfo>, AnalysisDto) {
         let expected = link_name(url);
         let media = media_engine::is_site_page(url) || crate::is_stream_link(url);
-        let (info, failure) = if media {
-            (None, None) // the video dialog reads those; a plain request would only get a page or a playlist
-        } else {
+        // The publisher's checksum is looked for next to the file at the same time (feature #6; kept a few minutes,
+        // so the download itself does not ask again).
+        let publisher = async {
+            if media || !self.publisher_check() {
+                return None;
+            }
+            // Never holds the dialog up for long: the download looks again if this was too slow.
+            match tokio::time::timeout(PUBLISHER_IN_ANALYSIS, self.find_publisher_checksum(url)).await.ok()? {
+                downloader_core::PublisherLookup::Found { checksum, list } => Some(intel::PublisherChecksumDto {
+                    list,
+                    algo: if checksum.algo == downloader_core::HashAlgo::Sha512 { "SHA-512" } else { "SHA-256" }.to_string(),
+                }),
+                _ => None,
+            }
+        };
+        let probe = async {
+            if media {
+                return (None, None); // the video dialog reads those; a plain request would only get a page or a playlist
+            }
             match tokio::time::timeout(ANALYSIS_TIMEOUT, self.inner.downloader.probe_quick(url.as_str(), headers)).await {
                 Ok(Ok(i)) => (Some(i), None),
                 Ok(Err(e)) => (None, Some(failure_of(&e))),
                 Err(_) => (None, Some(ProbeFailure::Slow)),
             }
         };
+        let ((info, failure), publisher_checksum) = tokio::join!(probe, publisher);
         let filename = match (requested, &info) {
             (Some(n), _) => n.to_string(),
             (None, Some(i)) => downloader_core::filename::choose_filename(i, url),
@@ -97,6 +117,7 @@ impl DownloadManager {
             },
             |s| self.inner.downloader.connection_plan(s),
         );
+        let analysis = AnalysisDto { publisher_checksum, ..analysis };
         (info, analysis)
     }
 
