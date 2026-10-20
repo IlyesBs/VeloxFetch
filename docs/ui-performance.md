@@ -111,6 +111,11 @@ not the `.input` surface the other fields use, so it looked different from them 
   * a press outside, a scroll elsewhere, a resize or leaving the window closes it;
   * it opens above the field when there is no room below, and follows the field's direction (right-to-left in
     Arabic);
+  * inside a modal `<dialog>` (`showModal`, e.g. the Add-download options dialog) the menu is attached to that
+    dialog, not to `<body>`: a modal dialog is painted in the browser's **top layer**, above everything on the
+    body, so a `body`-mounted list (its `position: fixed` and z-index cannot reach the top layer) opened *under*
+    the dialog. Mounting it inside the open dialog shares that layer; it stays viewport-positioned because the
+    dialog sets no transform (October 2026, `fix_select_menu_in_dialog`);
   * `role=listbox` / `option`, `aria-selected`, `aria-activedescendant`, `aria-expanded` on the field.
 * **Look** (`.select-menu`): the fields' own surface over the solid base,
   `linear-gradient(var(--raised), var(--raised)), var(--solid)`. It is opaque and the same colour as the fields in
@@ -121,10 +126,11 @@ not the `.input` surface the other fields use, so it looked different from them 
 
 **Tests:**
 * `selectMenu.test.ts`: installed at start-up; only theme tokens in the menu; the field's surface; keyboard skips
-  disabled options.
+  disabled options; the menu is mounted inside the field's open `<dialog>`, not on `<body>`.
 * e2e `desktop-ui.mjs`, real app, light and dark: the app's list opens, with a background equal to the theme's
   `--solid` under the field's surface layer; Escape keeps the value; a click picks (the profile really changes); the
-  keyboard opens and picks.
+  keyboard opens and picks; and, inside the Add-download options dialog, the list opens inside the open dialog (the
+  top layer), not under it.
 
 ## Cards no longer flash when a download starts (issue #20, October 2026)
 
