@@ -1,4 +1,4 @@
-//! Phase 13.2: one download engine against every kind of server the roadmap lists: normal, range,
+//! One download engine against every kind of server we test: normal, range,
 //! no-range, slow, unstable, redirecting, authenticating, throttling (429), failing (500), and
 //! servers that lie or misbehave. The server is `velox_integration_tests::serve`, whose behaviour
 //! is chosen by the request path (see its module documentation).
