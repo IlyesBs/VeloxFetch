@@ -1,19 +1,23 @@
-# VeloxFetch
+# VeloxFetch — fast, secure, open-source download manager
 
-**High-performance, secure, cross-platform download manager** — a Rust download engine with a Tauri v2
+**A high-performance download manager and download accelerator for Windows, Linux and macOS** — a free,
+open-source alternative to commercial download managers, built on a Rust download engine with a Tauri v2
 desktop app (React + TypeScript + Tailwind).
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational)
+[![Download latest release](https://img.shields.io/github/v/release/IlyesBs/VeloxFetch-releases?label=download)](https://github.com/IlyesBs/VeloxFetch-releases/releases)
+[![GitHub stars](https://img.shields.io/github/stars/IlyesBs/VeloxFetch?style=flat)](https://github.com/IlyesBs/VeloxFetch/stargazers)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-informational)
 
-VeloxFetch downloads files fast and reliably, integrates with your browser, handles video sites and whole
-playlists, and keeps everything on your computer — no accounts, no telemetry. It runs on Windows and Linux, in
-eight languages, with a right-to-left interface in Arabic.
+VeloxFetch downloads files fast and reliably — up to **64 connections** per download — integrates with Chrome,
+Edge, Brave and Firefox, downloads **videos and whole playlists** from YouTube, Vimeo and similar sites, verifies
+files against publisher checksums, and keeps everything on your computer: **no accounts, no telemetry, no ads**. It
+runs on Windows, Linux and macOS, in eight languages, with a right-to-left interface in Arabic.
 
 ## Download
 
 Get the latest build for **Windows** and **Linux** from the releases page:
-**https://github.com/IlyesBs/VeloxFetch/releases** (macOS: in progress).
+**https://github.com/IlyesBs/VeloxFetch-releases/releases** (macOS: in progress).
 
 Browser extension: **Chrome / Edge / Brave** from the Chrome Web Store, **Firefox** from
 [Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/). Installing VeloxFetch points your browser to it.
