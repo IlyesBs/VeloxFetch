@@ -155,6 +155,18 @@ pub fn store_page_url(id: &str) -> String {
     format!("https://chromewebstore.google.com/detail/{id}")
 }
 
+/// Open a fixed https page in the browser (the Firefox Add-ons listing). `url` is compiled into the app
+/// (never user input); it is opened as a new tab if the browser is already running.
+pub fn open_url(launcher: &Launcher, url: &str) -> std::io::Result<()> {
+    if !url.starts_with("https://") {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not an https url"));
+    }
+    match launcher {
+        Launcher::Exe(exe) => spawn(Command::new(exe).arg(url)),
+        Launcher::MacApp(app) => spawn(Command::new("open").arg("-a").arg(app).arg(url)),
+    }
+}
+
 /// Show a folder in the system file manager.
 pub fn open_folder(platform: Platform, dir: &Path) -> std::io::Result<()> {
     match platform {

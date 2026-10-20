@@ -15,8 +15,9 @@ const LABEL: Record<BrowserName, Key> = { chrome: "br.chrome", edge: "br.edge", 
  * Browser integration: lets the VeloxFetch extension hand links to this app. The installers already point Chrome,
  * Edge and Brave at the extension in the Chrome Web Store, and on the first start the app sets it up for the default
  * browser by itself (bridge.rs `auto_install_once`). Each browser also has one button: "Install extension" connects
- * that browser, then opens the extension's store page (Chrome, Edge, Brave: never a folder), or, for Firefox until
- * its add-on is published, prepares the extension folder and opens the extensions page. "Disconnect" undoes it.
+ * that browser, then opens the extension's store page: the Chrome Web Store for Chrome, Edge and Brave, and Firefox
+ * Add-ons (AMO) for Firefox — never a folder. (If the Firefox add-on is not published yet, it falls back to
+ * preparing the extension folder and opening the extensions page.) "Disconnect" undoes it.
  */
 export function BrowserSettings() {
   const t = useT();
@@ -79,7 +80,7 @@ export function BrowserSettings() {
     const list = state?.browsers.filter((b) => b.supported && b.browser !== "firefox") ?? [];
     return (list.find((b) => b.isDefault) ?? list.find((b) => b.found) ?? list[0])?.browser ?? "chrome";
   };
-  const fromStore = (b: BrowserName) => !!state?.chromeStoreId && b !== "firefox";
+  const fromStore = (b: BrowserName) => (b === "firefox" ? !!state?.firefoxStoreUrl : !!state?.chromeStoreId);
   if (!state) {
     return (
       <Panel title={t("br.title")} hint={t("br.hint")}>
@@ -136,11 +137,11 @@ export function BrowserSettings() {
               {fromStore(b.browser) && b.supported && (
                 <span
                   className="ms-2 inline-flex items-center gap-1 rounded-full border border-accent px-2 py-0.5 text-[11px] font-medium text-accent"
-                  title={t("br.storeBadgeHint")}
+                  title={t(b.browser === "firefox" ? "br.storeBadgeFirefoxHint" : "br.storeBadgeHint")}
                   data-testid={`browser-${b.browser}-store`}
                 >
                   <Icon name="shield" size={11} />
-                  {t("br.storeBadge")}
+                  {t(b.browser === "firefox" ? "br.storeBadgeFirefox" : "br.storeBadge")}
                 </span>
               )}
               {b.supported && !b.found && <span className="ms-2 text-[11px] text-dim">{t("br.notFound")}</span>}
@@ -183,10 +184,10 @@ export function BrowserSettings() {
             <>
               <li data-testid="extension-store-opened">
                 {installed.openedBrowser ? (
-                  t("br.stStore", { browser: label(installed.browser) })
+                  t(installed.browser === "firefox" ? "br.stFirefoxStore" : "br.stStore", { browser: label(installed.browser) })
                 ) : (
                   <>
-                    {t("br.stStoreOpenYourself", { browser: label(installed.browser) })}{" "}
+                    {t(installed.browser === "firefox" ? "br.stFirefoxStoreOpenYourself" : "br.stStoreOpenYourself", { browser: label(installed.browser) })}{" "}
                     <code className="break-all rounded bg-canvas px-1.5 py-0.5" data-testid="extension-store-url">
                       {installed.storeUrl}
                     </code>{" "}
@@ -197,7 +198,7 @@ export function BrowserSettings() {
                 )}
               </li>
               <li>
-                <Rich text={t("br.stStoreAccept")} />
+                <Rich text={t(installed.browser === "firefox" ? "br.stFirefoxStoreAccept" : "br.stStoreAccept")} />
               </li>
             </>
           ) : (

@@ -42,6 +42,7 @@ function values(cfg) {
     chromeExtensionId: cfg.chrome_extension_id,
     chromeStoreId: cfg.chrome_store_id || "",
     firefoxExtensionId: cfg.firefox_extension_id,
+    firefoxStoreUrl: cfg.firefox_store_url || "",
     hostName: cfg.native_host_name,
     chromeStoreUpdateUrl: cfg.chrome_store_update_url,
   };
@@ -79,7 +80,9 @@ function artifacts(v) {
       "/// GitHub's \"latest release\" feed (drafts and pre-releases are never served here).\n" +
       `pub const UPDATE_FEED: &str = ${rustStr(v.updateFeed)};\n` +
       "/// The prefix every update package address must start with.\n" +
-      `pub const UPDATE_PACKAGES: &str = ${rustStr(v.updatePackages)};\n`,
+      `pub const UPDATE_PACKAGES: &str = ${rustStr(v.updatePackages)};\n` +
+      "/// The Firefox Add-ons (AMO) listing to open for a Firefox user (`None` = not published yet).\n" +
+      `pub const FIREFOX_STORE_URL: Option<&str> = ${rustOpt(v.firefoxStoreUrl)};\n`,
   };
 }
 

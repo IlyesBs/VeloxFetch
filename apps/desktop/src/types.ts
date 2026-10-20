@@ -514,6 +514,8 @@ export interface BrowserIntegration {
   /** The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there. */
   chromeStoreId: string | null;
   firefoxExtensionId: string;
+  /** The Firefox Add-ons (AMO) listing Firefox gets the add-on from (null = not published yet). */
+  firefoxStoreUrl: string | null;
   /** Ask before a browser download starts. */
   confirmDownloads: boolean;
   videoBar: boolean;

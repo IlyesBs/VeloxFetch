@@ -30,6 +30,9 @@ chrome_extension_id: gbcanjaaelioalfdggkhbbnbinmfgdbc
 chrome_store_id: keobnkoppcchnbpmmfodidkcedglbhnn
 # The Firefox add-on id (browser_specific_settings.gecko.id).
 firefox_extension_id: velox-fetch@velox.app
+# The Firefox Add-ons (AMO) listing the app opens so a Firefox user can install the add-on. Empty =
+# not published yet (the app then falls back to the temporary-add-on developer flow for Firefox).
+firefox_store_url: https://addons.mozilla.org/addon/veloxfetch/
 # The name the native messaging host is registered under with the browsers.
 native_host_name: app.velox.fetch
 
