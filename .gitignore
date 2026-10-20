@@ -19,3 +19,5 @@ apps/browser-extension/dist/
 .DS_Store
 .idea/
 .vscode/
+# private working notes, never published
+/nextStep.md

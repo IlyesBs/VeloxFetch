@@ -19,6 +19,16 @@ appears once it is).
 **New here? Read [`VELOXFETCH-OVERVIEW.md`](VELOXFETCH-OVERVIEW.md) first**: the whole app (features, design,
 security, roadmap) on one page. Details: [`docs/architecture.md`](docs/architecture.md) and [`docs/security.md`](docs/security.md).
 
+## Support
+
+VeloxFetch is free and developed by one person. If it is useful to you, a small donation helps keep it going —
+entirely optional, and the app is never limited for not donating.
+
+* **Crypto:** [![Donate](https://img.shields.io/badge/Donate-Crypto-blue?style=for-the-badge)](https://link.depay.com/4VnYyZSV7h526UxFEVDIvO)
+* **Card / Payoneer:** coming soon.
+
+Thank you.
+
 ## Layout
 
 ```
@@ -206,3 +216,9 @@ Diagnostics stay on the computer: the app writes a small rotating log to `<app d
 
 The UI types in `apps/desktop/src/types.ts` mirror the DTOs in
 `crates/download-manager/src/api.rs`; keep them in sync.
+
+## License
+
+VeloxFetch is free software, licensed under the **GNU General Public License v3.0 or later**
+([`LICENSE`](LICENSE)). You may use, study, share and modify it; if you distribute a modified version, it must stay
+under the GPL and its source must be available. There is no warranty, to the extent permitted by law.
