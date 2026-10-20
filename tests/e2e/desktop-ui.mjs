@@ -270,6 +270,24 @@ try {
   check("the keyboard works too (Enter opens, Home, Enter picks; it was Fast)", picked.active === "fast" && (await invoke("get_profiles")).ok?.active === "default");
   await theme("dark");
 
+  // ---- a drop-down inside a modal dialog opens inside it (the top layer), not under it ----------
+  // Regression: the themed list was appended to <body>, so inside a showModal() dialog — the browser's top
+  // layer, painted above everything on <body> — the list opened *under* the dialog. It must mount inside the
+  // open dialog to share that layer.
+  await click("[data-testid=nav-downloads]");
+  await click("[data-testid=add-more]");
+  await waitFor(() => q("[data-testid=add-more-list] .popover-item"), "the add menu");
+  await page(`(() => { const items = [...document.querySelectorAll('[data-testid=add-more-list] .popover-item')]; items[items.length - 1].click(); return true; })()`);
+  await waitFor(() => q("dialog[open] [data-testid=add-when]"), "the options dialog");
+  await down("dialog[open] [data-testid=add-when]");
+  await waitFor(() => q("[data-testid=select-menu]"), "the list to open inside the dialog");
+  const inDialog = (await page(`(() => { const d = document.querySelector('dialog[open]'); const m = document.querySelector('[data-testid=select-menu]'); return !!d && !!m && d.contains(m); })()`)).ok;
+  check("a drop-down inside the options dialog opens inside it (the top layer), not under the dialog", inDialog === true, String(inDialog));
+  await page(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
+  await waitFor(async () => !(await q("[data-testid=select-menu]")), "Escape to close the list");
+  await page(`(() => { const d = document.querySelector('dialog[open]'); if (d) d.close(); return true; })()`);
+  await waitFor(async () => !(await q("dialog[open]")), "the dialog to close");
+
   // ---- hygiene ---------------------------------------------------------------------------------
   const csp = (await page("window.__csp")).ok;
   check("no Content-Security-Policy violations during the whole session", csp.length === 0, JSON.stringify(csp));
