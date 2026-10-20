@@ -1,18 +1,15 @@
 # VeloxFetch builds: the installers for Windows, Linux and macOS, with scripts/build-release.sh (the same script as a
-# local build). No tests here: they run on every commit of the branch (ci.yml), before it reaches `main`.
+# local build). No tests here: run the Tests workflow (ci.yml) for a branch before merging it.
 #
-#   * push to `main`        -> build every system automatically
-#   * "Run workflow" button -> pick the branch (and the systems): its installers, to try by hand before merging
-#   * tag `v*`              -> build, then a private draft GitHub release (never published unsigned)
+# Runs only from the "Run workflow" button (workflow_dispatch): pick the branch (and the systems) and its
+# installers are built, to try by hand. Dispatch from a tag `v*` to also publish a private draft GitHub release
+# (never published unsigned). Nothing builds automatically — no push or tag triggers a build on its own.
 #
 # Every third-party action is pinned to a full commit hash. The token is read-only unless a job asks for more.
 
 name: Build
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       platforms:
