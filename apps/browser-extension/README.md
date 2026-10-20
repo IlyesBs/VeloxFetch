@@ -37,13 +37,14 @@ npm test               # validation, least-privilege and id-drift checks (Node's
   *Developer mode*, choose *Load unpacked* and pick `dist/chrome`. The extension id will be
   `gbcanjaaelioalfdggkhbbnbinmfgdbc` (fixed by the public `key` in the manifest); the native host only accepts
   that id.
-* **Published:** the Chrome Web Store item `keobnkoppcchnbpmmfodidkcedglbhnn` (built from `dist/chrome-store`, no
-  `key`). The native host trusts it too (`CHROME_STORE_ID`), and the app's installers point Chrome, Edge and Brave at
-  it. The developer build above stays for development.
-* **Firefox:** open `about:debugging#/runtime/this-firefox`, *Load Temporary Add-on*, pick
-  `dist/firefox/manifest.json`. (A permanent install needs the add-on to be signed.) Firefox 140 or newer (Android
-  142): the manifest declares what the add-on hands to the app (`data_collection_permissions`: `browsingActivity`,
-  `websiteContent`, `authenticationInfo`), which addons.mozilla.org requires and Firefox shows at install.
+* **Published (Chromium):** the Chrome Web Store item `keobnkoppcchnbpmmfodidkcedglbhnn` (built from
+  `dist/chrome-store`, no `key`). The native host trusts it too (`CHROME_STORE_ID`), and the app's installers point
+  Chrome, Edge and Brave at it. The developer build above stays for development.
+* **Published (Firefox):** on Firefox Add-ons (AMO) — https://addons.mozilla.org/addon/veloxfetch/. Install it from
+  there (Firefox 140 or newer; Android 142). For development, open `about:debugging#/runtime/this-firefox`, *Load
+  Temporary Add-on* and pick `dist/firefox/manifest.json`. The manifest declares what the add-on hands to the app
+  (`data_collection_permissions`: `browsingActivity`, `websiteContent`, `authenticationInfo`), which
+  addons.mozilla.org requires and Firefox shows at install.
 
 ## Permissions, and why
 

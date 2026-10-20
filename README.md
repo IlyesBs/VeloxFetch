@@ -46,10 +46,11 @@ combined. Servers that give no strong version tag no longer force a resume to st
 the saved bytes are compared with the server's first.
 
 ### Browser integration
-Chrome, Edge and Brave get the extension from the **Chrome Web Store**; installing VeloxFetch asks the browser to
-add it and the browser does so by itself (Firefox uses a temporary add-on until review completes). A download
-started in the browser while VeloxFetch is closed launches the app — including for browsers installed as Snap or
-Flatpak packages. The confirmation dialog can also take a site's username and password when the server asks for them.
+Chrome, Edge and Brave get the extension from the **Chrome Web Store**; Firefox from
+**[Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/)**. Installing VeloxFetch asks the browser to add
+it. A download started in the browser while VeloxFetch is closed launches the app — including for browsers installed
+as Snap or Flatpak packages. The confirmation dialog can also take a site's username and password when the server
+asks for them.
 
 ### Video downloads
 With the extension installed, a **Download video** bar appears over videos — files, HLS / DASH streams, and video
