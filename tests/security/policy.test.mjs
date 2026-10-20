@@ -225,9 +225,13 @@ test("CI runs every security step, from a locked dependency set, on all three op
   }
   for (const os of ["windows-latest", "macos-latest", "ubuntu-latest"]) assert.match(ci, new RegExp(os), `tests on ${os}`);
   for (const os of ["windows-latest", "macos-latest", "ubuntu-22.04"]) assert.match(build, new RegExp(os), `build on ${os}`);
-  assert.match(ci, /branches-ignore: \[main\]/, "every commit of a branch is tested");
   assert.match(build, /scripts\/build-release\.sh/, "CI builds exactly like a local build (locked installs, SHA256SUMS)");
-  assert.match(build, /workflow_dispatch:/, "a branch can be built by hand before it is merged");
+  // Both workflows run only when started by hand ("Run workflow" -> pick the branch); nothing runs on its own.
+  for (const [name, wf] of [["ci", ci], ["build", build]]) {
+    assert.match(wf, /^on:\s*\n\s*workflow_dispatch:/m, `${name} runs only when started by hand`);
+    assert.doesNotMatch(wf, /^\s*push:\s*$/m, `${name} must not run automatically on push`);
+    assert.doesNotMatch(wf, /^\s*pull_request:\s*$/m, `${name} must not run automatically on a pull request`);
+  }
   assert.match(build, /sha256sum/, "the published files are hashed");
   assert.match(build, /--draft/, "a release is never published unsigned");
   assert.match(ci, /--locked/, "builds must not update the lockfile");

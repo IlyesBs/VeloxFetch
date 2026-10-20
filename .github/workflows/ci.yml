@@ -1,21 +1,17 @@
-# VeloxFetch tests (Phase 12.4): every commit pushed to a branch other than `main` (and pull requests from forks).
+# VeloxFetch tests: format -> lint -> unit + integration tests -> security checks -> dependency audit.
 #
-#   commit -> format -> lint -> unit + integration tests -> security checks -> dependency audit
+# Runs only from the "Run workflow" button (workflow_dispatch): pick the branch to test. Nothing runs
+# automatically — no push or pull request triggers it on its own.
 #
-# Builds are in build.yml: automatic on `main` (already tested on its branch), and a "Run workflow" button to build
-# the installers of any branch, to try them by hand before merging.
+# Builds are in build.yml (also manual: "Run workflow", pick the branch).
 #
 # Every third-party action is pinned to a full commit hash (a tag can be moved by whoever owns the
-# repository; a hash cannot). The token is read-only unless a job asks for more. Untrusted pull
-# requests never run with secrets: no privileged pull-request trigger is used, and signing happens only in
-# the `release` job on a tag, behind the protected `release` environment.
+# repository; a hash cannot). The token is read-only unless a job asks for more.
 
 name: Tests
 
 on:
-  push:
-    branches-ignore: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -31,8 +27,6 @@ env:
 jobs:
   test:
     name: format, lint, tests (${{ matrix.os }})
-    # A pull request from this repository's own branch was already tested on push: only forks are tested here.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -71,7 +65,6 @@ jobs:
 
   security:
     name: dependency audit, licences, SBOM
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
