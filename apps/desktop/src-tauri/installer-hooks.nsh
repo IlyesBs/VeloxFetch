@@ -13,6 +13,10 @@
 ; extension. No browser file or profile is touched. The id is CHROME_STORE_ID (crates/browser-bridge/src/caller.rs)
 ; and the keys are WINDOWS_MACHINE_KEYS (crates/system-integration/src/store_extension.rs); a test keeps them in step.
 
+; Single source of truth: config/veloxfetch.yaml. These two values are verified against it at build time by
+; tests/security/config.test.mjs (it fails and names this file if they drift). Kept literal rather than
+; !include'd because the Tauri NSIS bundler compiles this hook in its own scaffold folder, where a sibling
+; generated file would not be present. Edit the YAML, run `node scripts/gen-config.mjs`, then update these.
 !define VELOX_EXTENSION_ID "keobnkoppcchnbpmmfodidkcedglbhnn"
 !define VELOX_STORE_UPDATE_URL "https://clients2.google.com/service/update2/crx"
 

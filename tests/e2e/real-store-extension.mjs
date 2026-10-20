@@ -27,7 +27,7 @@ import { check, createHarness, exe, finish, path, sha256, sleep, startFileServer
 
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
 const HOST = path.join(path.dirname(APP), exe("velox-native-host"));
-const ID = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(fs.readFileSync("crates/browser-bridge/src/caller.rs", "utf8"))[1];
+const ID = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(fs.readFileSync("crates/browser-bridge/src/generated/identity.rs", "utf8"))[1];
 // Per browser: its launcher and desktop file (what VeloxFetch looks for), its program folder, its profile folder
 // under $HOME, and its system pointer folder (the one compiled into the browser; postinst.sh writes all three).
 const BROWSERS = {

@@ -3,7 +3,8 @@
 One command runs everything that can run without a browser or a display: `node scripts/security-gate.mjs`
 (formatting, clippy, every test below, the policy checks, the audits). One command for the tests alone:
 `cargo test --workspace --locked`, then `npm test --prefix apps/desktop`, `npm test --prefix apps/browser-extension`,
-`node --test tests/security/policy.test.mjs`. The end-to-end scripts in `tests/e2e/` drive the real desktop app
+`node --test tests/security/*.test.mjs` (the policy checks, and `config.test.mjs`: the project config in
+`config/veloxfetch.yaml` is in step with the files generated from it). The end-to-end scripts in `tests/e2e/` drive the real desktop app
 (see "End to end" at the bottom).
 
 ## What each roadmap item is tested by

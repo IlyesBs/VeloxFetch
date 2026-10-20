@@ -400,12 +400,14 @@ fn dry_run_shell() -> bool {
 
 /// The public keys this build trusts for updates (empty: it cannot update itself).
 const UPDATE_KEYS: &str = include_str!("../update-keys.txt");
-/// The public download repository (the source repository is private): the release page, the update feed and the
-/// packages all come from it. `scripts/update-key.mjs` and `scripts/publish-release.sh` name the same one.
-const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases";
-/// GitHub's "latest release" address: drafts and pre-releases are never served here.
-const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/latest/download/latest.json";
-const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/download/";
+// The public download repository (the source repository is private) and the product name come from the single
+// source of truth, config/veloxfetch.yaml (shared with the installers and the publish scripts), compiled in via
+// src/generated/identity.rs. The release page, the update feed and the package prefix are all derived from the
+// owner/repo there. Edit the YAML, then run `node scripts/gen-config.mjs`. Never read from a file at run time,
+// so an install on an unknown computer cannot be made to fetch its "updates" from somewhere else.
+#[path = "generated/identity.rs"]
+mod identity;
+use identity::{PRODUCT, RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES};
 
 /// Where updates come from. Debug builds never ask the real release server: only a local one, when the end-to-end
 /// test sets it up (`VELOX_UPDATE_FEED`, `VELOX_UPDATE_PREFIX`, `VELOX_UPDATE_KEYS`).
@@ -415,7 +417,7 @@ fn update_config() -> Option<download_manager::UpdateConfig> {
         keys: update_verify::TrustedKeys::parse(UPDATE_KEYS)
             .map_err(|e| tracing::error!(error = %e, "the trusted update keys of this build are unreadable: no updates"))
             .ok()?,
-        policy: update_verify::Policy { product: "VeloxFetch".into(), url_prefix: UPDATE_PACKAGES.into(), allow_loopback_http: false },
+        policy: update_verify::Policy { product: PRODUCT.into(), url_prefix: UPDATE_PACKAGES.into(), allow_loopback_http: false },
         feed: UPDATE_FEED.into(),
         release_page: RELEASE_PAGE.into(),
         current,
