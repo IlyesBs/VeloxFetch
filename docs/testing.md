@@ -781,6 +781,15 @@ one of its own (`held`); both happen under the queue's lock, so nothing can let 
 the count in that moment. It now waits for the count (bounded), as does `smart_preview`'s game pause test, which had
 the same read. 0 failures in 60 and 15 runs. No app code changed.
 
+**Long tab labels in the vertical column (`fix_settings_nav_wrap`, October 2026).** At 768 px and up the Settings
+tabs stack in a narrow column (11 rem). A long label — French "File d'attente et planification" / "Navigateur et
+presse-papiers", and the longer German and Portuguese ones — wrapped to a second line and, because the tab was a
+fixed `h-8`, overflowed its height and overlapped the next tab. The tab is now `min-h-8` (it grows to hold the
+wrapped label; `leading-tight`, the icon `shrink-0`), and in the narrow horizontal tab row, where a tab is
+auto-width, the label stays on one line. `desktop-i18n.mjs` opens Settings at 1100 px and, in **every language the
+build offers** (three on `main`, eight on `v2.0.0`), checks that no section tab overflows its own height and that no
+two tabs overlap.
+
 ## Firefox data consent (October 2026)
 
 addons.mozilla.org refused the add-on's zip: `data_collection_permissions` missing. `package.test.mjs` now checks that the

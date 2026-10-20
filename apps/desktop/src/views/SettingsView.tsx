@@ -109,7 +109,7 @@ export function SettingsView() {
         <div className="flex gap-1 overflow-x-auto pb-1 md:flex-col md:overflow-visible md:pb-0">
           {SECTIONS.map((s) => (
             <button key={s.id} className="nav-link w-auto shrink-0 md:w-full md:shrink" aria-current={current === s.id} onClick={() => jump(s.id)}>
-              <Icon name={s.icon} size={15} />
+              <Icon name={s.icon} size={15} className="shrink-0" />
               {t(s.label)}
             </button>
           ))}
