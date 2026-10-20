@@ -455,7 +455,7 @@ try {
   // ---- 8. "Install extension" button: Chrome, Edge and Brave from the Chrome Web Store, never a folder -------------
   check("each browser row offers Install extension (nothing is connected yet)", (await text("[data-testid=browser-brave-toggle]")) === "Install extension" && (await page("document.querySelectorAll('[data-testid=extension-steps]').length")).ok === 0);
   const badges = await Promise.all(["chrome", "edge", "brave", "firefox"].map((b) => text(`[data-testid=browser-${b}-store]`)));
-  check("Chrome, Edge and Brave are marked Chrome Web Store, Firefox is not", badges.join() === "Chrome Web Store,Chrome Web Store,Chrome Web Store,", JSON.stringify(badges));
+  check("Chrome, Edge and Brave are marked Chrome Web Store, Firefox is marked Firefox Add-ons", badges.join() === "Chrome Web Store,Chrome Web Store,Chrome Web Store,Firefox Add-ons", JSON.stringify(badges));
   check("the introduction says the browsers get it from the Chrome Web Store", /Chrome Web Store/.test((await text("[data-testid=extension-intro]")) ?? ""));
   await click("[data-testid=browser-brave-toggle]");
   await waitFor(async () => (await text("[data-testid=extension-steps]")) !== null, "installation steps to appear");
@@ -485,11 +485,17 @@ try {
   const statuses = await Promise.all(["chrome", "edge", "brave", "firefox"].map((b) => text(`[data-testid=browser-${b}-status]`)));
   check("only the browser whose button was pressed got connected (Brave, not the default one)", statuses.join() === "Not connected,Not connected,Connected,Not connected", statuses.join());
   check("a connected row offers Disconnect and Show steps", (await text("[data-testid=browser-brave-toggle]")) === "Disconnect" && (await page("!!document.querySelector('[data-testid=browser-brave-steps]')")).ok === true);
+  // Firefox installs from Firefox Add-ons (AMO), like a store: click Install and check the store flow in the UI.
+  await click("[data-testid=browser-firefox-toggle]");
+  await waitFor(async () => /Firefox Add-ons/.test((await text("[data-testid=extension-steps]")) ?? ""), "Firefox store steps");
+  const ffSteps = (await text("[data-testid=extension-steps]")) ?? "";
+  check("Firefox installs from Firefox Add-ons (AMO) in the UI: its page + Add to Firefox, no Developer mode, no folder",
+    /Firefox Add-ons/.test(ffSteps) && /Add to Firefox/.test(ffSteps) && !/Load Temporary Add-on|Developer mode/.test(ffSteps) && (await text("[data-testid=extension-folder]")) === null, ffSteps);
+  check("the Firefox Add-ons page address is shown to open by hand", (await text("[data-testid=extension-store-url]"))?.trim() === "https://addons.mozilla.org/addon/veloxfetch/");
+  check("no Firefox extension folder is prepared when it installs from the store", !fs.existsSync(path.join(h.dataDir, "browser-extension", "firefox")));
   const ffInstall = await invoke("install_browser_extension", { request: { browser: "firefox" } });
-  check("Firefox (no store add-on yet) gets its own build (temporary add-on manifest)", ffInstall.ok?.method === "developer" && ffInstall.ok.folder.endsWith("firefox") && !!JSON.parse(fs.readFileSync(path.join(ffInstall.ok.folder, "manifest.json"), "utf8")).browser_specific_settings, JSON.stringify(ffInstall));
-  const ffFolder = ffInstall.ok?.folder ?? "";
-  check("the copy is complete (background script, popup, icons)", ["background.js", "popup.html", "popup.js", "lib/validate.js", "icons/128.png"].every((f) => fs.existsSync(path.join(ffFolder, f))));
-  check("no program was started by the test run", ffInstall.ok?.openedBrowser === false && ffInstall.ok?.openedFolder === false);
+  check("Firefox install returns the store method, the AMO page, no folder, nothing started",
+    ffInstall.ok?.method === "store" && ffInstall.ok.folder === "" && ffInstall.ok.storeUrl === "https://addons.mozilla.org/addon/veloxfetch/" && ffInstall.ok.openedBrowser === false && ffInstall.ok.openedFolder === false, JSON.stringify(ffInstall));
   const badExt = await invoke("install_browser_extension", { request: { browser: "netscape" } });
   check("an unknown browser is rejected", !!badExt.err);
   const pathExt = await invoke("install_browser_extension", { request: { browser: "chrome", folder: "C:\evil" } });

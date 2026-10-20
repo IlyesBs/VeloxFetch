@@ -14,6 +14,7 @@ use browser_bridge::{
     chromium_ids, serve, Allowlist, Caller, DownloadRequest, Endpoint, Listener, MediaHint, Token, CHROME_EXTENSION_ID, CHROME_STORE_ID,
     FIREFOX_EXTENSION_ID, HOST_NAME,
 };
+use crate::identity::FIREFOX_STORE_URL;
 use download_manager::{ApiError, BrowserContext, DownloadManager, ManagerError, NewDownload};
 
 /// Called when a download is waiting for the user (brings the window to the front).
@@ -229,6 +230,8 @@ pub struct BrowserIntegrationDto {
     /// The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there.
     pub chrome_store_id: Option<String>,
     pub firefox_extension_id: String,
+    /// The Firefox Add-ons (AMO) listing Firefox gets the add-on from (`None` = not published yet).
+    pub firefox_store_url: Option<String>,
     /// Ask the user (a dialog with the file's details) before a browser download starts.
     pub confirm_downloads: bool,
     /// Show the "Download video" bar over videos in the browser.
@@ -546,6 +549,7 @@ impl Bridge {
             chrome_extension_id: CHROME_EXTENSION_ID.to_string(),
             chrome_store_id: CHROME_STORE_ID.map(str::to_string),
             firefox_extension_id: FIREFOX_EXTENSION_ID.to_string(),
+            firefox_store_url: FIREFOX_STORE_URL.map(str::to_string),
             confirm_downloads: self.manager.browser_confirm(),
             video_bar: self.manager.video_bar(),
             secrets_protected: self.manager.secrets_protected(),
@@ -608,7 +612,25 @@ impl Bridge {
             });
         }
 
-        // 3. Firefox (until its add-on is published), or no store id: the extension files, in a fixed folder inside the app's data folder
+        // 2b. Firefox: the published add-on on Firefox Add-ons (AMO). Its listing opens with Firefox's own Add
+        // button. Firefox has no per-user external-extension pointer (nothing to register), so we only open it.
+        if browser == Browser::Firefox {
+            if let Some(url) = FIREFOX_STORE_URL {
+                let opened_browser =
+                    launching && launch::find_browser(browser, platform).is_some_and(|l| launch::open_url(&l, url).is_ok());
+                return Ok(ExtensionInstallDto {
+                    browser,
+                    method: "store",
+                    folder: String::new(),
+                    store_url: url.to_string(),
+                    opened_browser,
+                    opened_folder: false,
+                    integration: self.integration(),
+                });
+            }
+        }
+
+        // 3. Firefox before its add-on was published, or no store id: the extension files, in a fixed folder inside the app's data folder
         let family = if browser == Browser::Firefox { "firefox" } else { "chromium" };
         let source = dev_var("VELOX_EXTENSION_SRC")
             .map(PathBuf::from)

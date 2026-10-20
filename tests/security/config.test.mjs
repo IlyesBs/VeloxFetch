@@ -33,6 +33,15 @@ test("the single source of truth pins the public download repository and a valid
   assert.equal(val("releases_repo"), "VeloxFetch-releases");
   assert.match(val("chrome_store_id"), /^[a-p]{32}$/, "the Chrome Web Store id is 32 chars a–p");
   assert.equal(val("native_host_name"), "app.velox.fetch");
+  // The Firefox Add-ons listing the app opens for Firefox users: an https addons.mozilla.org page, generated
+  // into the desktop binary as FIREFOX_STORE_URL.
+  const firefoxStore = val("firefox_store_url");
+  assert.match(firefoxStore, /^https:\/\/addons\.mozilla\.org\/[^\s]+$/, "firefox_store_url is an https addons.mozilla.org page");
+  assert.match(
+    read("apps", "desktop", "src-tauri", "src", "generated", "identity.rs"),
+    new RegExp(`FIREFOX_STORE_URL: Option<&str> = Some\\("${firefoxStore.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)`),
+    "FIREFOX_STORE_URL is generated from the YAML",
+  );
 });
 
 test("the trust anchors are compiled in, never read from a file at run time", () => {
