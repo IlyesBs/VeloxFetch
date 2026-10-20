@@ -433,7 +433,7 @@ dependencies = [
 
 [[package]]
 name = "browser-bridge"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "getrandom 0.2.17",
  "hmac 0.12.1",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "diagnostics"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "tracing",
  "tracing-core",
@@ -1190,7 +1190,7 @@ checksum = "75b325c5dbd37f80359721ad39aca5a29fb04c89279657cffdda8736d0c0b9d2"
 
 [[package]]
 name = "download-manager"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "diagnostics",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "downloader-core"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "failpoint",
@@ -1415,7 +1415,7 @@ dependencies = [
 
 [[package]]
 name = "failpoint"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "libc",
 ]
@@ -2097,7 +2097,7 @@ dependencies = [
 
 [[package]]
 name = "http-client"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2696,7 +2696,7 @@ dependencies = [
 
 [[package]]
 name = "media-engine"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "bytes",
  "failpoint",
@@ -3234,7 +3234,7 @@ dependencies = [
 
 [[package]]
 name = "path-safety"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "libc",
 ]
@@ -3247,7 +3247,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "persistence"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "downloader-core",
  "failpoint",
@@ -3944,7 +3944,7 @@ dependencies = [
 
 [[package]]
 name = "scheduler"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "secrets"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "chacha20poly1305",
  "getrandom 0.2.17",
@@ -4534,7 +4534,7 @@ dependencies = [
 
 [[package]]
 name = "system-integration"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "arboard",
  "serde",
@@ -5309,7 +5309,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "update-verify"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "ed25519-dalek",
  "serde",
@@ -5381,7 +5381,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "velox-bench"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "downloader-core",
  "persistence",
@@ -5393,7 +5393,7 @@ dependencies = [
 
 [[package]]
 name = "velox-cli"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "clap",
  "diagnostics",
@@ -5405,7 +5405,7 @@ dependencies = [
 
 [[package]]
 name = "velox-desktop"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "browser-bridge",
  "diagnostics",
@@ -5430,7 +5430,7 @@ dependencies = [
 
 [[package]]
 name = "velox-integration-tests"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "diagnostics",
  "download-manager",
@@ -5452,7 +5452,7 @@ dependencies = [
 
 [[package]]
 name = "velox-native-host"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "browser-bridge",
  "diagnostics",
