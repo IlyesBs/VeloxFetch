@@ -158,6 +158,27 @@ try {
     await h.cdp.send("Emulation.clearDeviceMetricsOverride");
     check(`${lang}: no page is wider than a narrow window, the Settings tabs scroll in their row, the status bar fits`, wide.length === 0, wide.join(" | "));
   }
+
+  // The Settings section tabs sit in a narrow vertical column (>= 768 px). A long label — French "File d'attente et
+  // planification" / "Navigateur et presse-papiers", and the longer German / Portuguese ones — must wrap and grow
+  // its tab, never overflow the tab's height and overlap the next one. Checked in every language the app offers.
+  await h.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
+  await click("[data-testid=nav-settings]");
+  const langs = await ev(`[...document.querySelectorAll('[data-testid^=settings-lang-]')].map((b) => b.getAttribute('data-testid').slice('settings-lang-'.length))`);
+  const navBad = [];
+  for (const lang of langs) {
+    await click(`[data-testid=settings-lang-${lang}]`);
+    await waitFor(async () => (await ev("document.documentElement.lang")) === lang, `the ${lang} interface`);
+    await sleep(150);
+    const bad = await ev(`(() => { const out = []; const btns = [...document.querySelectorAll('[data-testid=settings-nav] button')];
+      for (const b of btns) if (b.scrollHeight > b.clientHeight + 1) out.push((b.innerText || '').replace(/\\s+/g, ' ').trim() + ' ' + b.scrollHeight + '>' + b.clientHeight);
+      for (let i = 1; i < btns.length; i++) { const a = btns[i - 1].getBoundingClientRect(), c = btns[i].getBoundingClientRect(); if (c.top < a.bottom - 1) out.push('tabs overlap at ' + i); }
+      return out; })()`);
+    if (bad.length) navBad.push(`${lang}: ${bad.join(", ")}`);
+  }
+  await h.cdp.send("Emulation.clearDeviceMetricsOverride");
+  check("every Settings section tab holds its label without overflow or overlap in every language (long labels wrap)", navBad.length === 0, navBad.join(" | "));
+
   await click("[data-testid=nav-settings]");
   await click("[data-testid=settings-lang-en]");
 } catch (e) {

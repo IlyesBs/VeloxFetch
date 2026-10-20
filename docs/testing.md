@@ -754,6 +754,15 @@ Settings at 900, 760 and 640 px in English, French and Arabic and checks that no
 made to scroll sideways, like tab bars, excepted), that each Settings tab stays a tab and the tab row fits the window,
 and that nothing is pushed out of the status bar.
 
+**Long tab labels in the vertical column (`fix_settings_nav_wrap`, October 2026).** At 768 px and up the Settings
+tabs stack in a narrow column (11 rem). A long label — French "File d'attente et planification" / "Navigateur et
+presse-papiers", and the longer German and Portuguese ones — wrapped to a second line and, because the tab was a
+fixed `h-8`, overflowed its height and overlapped the next tab. The tab is now `min-h-8` (it grows to hold the
+wrapped label; `leading-tight`, the icon `shrink-0`), and in the narrow horizontal tab row, where a tab is
+auto-width, the label stays on one line. `desktop-i18n.mjs` opens Settings at 1100 px and, in **every language the
+build offers** (three on `main`, eight on `v2.0.0`), checks that no section tab overflows its own height and that no
+two tabs overlap.
+
 ## Firefox data consent (October 2026)
 
 addons.mozilla.org refused the add-on's zip: `data_collection_permissions` missing. `package.test.mjs` now checks that the
