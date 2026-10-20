@@ -9,23 +9,19 @@
 //! we check again here, against a list compiled into the binary, so a wrongly written manifest (or
 //! the host being run by hand) cannot open the door.
 
-/// Chromium extension id, fixed by the public key in the extension's manifest.
-pub const CHROME_EXTENSION_ID: &str = "gbcanjaaelioalfdggkhbbnbinmfgdbc";
-/// The extension's id in the Chrome Web Store (the store gives an item its own id). Chrome, Edge and Brave get the
-/// extension from the store: the installers point the browsers at it (their own "New extension added" prompt) and
-/// Install extension opens its store page. While it is `None`, browsers get it through Developer mode instead.
-/// The installers carry the same id (`packaging/postinst.sh`, `installer-hooks.nsh`; a test keeps them in step).
-pub const CHROME_STORE_ID: Option<&str> = Some("keobnkoppcchnbpmmfodidkcedglbhnn");
+// The extension ids and the host name are compiled in from the single source of truth,
+// config/veloxfetch.yaml (shared with the installers): edit the YAML, then run `node scripts/gen-config.mjs`.
+// `CHROME_STORE_ID` is the Chrome Web Store id (`None` = not published; Developer mode only). Chrome, Edge and
+// Brave get the extension from the store; the installers point the browsers at that same id (a test keeps them
+// in step). They are never read from a file at run time, so a machine cannot be made to trust another extension.
+#[path = "generated/identity.rs"]
+mod identity;
+pub use identity::{CHROME_EXTENSION_ID, CHROME_STORE_ID, FIREFOX_EXTENSION_ID, HOST_NAME};
 
 /// Every Chromium extension id that may use the bridge: the one loaded unpacked, and the store one.
 pub fn chromium_ids() -> Vec<String> {
     std::iter::once(CHROME_EXTENSION_ID).chain(CHROME_STORE_ID).map(str::to_string).collect()
 }
-
-/// Firefox add-on id (`browser_specific_settings.gecko.id`).
-pub const FIREFOX_EXTENSION_ID: &str = "velox-fetch@velox.app";
-/// Name the host is registered under with the browsers.
-pub const HOST_NAME: &str = "app.velox.fetch";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Caller {

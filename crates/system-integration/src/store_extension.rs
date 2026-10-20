@@ -19,8 +19,11 @@ use std::path::{Path, PathBuf};
 use crate::native_messaging::Browser;
 use crate::Platform;
 
-/// Chrome Web Store's update service: what the browser contacts to fetch the published extension.
-pub const CHROME_STORE_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
+// Compiled in from the single source of truth, config/veloxfetch.yaml (shared with the installers):
+// edit the YAML, then run `node scripts/gen-config.mjs`.
+#[path = "generated/identity.rs"]
+mod identity;
+pub use identity::CHROME_STORE_UPDATE_URL;
 
 /// Linux: the folders the deb / rpm packages put `<id>.json` in, for every user: Chrome's own, Chromium's (which
 /// Brave and other Chromium browsers read too: checked against a real Brave), and Edge's.
