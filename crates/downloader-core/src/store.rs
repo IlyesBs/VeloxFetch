@@ -89,6 +89,9 @@ pub struct DownloadRecord {
     /// The same stamp at resume: the file was not touched since, the saved segments are trusted as they are.
     /// Another stamp (a crash after more writes, an outside change) or none: completed segments are re-hashed first.
     pub part_stamp: Option<String>,
+    /// Where `checksum` came from: `None` the user, `publisher:<list name>` the publisher's list next to the file
+    /// (recorded once the file matched it).
+    pub checksum_source: Option<String>,
 }
 
 impl std::fmt::Debug for DownloadRecord {

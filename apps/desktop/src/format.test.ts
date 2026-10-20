@@ -73,5 +73,15 @@ describe("format", () => {
     }
     expect(opensVideoDialog("https://cdn.test/master.m3u8")).toBe(true);
     expect(opensVideoDialog("https://cdn.test/file.zip")).toBe(false);
+
+  });
+
+  it("opens the video dialog for playlist pages, which list their videos", () => {
+    for (const yes of ["https://www.youtube.com/playlist?list=PL123", "https://music.youtube.com/playlist?list=PL1", "https://www.dailymotion.com/playlist/x6hynp"]) {
+      expect(opensVideoDialog(yes)).toBe(true);
+    }
+    for (const no of ["https://www.youtube.com/feed/playlists", "https://evil.test/playlist?list=PL1", "https://www.youtube.com/@a/playlists"]) {
+      expect(isVideoPage(no)).toBe(false);
+    }
   });
 });

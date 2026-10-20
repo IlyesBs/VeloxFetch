@@ -180,7 +180,7 @@ impl DownloadManager {
         }
     }
 
-    async fn put_setting(&self, key: &'static str, value: String) -> Result<(), ManagerError> {
+    pub(super) async fn put_setting(&self, key: &'static str, value: String) -> Result<(), ManagerError> {
         let store = self.inner.store.clone();
         blocking(move || store.set_setting(key, &value)).await?;
         Ok(())

@@ -21,6 +21,8 @@ pub mod validate;
 pub use api::*;
 pub use batch::{BatchItem, BatchPreview, BatchRequest, BatchResult, ItemState, MAX_BATCH, MAX_GENERATED};
 pub use downloader_core::{DownloadStatus, Priority};
+/// A network to spread downloads over ("several networks at once"; `ManagerConfig::test_networks`).
+pub use http_client::{LaneState, RouteSpec};
 pub use manager::{
     is_stream_link, preview_media_type, smart_throttle_find_running, smart_throttle_is_app_path, DownloadManager, PreviewHead,
     PreviewResponse, ThrottleSignals, UpdatePlan, MAIN_QUEUE, SECRET_KEY_NAME, SMART_THROTTLE_DEFAULT_APPS, THROTTLE_IDLE_AFTER,

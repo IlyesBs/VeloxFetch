@@ -30,7 +30,9 @@ import type {
   PickedFolder,
   Storage,
   FileTarget,
+  MultiNetwork,
   NetworkSettings,
+  SetMultiNetwork,
   SetNetwork,
   SpeedLimits,
   BrowserName,
@@ -43,6 +45,7 @@ import type {
   MediaAnalysis,
   MediaJob,
   MediaRequest,
+  PlaylistRequest,
   Metrics,
   NewDownload,
   PowerAction,
@@ -57,6 +60,7 @@ import type {
   DesktopPrefs,
   SetDesktopPrefs,
   SetSmartThrottle,
+  SetGameMode,
 } from "./types";
 
 export const EVENT_CHANNEL = "velox://event";
@@ -131,8 +135,12 @@ export const api = {
   checkDuplicate: (url: string, checksum?: string) => call<DuplicateMatch | null>("check_duplicate", { request: { url, ...(checksum && { checksum }) } }),
   getClipboardWatch: () => call<ClipboardState>("get_clipboard_watch"),
   setClipboardWatch: (enabled: boolean) => call<ClipboardState>("set_clipboard_watch", { enabled }),
-  analyzeMedia: (url: string, pending?: number) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null }),
+  /** Look for the publisher's checksum next to each file and check the file against it (default on). */
+  getPublisherCheck: () => call<boolean>("get_publisher_check"),
+  setPublisherCheck: (enabled: boolean) => call<boolean>("set_publisher_check", { enabled }),
+  analyzeMedia: (url: string, pending?: number, playlist?: boolean) => call<MediaAnalysis>("analyze_media", { url, pending: pending ?? null, playlist: playlist ?? null }),
   startMedia: (request: MediaRequest) => call<MediaJob>("start_media", { request }),
+  startPlaylist: (request: PlaylistRequest) => call<MediaJob[]>("start_playlist", { request }),
   listMediaJobs: () => call<MediaJob[]>("list_media_jobs"),
   cancelMediaJob: (id: number) => call<void>("cancel_media_job", { id }),
   pauseMediaJob: (id: number) => call<void>("pause_media_job", { id }),
@@ -153,6 +161,8 @@ export const api = {
   chooseDownloadFolder: () => call<Storage | null>("choose_download_folder"),
   getNetwork: () => call<NetworkSettings>("get_network"),
   setNetwork: (request: SetNetwork) => call<NetworkSettings>("set_network", { request }),
+  getMultiNetwork: () => call<MultiNetwork>("get_multi_network"),
+  setMultiNetwork: (request: SetMultiNetwork) => call<MultiNetwork>("set_multi_network", { request }),
   getSpeedLimits: () => call<SpeedLimits>("get_speed_limits"),
   /** Give a download the user name / password its server asked for and start it again. */
   signIn: (id: number, username: string, password: string) => call<Download>("set_download_credentials", { request: { id, username, password } }),
@@ -177,6 +187,7 @@ export const api = {
   setUpdateAuto: (enabled: boolean) => call<UpdateStatus>("set_update_auto", { enabled }),
   openReleasePage: () => call<void>("open_release_page"),
   setSmartThrottle: (request: SetSmartThrottle) => call<SmartThrottle>("set_smart_throttle", { request }),
+  setGameMode: (request: SetGameMode) => call<SmartThrottle>("set_game_mode", { request }),
   setPreviewMode: (id: number, enabled: boolean) => call<PreviewInfo>("set_preview_mode", { id, enabled }),
   getPreviewInfo: (id: number) => call<PreviewInfo>("get_preview_info", { id }),
   getPreviewBase: () => call<string | null>("get_preview_base"),

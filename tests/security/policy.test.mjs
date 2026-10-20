@@ -43,10 +43,19 @@ const lockedCrates = () => [...lock().matchAll(/^name = "([^"]+)"$/gm)].map((m) 
 test("no shipped code opens a TCP or UDP listening socket, except the Linux / macOS preview address built to 12.2", () => {
   const bad = [];
   const PREVIEW = path.join("apps", "desktop", "src-tauri", "src", "preview_server.rs");
+  const LANES = path.join("crates", "http-client", "src", "lanes.rs");
   for (const f of shippedRust()) {
     const text = withoutTestModules(fs.readFileSync(f, "utf8"));
-    if (/\b(TcpListener|UdpSocket)\b/.test(text) && path.relative(ROOT, f) !== PREVIEW) bad.push(path.relative(ROOT, f));
+    const rel = path.relative(ROOT, f);
+    if (/\b(TcpListener|UdpSocket)\b|Type::(DGRAM|STREAM|RAW)/.test(text) && rel !== PREVIEW && rel !== LANES) bad.push(rel);
   }
+  // Several networks at once asks the system which route it would use to a server (so a VPN is never gone around):
+  // one datagram socket, never bound by hand, never sent on, read or listening, closed at once. Nothing else.
+  const lanes = withoutTestModules(read("crates", "http-client", "src", "lanes.rs"));
+  assert.equal((lanes.match(/Type::DGRAM/g) ?? []).length, 1, "one route question");
+  assert.ok(!/TcpListener|UdpSocket|Type::(STREAM|RAW)|\.bind\(|\.listen\(|\.send|\.recv|\.accept\(/.test(lanes), "never bound, sent on, read or listening");
+  const ask = lanes.slice(lanes.indexOf("pub fn system_source_for"), lanes.indexOf("pub fn spreadable"));
+  assert.match(ask, /s\.connect\(&to\.into\(\)\)\.ok\(\)\?;\s*s\.local_addr\(\)/, "connect (no packet), read the chosen address, done");
   assert.deepEqual(bad, [], "a local HTTP/TCP API needs the 12.2 design (127.0.0.1 + token + Origin + schemas + rate limits) first");
   // The one exception (WebKitGTK's player cannot read a custom protocol; WKWebView's cannot stream a growing file
   // through one): 12.2 in full, Linux and macOS only (Windows keeps the custom protocol), read-only.
@@ -276,9 +285,12 @@ test("updates are only our own signed design (Phase 19, docs/auto-update.md)", (
   // The public download repository (the source one is private): the app, the manifest tool and the publish script
   // all name the same one, or the manifest would list packages the app refuses.
   const PUBLIC = "IlyesBs/VeloxFetch-releases";
-  assert.match(lib, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
-  assert.match(lib, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
-  assert.match(lib, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
+  // The update addresses are generated into identity.rs from config/veloxfetch.yaml (config.test.mjs checks they
+  // are in step); they are still what the built binary trusts, so the invariant is asserted on the compiled values.
+  const ids = read("apps", "desktop", "src-tauri", "src", "generated", "identity.rs");
+  assert.match(ids, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
+  assert.match(ids, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
+  assert.match(ids, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
   assert.match(tool, new RegExp(`const REPO = "${PUBLIC}"`));
   assert.match(read("scripts", "publish-release.sh"), new RegExp(`^PUBLIC_REPO="${PUBLIC}"$`, "m"));
   assert.doesNotMatch(lib, /fn (download_update|install_update|check_for_updates)\([^)]*(url|path|String)/);
@@ -720,6 +732,44 @@ test("Download Intelligence: main window only, a link only, read-only, one quick
   assert.match(pending, /task\.abort\(\); \/\/ answered/);
 });
 
+test("the publisher's checksum: main window only, https next to the file, no cookie or sign-in, bounded, never called safe", () => {
+  const lookup = withoutTestModules(read("crates", "download-manager", "src", "manager", "publisher.rs"));
+  const lists = withoutTestModules(read("crates", "downloader-core", "src", "integrity.rs"));
+  const app = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  // The switch is the main window's only.
+  for (const c of ["get_publisher_check", "set_publisher_check"]) {
+    assert.match(read("apps", "desktop", "src-tauri", "build.rs"), new RegExp(`"${c}"`));
+    assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), new RegExp(`"allow-${c.replaceAll("_", "-")}"`));
+    for (const other of ["download-window.json", "settings-window.json"]) {
+      assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes(c.replaceAll("_", "-")), `${c} not in ${other}`);
+    }
+  }
+  // https only; plain http only through the debug-only test switch (a release never reads it).
+  assert.match(lookup, /url\.scheme\(\) == "https" \|\| over_http && url\.scheme\(\) == "http"/);
+  assert.match(read("crates", "download-manager", "src", "api.rs"), /publisher_over_http: false,/);
+  assert.match(app, /if dev_only\("VELOX_PUBLISHER_HTTP"\)\.is_some\(\) \{\s*cfg\.publisher_over_http = true;/);
+  assert.equal((app.match(/publisher_over_http/g) ?? []).length, 1, "set in one place only");
+  // The lists: the protected client, a plain GET (no cookie, sign-in, referrer or header), the same host, never the
+  // link's query, bounded in size and time.
+  assert.match(lookup, /self\.media_client\(\)\.get\(url\)/);
+  const code = lookup.split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  assert.ok(!/get_with|RequestExtras|cookie|authorization|referer|header\(/i.test(code.replace(/headers\(\)\.get\("content-type"\)/, "")), "nothing private goes with a list");
+  assert.match(lookup, /folder\.set_query\(None\);/);
+  assert.match(lookup, /resp\.url\(\)\.host_str\(\) != url\.host_str\(\)/);
+  assert.match(lookup, /const MAX_LIST: usize = 1024 \* 1024;/);
+  assert.match(lookup, /tokio::time::timeout\(LOOKUP_BUDGET, self\.ask_lists\(url\)\)/);
+  assert.match(lookup, /tokio::time::timeout\(LIST_TIMEOUT, read\)/);
+  assert.match(lists, /take\(MAX_LIST_LINES\)/);
+  // Nothing is written but the setting; the list's address is never logged or kept.
+  assert.ok(!/OpenOptions|File::create|fs::write|remove_file|rename\(|create_dir/.test(lookup), "the lookup writes no file");
+  assert.ok(!/tracing::[a-z]+!\([^;]*url/.test(lookup), "no address in the log");
+  // Never "safe": the interface says what it proves.
+  const en = JSON.parse(read("apps", "desktop", "src", "locales", "en.json"));
+  const texts = Object.entries(en).filter(([k]) => k.startsWith("verify.")).map(([, v]) => v);
+  assert.ok(texts.length > 10 && texts.every((t) => !/\bsafe\b/i.test(t)), "never called safe");
+  assert.match(en["verify.setLimit"], /not that the site can be trusted/);
+});
+
 test("Download Doctor: diagnoses only, never retries or writes by itself, no error text or secret kept", () => {
   const rules = withoutTestModules(read("crates", "download-manager", "src", "doctor.rs"));
   const glue = withoutTestModules(read("crates", "download-manager", "src", "manager", "doctor.rs"));
@@ -892,8 +942,35 @@ test("one version everywhere (the updater compares it; the extension reports it)
   }
 });
 
+test("Game mode: main window only, bounded, strict requests, nothing new looked at or sent", () => {
+  // (This file has a test-only helper near the top: cut at its test module instead.)
+  const smartAll = read("crates", "download-manager", "src", "manager", "smart_throttle.rs");
+  const smart = smartAll.slice(0, smartAll.indexOf("#[cfg(test)]\nmod tests"));
+  const api = read("crates", "download-manager", "src", "api.rs");
+  const desktop = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "desktop.rs"));
+  // The switch is the main window's only (the tray item runs in the app itself, not through a command).
+  assert.match(read("apps", "desktop", "src-tauri", "build.rs"), /"set_game_mode"/);
+  assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), /"allow-set-game-mode"/);
+  for (const other of ["download-window.json", "settings-window.json"]) {
+    assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes("game-mode"), `set_game_mode not in ${other}`);
+  }
+  // A strict request: unknown fields refused, at most a day, never longer than a day from now.
+  const req = api.slice(api.indexOf("pub struct SetGameMode") - 120, api.indexOf("pub struct SetGameMode"));
+  assert.match(req, /deny_unknown_fields/);
+  assert.match(smart, /pub const MAX_GAME_MODE_MINUTES: u32 = 24 \* 60;/);
+  assert.match(smart, /\.min\(now \+ i64::from\(MAX_GAME_MODE_MINUTES\) \* 60_000\)/);
+  // A saved end that cannot be read is off (never "on for ever" by accident); one that has passed is forgotten.
+  assert.match(smart, /ms if ms > 0 => Some\(GameUntil::At\(ms\)\),\s*_ => None,/);
+  assert.match(smart, /\.filter\(\|g\| !g\.ended\(now_ms\(\)\)\)/);
+  assert.match(smart, /delete_setting\(GAME_MODE_UNTIL_KEY\)/);
+  // Nothing new is looked at: Game mode does not scan programs or send anything; the end notification is local.
+  const game = smart.slice(smart.indexOf("pub async fn set_game_mode"), smart.indexOf("pub(super) fn resume_game_mode"));
+  assert.ok(!/http|client|send|running_programs|sysinfo/i.test(game.replace(/\/\/.*$/gm, "")), "Game mode only changes the cap and the queue");
+  assert.match(desktop, /notify\(manager, &text\(&prefs\.language, "gm\.endedTitle"\), &text\(&prefs\.language, "gm\.endedBody"\)\)/);
+});
+
 test("the installers point the browsers at the store extension the app trusts, at the documented places only, and remove it", () => {
-  const id = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(read("crates/browser-bridge/src/caller.rs"))?.[1];
+  const id = /CHROME_STORE_ID: Option<&str> = Some\("([a-p]{32})"\)/.exec(read("crates/browser-bridge/src/generated/identity.rs"))?.[1];
   assert.ok(id, "CHROME_STORE_ID is set");
   const store = read("crates/system-integration/src/store_extension.rs");
   const folders = [.../LINUX_SYSTEM_FOLDERS: \[&str; 3\] =\s*\[([^\]]+)\]/.exec(store)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);

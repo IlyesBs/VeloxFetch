@@ -14,9 +14,10 @@ import { SignInDialog } from "../components/SignInDialog";
 import { SegmentMap, SegmentRows } from "../components/SegmentMonitor";
 import { formatBytes, formatEta, formatPercent, formatSpeed, fraction, parseRate } from "../format";
 import { useDetail, useDownload } from "../hooks";
-import { PRIORITIES, type Diagnosis, type Priority } from "../types";
+import { PRIORITIES, type Diagnosis, type Download, type Priority } from "../types";
 import { Icon } from "../ui/icons";
 import { ProgressBar, Sparkline, StatusChip } from "../ui/primitives";
+import { verifyText } from "../components/VerifyBadge";
 
 /** No diagnosis (a download that failed before Download Doctor): the Retry button keeps its usual label. */
 const NO_DOCTOR: Diagnosis = { category: "unknown", code: "other", source: "unknown", httpStatus: null, retry: "unknown", retryAfterSecs: null, retryAtMs: null, severity: "recoverable", factors: [], actions: [], neededBytes: null, freeBytes: null };
@@ -41,6 +42,46 @@ export function Card({ title, right, children, testId }: { title: string; right?
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * The file's integrity (feature #6), in plain words: verified against the publisher's checksum (which list, which
+ * kind) or the user's; checked before it is finished; arrived damaged; or no checksum known (only its size is checked).
+ */
+function IntegrityCard({ d, checksum }: { d: Download; checksum: string | null }) {
+  const t = useT();
+  const v = d.verify;
+  const damaged = d.errorCode === "publisher_checksum_mismatch" || d.errorCode === "checksum_mismatch";
+  const [tone, title, text] = damaged
+    ? (["text-bad", t("verify.damaged"), t(d.errorCode === "publisher_checksum_mismatch" ? "verify.damagedPublisherTip" : "verify.damagedYouTip")] as const)
+    : v
+      ? ([v.state === "verified" ? "text-ok" : v.state === "ready" ? "text-accent" : "text-dim", t(v.state === "verified" ? "verify.verified" : v.state === "ready" ? "verify.ready" : "verify.looking"), verifyText(t, v)] as const)
+      : (["text-dim", t("verify.none"), t("verify.noneTip")] as const);
+  return (
+    <Card title={t("verify.title")} testId="integrity-card">
+      <div className="flex items-start gap-3" data-state={damaged ? "damaged" : (v?.state ?? "none")} data-by={v?.by ?? undefined}>
+        <Icon name={damaged ? "alert" : "shield"} size={30} strokeWidth={1.6} className={`mt-0.5 shrink-0 ${tone}`} />
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className={`text-[15px] font-semibold ${tone}`} data-testid="integrity-title">
+            {title}
+          </p>
+          <p className="text-[13px] text-dim" data-testid="integrity-text">
+            {text}
+          </p>
+          {checksum && v?.state === "verified" && (
+            <p className="flex min-w-0 items-center gap-2 pt-1">
+              <span className="truncate font-mono text-xs text-fg/80" title={checksum} data-testid="integrity-checksum">
+                {checksum}
+              </span>
+              <button className="shrink-0 text-dim hover:text-fg" aria-label={tr("det.copy", { what: t("det.checksum") })} onClick={() => void actions.copy(checksum)}>
+                <Icon name="copy" size={14} />
+              </button>
+            </p>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -240,6 +281,8 @@ export function DetailView({ id, onBack }: { id: number; onBack: () => void }) {
           </div>
         </Card>
       </div>
+
+      <IntegrityCard d={d} checksum={detail.checksum} />
 
       <Card
         title={t("det.segments")}

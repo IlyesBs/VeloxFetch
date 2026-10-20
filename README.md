@@ -6,14 +6,17 @@ desktop app (React + TypeScript + Tailwind).
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational)
 
-VeloxFetch downloads files fast and reliably, integrates with your browser, handles video sites, and keeps
-everything on your computer — no accounts, no telemetry. It runs on Windows and Linux, in eight languages, with a
-right-to-left interface in Arabic.
+VeloxFetch downloads files fast and reliably, integrates with your browser, handles video sites and whole
+playlists, and keeps everything on your computer — no accounts, no telemetry. It runs on Windows and Linux, in
+eight languages, with a right-to-left interface in Arabic.
 
 ## Download
 
 Get the latest build for **Windows** and **Linux** from the releases page:
 **https://github.com/IlyesBs/VeloxFetch-releases/releases** (macOS: in progress).
+
+Browser extension: **Chrome / Edge / Brave** from the Chrome Web Store, **Firefox** from
+[Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/). Installing VeloxFetch points your browser to it.
 
 ## Support
 
@@ -34,6 +37,12 @@ and a broken single-connection transfer continues where it stopped — only when
 file. The engine moves roughly **1.1 – 1.8 GB/s on loopback** at any connection count, uses a few percent of one
 core at gigabit speed, and finishes the file as the last byte lands.
 
+### Several networks at once
+Spread a download's connections over your networks (Wi-Fi, a cable, a phone shared over USB) so their speeds add up
+(Settings → Network, off by default). Only for secure links to the internet, never through a proxy or around a VPN;
+you can leave out any network (a phone with a data cap). A network that stops working hands its part back to your
+usual connection at once, and the dashboard shows each network's speed and their total.
+
 ### Never lose a download
 A failure the network or server may recover from (no connection, DNS, timeout, dropped connection, 408 / 425 / 429 /
 5xx) is retried on its own from the bytes already saved. Offline, nothing is sent and no attempt is wasted; it
@@ -45,20 +54,26 @@ Every ranged response must carry the download's version and total size, so two v
 combined. Servers that give no strong version tag no longer force a resume to start over — a few small samples of
 the saved bytes are compared with the server's first.
 
-### Browser integration
-Chrome, Edge and Brave get the extension from the **Chrome Web Store**; Firefox from
-**[Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/)**. Installing VeloxFetch asks the browser to add
-it. A download started in the browser while VeloxFetch is closed launches the app — including for browsers installed
-as Snap or Flatpak packages. The confirmation dialog can also take a site's username and password when the server
-asks for them.
+### Publisher checksum
+When a site publishes a checksum next to a file (`SHA256SUMS`, `SHA512SUMS`, `<file>.sha256`…), VeloxFetch finds it
+while the file downloads — a few small same-site requests, no cookie or sign-in — and verifies the file before it is
+finished, marking it **Verified**. A damaged file is never kept.
 
-### Video downloads
+### Browser integration
+Chrome, Edge and Brave get the extension from the **Chrome Web Store**; Firefox from **Firefox Add-ons (AMO)**.
+Installing VeloxFetch asks the browser to add it. A download started in the browser while VeloxFetch is closed
+launches the app — including for browsers installed as Snap or Flatpak packages. The confirmation dialog can also
+take a site's username and password when the server asks for them.
+
+### Video downloads and playlists
 With the extension installed, a **Download video** bar appears over videos — files, HLS / DASH streams, and video
 pages on YouTube, Vimeo and similar sites. Choose the quality and the container (MP4 by default, MKV or WebM; MP3,
-M4A or Opus for audio only). The helper programs video sites need are fetched and kept up to date automatically,
-with nothing to install by hand. A video can be paused, resumed and watched while it downloads, is retried by itself
-when the site or network fails part-way, and lands in the history. Videos protected with DRM cannot be downloaded,
-and the app says so.
+M4A or Opus for audio only). **Whole playlists** too: open a playlist link, or press *Download the whole playlist*
+on one of its videos, tick the ones you want, and they download into a folder named after the playlist, numbered in
+order, a few at a time. The helper programs video sites need (yt-dlp, Deno, ffmpeg) are fetched and kept up to date
+automatically, with nothing to install by hand. A video can be paused, resumed and watched while it downloads, is
+retried by itself when the site or network fails part-way, and lands in the history. DRM-protected videos cannot be
+downloaded, and the app says so.
 
 ### Smart throttle
 Three levels (Settings → Speed, and the dashboard card):
@@ -70,6 +85,11 @@ Three levels (Settings → Speed, and the dashboard card):
 Under a cap a download keeps only the connections it needs and reads in small, even steps, so the line sees no
 bursts and nothing stops when a cap starts, changes or lifts. The detail view can **preview** audio and video while
 they download.
+
+### Game mode
+One click — the status bar's gamepad, the tray menu, or Ctrl+G — and downloads give way to a game or a call at once
+(give way, a low speed limit, or pause), with a banner and a countdown, lifted when you turn it off or the timer
+ends.
 
 ### Smart download queue and scheduling
 Create several queues, each with a few plain rules (time windows, idle-only, not on mobile data, pause while the
@@ -95,6 +115,10 @@ you from downloading anyway.
   retrying helps, and what to do.
 - **Download profiles** — Default, Fast, Balanced, Low resource, and your own; presets over speed limit, downloads
   at once, connections and Smart throttle, applied without restarting downloads.
+
+### Languages
+English, French, Arabic, Spanish, Portuguese (Brazil), German, Russian and Turkish. VeloxFetch starts in your
+computer's language.
 
 ### Privacy and security
 Everything stays on your computer: no accounts, **no telemetry**, no remote code. A small rotating diagnostics log

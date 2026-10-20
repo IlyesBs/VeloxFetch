@@ -24,15 +24,29 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 const EVERY: Duration = Duration::from_secs(3);
 const SCAN_LIMIT: Duration = Duration::from_secs(2);
 
-/// Start the watcher (for the life of the app).
-pub fn spawn(manager: DownloadManager) {
+/// Start the watcher (for the life of the app). It also keeps the tray's Game mode tick in line and says when Game
+/// mode's time ran out.
+pub fn spawn(app: tauri::AppHandle, manager: DownloadManager) {
     tauri::async_runtime::spawn(async move {
+        // When Game mode was to end, as last seen (`Some(None)`: on until turned off).
+        let mut game_until: Option<Option<i64>> = None;
         // Kept between scans: refreshing an existing list is much cheaper than building a new one.
         let system: Arc<Mutex<Option<System>>> = Arc::new(Mutex::new(None));
         let mut tick = tokio::time::interval(EVERY);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tick.tick().await;
+            let gm = manager.smart_throttle().game_mode;
+            let now = gm.on.then_some(gm.until_ms);
+            if let (Some(Some(until)), None) = (game_until, now) {
+                // Off since the last tick, and its time had come: it ran out (the user did not turn it off).
+                let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+                if now_ms + 1_000 >= until {
+                    crate::desktop::notify_game_mode_ended(&app, &manager);
+                }
+            }
+            game_until = now;
+            crate::desktop::sync_tray_game(&app, gm.on, &manager.desktop_prefs().language);
             if !manager.smart_throttle_enabled() {
                 // Off: no scan; the manager still learns how fast the connection is.
                 system.lock().map(|mut s| s.take()).ok();

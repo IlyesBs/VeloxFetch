@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/http-client", "crates/downloader-core", "crates/persistence", "crates/download-manager", "crates/scheduler", "crates/system-integration", "crates/browser-bridge", "crates/media-engine", "crates/path-safety", "crates/secrets", "crates/failpoint", "crates/diagnostics", "crates/update-verify", "apps/cli", "apps/native-host", "apps/desktop/src-tauri", "tests/integration", "tests/bench"]
 
 [workspace.package]
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
@@ -21,3 +21,6 @@ tracing = "0.1"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Drop debug symbols and the symbol table from every release binary (the CLI and the native host too,
+# not only the app the bundler already strips): smaller binaries, no debug metadata shipped to users.
+strip = "symbols"

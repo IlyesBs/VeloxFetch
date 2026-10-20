@@ -69,6 +69,7 @@ export const EMPTY_METRICS: Metrics = {
   diskReadBps: null,
   diskWriteBps: null,
   ioSample: 0,
+  networks: null,
 };
 
 /** The side panels' charts: one point per network / disk reading (about one a second). */

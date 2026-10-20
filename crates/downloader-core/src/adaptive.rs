@@ -122,6 +122,9 @@ pub struct AdaptiveController {
     probe_fails: u32,
     /// When `limit` last changed.
     changed_at: Instant,
+    /// Never fewer connections than this, except when the server says "too many" (one per network when a download is
+    /// spread over several: below that a network sits idle).
+    floor: usize,
     /// The last "too many connections" answer, lowering or not.
     last_refusal: Option<Instant>,
 }
@@ -150,7 +153,16 @@ impl AdaptiveController {
             probe_fails: 0,
             changed_at: Instant::now(),
             last_refusal: None,
+            floor: 1,
         }
+    }
+
+    /// Keep at least `n` connections (start with them too), unless the server refuses them (429 / 503).
+    pub fn with_floor(mut self, n: usize) -> Self {
+        self.floor = n.clamp(1, self.ceiling);
+        self.limit = self.limit.max(self.floor);
+        self.prev_limit = self.prev_limit.max(self.floor);
+        self
     }
 
     pub fn limit(&self) -> usize {
@@ -184,7 +196,7 @@ impl AdaptiveController {
     }
 
     fn step_down(&mut self) -> usize {
-        (self.limit / 2).max(1)
+        (self.limit / 2).max(self.floor)
     }
 
     fn hold(&mut self) {
@@ -238,7 +250,8 @@ impl AdaptiveController {
             return None;
         }
         self.throttle_hits = self.throttle_hits.saturating_add(1);
-        let new = self.step_down();
+        // The server's own "too many": below the floor too.
+        let new = (self.limit / 2).max(1);
         let best = self.best_throughput;
         self.lower_to(new, best)
     }
@@ -800,6 +813,25 @@ mod tests {
         for _ in 0..2 {
             assert_eq!(c.observe(s(tp(4, 4))), None, "holding at the plateau");
         }
+    }
+
+    #[test]
+    fn a_floor_keeps_one_connection_per_network_unless_the_server_refuses() {
+        // Spread over 3 networks: it starts with 3 at least and never steps below 3 on errors or a slowdown.
+        let mut c = AdaptiveController::new(cfg(), 1, 16).with_floor(3);
+        assert_eq!(c.limit(), 3);
+        let bad = Sample { throughput: 100.0, errors: 5, latency: None, limited: false };
+        c.observe(s(100.0));
+        for _ in 0..4 {
+            c.observe(bad);
+            assert!(c.limit() >= 3, "{}", c.limit());
+        }
+        // The server's own "too many" still wins (the first one after a quiet spell is a hiccup, the next is not).
+        let now = Instant::now() + Duration::from_secs(60);
+        assert_eq!(c.on_throttled(now), None);
+        assert_eq!(c.on_throttled(now + Duration::from_secs(5)), Some(1));
+        // Never above the user's ceiling.
+        assert_eq!(AdaptiveController::new(cfg(), 1, 2).with_floor(3).limit(), 2);
     }
 
     #[test]

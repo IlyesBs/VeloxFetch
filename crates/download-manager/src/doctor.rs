@@ -288,7 +288,7 @@ impl Failure {
             "folder_not_allowed" => Failure::FolderNotAllowed,
             "write_failed" => Failure::WriteFailed,
             "file_exists" => Failure::FileExists,
-            "checksum_mismatch" => Failure::Checksum,
+            "checksum_mismatch" | "publisher_checksum_mismatch" => Failure::Checksum,
             "incomplete" => Failure::Incomplete,
             "persistence" => Failure::Persistence,
             "web_page" => Failure::WebPage,

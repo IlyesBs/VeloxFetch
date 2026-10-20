@@ -31,7 +31,39 @@ export const LANGS: { lang: Lang; label: string; short: string; dir: "ltr" | "rt
 const isLang = (l: string | null): l is Lang => !!l && LANGS.some((x) => x.lang === l);
 const dirOf = (l: Lang) => LANGS.find((x) => x.lang === l)?.dir ?? "ltr";
 
-/** The saved choice, else English. */
+/**
+ * The first of the computer's languages (`navigator.languages`, most wanted first) there is a file for: the exact
+ * code ("pt-br", "zh-cn"), else the same language ("es-MX" -> "es", "pt-PT" -> "pt-br", "zh-Hans-SG" -> "zh-cn"). Traditional
+ * Chinese has no file yet: never given Simplified. `null`: none (English is used).
+ */
+export function pickLang(wanted: readonly string[], have: readonly string[]): Lang | null {
+  for (const raw of wanted) {
+    const code = raw.trim().toLowerCase().replace(/_/g, "-");
+    if (!/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(code)) continue;
+    if (have.includes(code)) return code;
+    const [base, ...rest] = code.split("-");
+    if (base === "zh") {
+      const traditional = rest.some((p) => ["hant", "tw", "hk", "mo"].includes(p));
+      if (!traditional && have.includes("zh-cn")) return "zh-cn";
+      continue;
+    }
+    if (have.includes(base!)) return base!;
+    const regional = have.find((h) => h.startsWith(`${base}-`));
+    if (regional) return regional;
+  }
+  return null;
+}
+
+/** The computer's languages, as the web view knows them. */
+function systemLangs(): readonly string[] {
+  try {
+    return navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The saved choice, else the computer's language when there is a file for it, else English. */
 function stored(): Lang {
   try {
     const v = localStorage.getItem(KEY);
@@ -39,7 +71,7 @@ function stored(): Lang {
   } catch {
     /* ignore */
   }
-  return "en";
+  return pickLang(systemLangs(), LANGS.map((l) => l.lang)) ?? "en";
 }
 
 const KEY = "velox.lang";

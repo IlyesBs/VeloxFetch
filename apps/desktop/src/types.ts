@@ -55,6 +55,30 @@ export interface Download {
   doctor: Diagnosis | null;
   /** Completed, but its file is no longer on disk (deleted or moved by hand): offer "Download again". */
   fileMissing?: boolean;
+  /** Failed because of the network or a server's passing trouble: tried again on its own. */
+  autoRetry?: AutoRetry | null;
+  /** Integrity check (feature #6): the checksum the file is (or was) checked against. */
+  verify?: Verify | null;
+}
+
+/** A file's integrity check: the publisher's checksum list found next to it on the site, or the user's own. */
+export interface Verify {
+  /** looking: the publisher's list is being looked for; ready: checked before it is finished; verified: it matched. */
+  state: "looking" | "ready" | "verified";
+  by: "publisher" | "you" | null;
+  /** "SHA-256" / "SHA-512". */
+  algo: string | null;
+  /** The publisher's list's name ("SHA256SUMS"), never its address. */
+  list: string | null;
+}
+
+/** When a failed download is tried again on its own (crates/download-manager/src/manager/recovery.rs). */
+export interface AutoRetry {
+  /** The next try (ms since 1970); null while waiting for the network. */
+  atMs: number | null;
+  waitingForNetwork: boolean;
+  tries: number;
+  maxTries: number;
 }
 
 /** Download Doctor (crates/download-manager/src/doctor.rs): every field comes from observed evidence. */
@@ -121,6 +145,8 @@ export interface Diagnostics {
   avgSpeedBps: number;
   activeSecs: number;
   transferred: number;
+  /** Bytes received through each network, when several were used at once. */
+  networks: { name: string; bytes: number; kind?: AdapterKind | null }[];
   events: DiagEvent[];
   /** Download Doctor's diagnosis of the last failure, while it is failed. */
   doctor: Diagnosis | null;
@@ -188,9 +214,30 @@ export interface SmartThrottle {
   gameHold: boolean;
   /** The active Download Profile sets the automatic mode (true also turns Smart throttle on); null: it leaves it. */
   profileAdaptive: boolean | null;
+  /** Off because several networks at once is on (every network at full speed); `enabled` is the user's kept switch. */
+  heldByNetworks: boolean;
+  /** Game mode: on in one click; the gaming policy applies now, whatever level is chosen, until it ends. */
+  gameMode: GameMode;
 }
 
-export type ThrottleReason = "off" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
+export interface GameMode {
+  on: boolean;
+  /** When it ends (Unix ms); null while on: when the user turns it off. */
+  untilMs: number | null;
+  /** How long one click turns it on for (minutes; 0 = until turned off). */
+  minutes: number;
+}
+
+/** Turn Game mode on or off, make it longer, or set how long one click turns it on for. */
+export interface SetGameMode {
+  on?: boolean;
+  /** With on: for this long (minutes; 0 = until turned off); the usual time when left out. */
+  minutes?: number;
+  addMinutes?: number;
+  defaultMinutes?: number;
+}
+
+export type ThrottleReason = "off" | "game" | "fullIdle" | "fullFree" | "browsing" | "busy" | "app" | "easing" | "unknown" | "checking" | "manual";
 
 export interface SetSmartThrottle {
   enabled?: boolean;
@@ -258,6 +305,8 @@ export interface HistoryEntry {
   kind: FileKind;
   /** The file is still where it was saved. */
   exists: boolean;
+  /** Proven by a checksum (feature #6). */
+  verify?: Verify | null;
 }
 
 /** A saved file to show or open: a download of the list or a history line (by id, never by path). */
@@ -274,6 +323,38 @@ export interface NetworkSettings {
   userAgent: string | null;
   defaultUserAgent: string;
   secretsProtected: boolean;
+}
+
+/** Several networks at once (Settings > Network). Network addresses are never sent, only names. */
+export interface MultiNetwork {
+  enabled: boolean;
+  /** On, but nothing is spread: a VPN carries the traffic, or a proxy does. */
+  blocked: "vpn" | "proxy" | null;
+  networks: NetworkLane[];
+}
+
+/** What a network adapter is (Rust `system_integration::AdapterKind`). */
+export type AdapterKind = "wifi" | "ethernet" | "usbEthernet" | "phone" | "mobile" | "bluetooth" | "other";
+
+export interface NetworkLane {
+  /** The system's name (the key choices are saved by); shown only when `kind` is "other". */
+  name: string;
+  kind: AdapterKind;
+  /** The computer's usual route to the internet leaves from it. */
+  main: boolean;
+  /** Not left out by the user. */
+  chosen: boolean;
+  /** While downloads are spread over it; `null`: not used now. */
+  state: "ready" | "working" | "resting" | null;
+  active: number;
+  /** Received through it since the app started. */
+  bytes: number;
+}
+
+export interface SetMultiNetwork {
+  enabled: boolean;
+  /** Names of the networks left out. */
+  skip: string[];
 }
 
 export interface SetNetwork {
@@ -315,6 +396,30 @@ export interface Metrics {
   diskWriteBps: number | null;
   /** Number of that reading: a new one adds a point to the side panels' charts. */
   ioSample: number;
+  /** Several networks at once is on: what each network brings now (null while it is off). */
+  networks: NetworkSpeeds | null;
+}
+
+/** Several networks at once, live (the dashboard's indicator and card). */
+export interface NetworkSpeeds {
+  /** On, but nothing is spread: a VPN carries the traffic, or a proxy does. */
+  blocked: "vpn" | "proxy" | null;
+  /** The chosen networks, and the usual one even when left out (what is not spread goes through it). */
+  networks: NetworkSpeed[];
+  /** Received through the system's route when none of the networks carries it (a VPN), bytes/s. */
+  otherBps: number;
+  /** Sum of every network's speed, bytes/s. */
+  totalBps: number;
+}
+
+export interface NetworkSpeed {
+  name: string;
+  kind: AdapterKind;
+  main: boolean;
+  chosen: boolean;
+  state: "ready" | "working" | "resting" | null;
+  connections: number;
+  speedBps: number;
 }
 
 export interface Progress {
@@ -409,6 +514,8 @@ export interface BrowserIntegration {
   /** The extension's id in the Chrome Web Store: Chrome, Edge and Brave get it from there. */
   chromeStoreId: string | null;
   firefoxExtensionId: string;
+  /** The Firefox Add-ons (AMO) listing Firefox gets the add-on from (null = not published yet). */
+  firefoxStoreUrl: string | null;
   /** Ask before a browser download starts. */
   confirmDownloads: boolean;
   videoBar: boolean;
@@ -547,6 +654,8 @@ export interface Analysis {
   /** Most serious first. */
   findings: Finding[];
   errorCode: string | null;
+  /** The publisher's checksum list was found next to the file: it will be checked against it (feature #6). */
+  publisherChecksum?: { list: string; algo: string } | null;
 }
 
 /** Batch downloads (a list of links, or a pattern like https://host/file_[001-100].zip). */
@@ -699,6 +808,39 @@ export interface MediaAnalysis {
   subtitles: TrackOption[];
   /** ffmpeg was found, so separate video and audio can be joined into one file. */
   combineAvailable: boolean;
+  /** The link is a playlist: its videos (links stay in the app), `streams` holds the qualities for all of them. */
+  playlist?: Playlist;
+  /** The key `startPlaylist` takes (a playlist only). */
+  playlistKey?: string | null;
+  /** The link is one video of a playlist: the whole playlist can be read instead. */
+  partOfPlaylist?: boolean;
+}
+
+export interface Playlist {
+  title: string;
+  /** How many videos the site says it has (may be more than `entries`). */
+  total: number | null;
+  entries: PlaylistEntry[];
+  /** It has more videos than were read (at most 500). */
+  truncated: boolean;
+}
+
+export interface PlaylistEntry {
+  /** Position in the playlist (1-based): what `startPlaylist` takes. */
+  index: number;
+  title: string;
+  durationSecs: number | null;
+  /** False for a private, deleted, members-only or live video. */
+  available: boolean;
+}
+
+export interface PlaylistRequest {
+  key: string;
+  items: number[];
+  quality?: string;
+  format?: string;
+  subdir?: string;
+  pending?: number;
 }
 
 export interface MediaRequest {
@@ -716,7 +858,8 @@ export interface MediaRequest {
   pending?: number;
 }
 
-export type MediaStatus = "preparing" | "downloading" | "combining" | "completed" | "failed" | "cancelled" | "paused";
+/** `queued`: waiting for a free place (a few video downloads run at once); it starts on its own. */
+export type MediaStatus = "queued" | "preparing" | "downloading" | "combining" | "completed" | "failed" | "cancelled" | "paused";
 
 export interface MediaJob {
   id: number;
@@ -761,6 +904,8 @@ export interface MediaJob {
   fileSize?: number | null;
   /** Times the app tried again on its own. */
   retries?: number;
+  /** One video of a playlist: its name, its position in it, and how many were chosen with it. */
+  playlist?: { title: string; index: number; count: number } | null;
 }
 
 /** What a downloaded file is, for sorting it into a folder. */

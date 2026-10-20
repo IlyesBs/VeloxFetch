@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { GameModeSettings } from "./GameMode";
 import { actions } from "../actions";
 import { useStore } from "../hooks";
 import { formatSpeed } from "../format";
@@ -158,6 +159,8 @@ export function SmartThrottleSettings() {
   // The level in force (a Download Profile may set it: Fast, or Balanced's Smart).
   const level = throttleLevel(s);
   const byProfile = s?.profileAdaptive != null;
+  // Several networks at once is on: Smart throttle stays off (every network at full speed) until it is turned off.
+  const held = !!s?.heldByNetworks;
   const on = throttleOn(s);
   const slowed = on && s?.limitBps != null;
   const share = s?.sharePercent ?? 25;
@@ -178,13 +181,14 @@ export function SmartThrottleSettings() {
 
   return (
     <Panel title={t("smart.title")} hint={t("smart.hint")}>
+      <GameModeSettings />
       <fieldset>
         <legend className="label mb-1.5">{t("smart.level")}</legend>
         <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" data-testid="smart-levels">
           {THROTTLE_LEVELS.map((l) => (
             <label
               key={l.level}
-              className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-[13px] ${level === l.level ? "border-accent" : "border-line"} ${!s || byProfile ? "cursor-not-allowed opacity-60" : ""}`}
+              className={`flex cursor-pointer gap-2 rounded-md border p-2.5 text-[13px] ${level === l.level ? "border-accent" : "border-line"} ${!s || byProfile || held ? "cursor-not-allowed opacity-60" : ""}`}
             >
               <input
                 type="radio"
@@ -192,7 +196,7 @@ export function SmartThrottleSettings() {
                 className="mt-0.5"
                 data-testid={`smart-level-${l.level}`}
                 checked={level === l.level}
-                disabled={!s || byProfile}
+                disabled={!s || byProfile || held}
                 onChange={() => save(LEVEL_REQUEST[l.level], t("hud.modeSet", { name: t(`lvl.${l.level}`) }))}
               />
               <span>
@@ -203,7 +207,12 @@ export function SmartThrottleSettings() {
           ))}
         </div>
       </fieldset>
-      {s?.profileAdaptive != null && (
+      {held && (
+        <p className="mt-1 text-[11px] text-accent" data-testid="smart-held-note">
+          {t("multi.smartHeld")}
+        </p>
+      )}
+      {s?.profileAdaptive != null && !held && (
         <p className="mt-1 text-[11px] text-accent" data-testid="smart-profile-note">
           {t(s.profileAdaptive ? "prof.smartAutoOn" : "prof.smartAutoOff")}
         </p>

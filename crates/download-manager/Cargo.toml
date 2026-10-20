@@ -18,6 +18,8 @@ system-integration = { path = "../system-integration" }
 tokio.workspace = true
 serde.workspace = true
 url.workspace = true
+# The publisher's checksum (manager/publisher.rs): file names in links (already in the tree through `url`).
+percent-encoding = "2.3"
 thiserror.workspace = true
 tracing.workspace = true
 fs4 = "1.1.0"

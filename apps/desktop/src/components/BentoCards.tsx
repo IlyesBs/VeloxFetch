@@ -5,6 +5,7 @@ import { useT } from "../i18n";
 import type { State } from "../store";
 import { Icon, type IconName } from "../ui/icons";
 import { Sparkline } from "../ui/primitives";
+import { MultiNetworkBadge } from "./MultiNetworkCard";
 
 /** "12.3 MB/s" as a big number and a small unit. The text reads the same as formatSpeed's. */
 function Amount({ text, testId }: { text: string; testId?: string }) {
@@ -101,6 +102,7 @@ export function BentoCards() {
           label={t("stat.speed")}
           tone="cyan"
           testId="tile-speed"
+          side={<MultiNetworkBadge />}
           value={
             <span className="inline-flex items-center gap-1.5">
               <Amount text={formatSpeed(m.speedBps)} testId="speed-value" />

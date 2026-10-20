@@ -629,6 +629,22 @@ impl DownloadManager {
         }
     }
 
+    /// Whether the computer is online, as the queues judge it: a download making progress proves it; "offline"
+    /// counts only once seen twice in a row; `None` when not known. Second: the last look said offline (not
+    /// confirmed yet).
+    pub(super) fn judged_online(&self) -> (Option<bool>, bool) {
+        if self.inner.trackers.lock().unwrap().values().any(|t| t.speed > 1024.0) {
+            return (Some(true), false);
+        }
+        let q = self.inner.queues.lock().unwrap();
+        let seen_offline = q.net.online == Some(false);
+        if seen_offline && q.offline_hits < OFFLINE_CONFIRM {
+            (None, true)
+        } else {
+            (q.net.online, seen_offline)
+        }
+    }
+
     /// Paused by its queue's rules (resumed by the queue).
     pub(super) fn held_by_queue(&self, id: i64) -> bool {
         self.inner.queues.lock().unwrap().held.contains(&id)
@@ -670,7 +686,8 @@ impl DownloadManager {
         // The network: only looked at when something has to download (or a rule depends on it), every few seconds.
         let work = rows.iter().any(|r| pending(r.status));
         let every = self.inner.cfg.queue_poll * NET_EVERY_POLLS;
-        let net_due = (work || has_rules) && self.inner.queues.lock().unwrap().net_at.is_none_or(|t| t.elapsed() >= every);
+        let net_due =
+            (work || has_rules || self.recovering()) && self.inner.queues.lock().unwrap().net_at.is_none_or(|t| t.elapsed() >= every);
         if net_due {
             let system = self.inner.cfg.system.0.clone();
             let net = tokio::task::spawn_blocking(move || system.network()).await.unwrap_or_default();

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-multi-network"
+description = "Enables the set_multi_network command without any pre-configured scope."
+commands.allow = ["set_multi_network"]
+
+[[permission]]
+identifier = "deny-set-multi-network"
+description = "Denies the set_multi_network command without any pre-configured scope."
+commands.deny = ["set_multi_network"]

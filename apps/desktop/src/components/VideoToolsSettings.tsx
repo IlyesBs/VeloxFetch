@@ -78,7 +78,8 @@ export function VideoToolsSettings() {
                 <b>{t(x.name)}</b> <span className="text-dim">{t(x.what)}</span>
                 {s?.error && !s.installed && <span className="mt-0.5 block text-xs text-bad">{t("deps.failedWhy")}</span>}
               </span>
-              <span className={`shrink-0 text-xs ${st.tone}`}>{st.text}</span>
+              {/* At most about half the row, wrapping (long languages): never wider than the panel. */}
+              <span className={`max-w-[45%] shrink-0 text-end text-xs ${st.tone}`}>{st.text}</span>
             </li>
           );
         })}

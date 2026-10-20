@@ -68,6 +68,18 @@ export function IntelligencePanel({ a, basics = false }: { a: Analysis; basics?:
         <Row label={t("intel.security")} testid="intel-security">
           {a.https ? t("intel.secure") : t("intel.insecure")}
         </Row>
+        <Row label={t("verify.title")} testid="intel-integrity">
+          {a.publisherChecksum ? (
+            <span className="inline-flex items-start gap-1.5 font-medium text-ok" data-found="true">
+              <Icon name="shield" size={14} className="mt-0.5 shrink-0" />
+              <span>{t("verify.found", { list: a.publisherChecksum.list, algo: a.publisherChecksum.algo })}</span>
+            </span>
+          ) : (
+            <span className="text-dim" data-found="false">
+              {t("verify.notFound")}
+            </span>
+          )}
+        </Row>
         {dup && (
           <Row label={t("intel.duplicate")} testid="intel-duplicate">
             {t(dup.id !== null ? "intel.dup.list" : "intel.dup.history", { name: dup.filename })} · {t(`intel.dup.${dup.reason}`)}

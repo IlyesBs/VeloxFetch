@@ -10,6 +10,7 @@ import type { Download, FileKind } from "../types";
 import { Icon, type IconName } from "../ui/icons";
 import { EmptyState } from "../ui/primitives";
 import { FOCUS_SEARCH } from "./DownloadsView";
+import { VerifyBadge } from "../components/VerifyBadge";
 
 type Order = "newest" | "name" | "size";
 const ORDERS: { name: Order; label: Key }[] = [
@@ -37,13 +38,15 @@ const DoneRow = memo(function DoneRow({ id, onOpen }: { id: number; onOpen: (id:
       <div className={`done-icon kind-${d.kind}`} title={kindLabel(d.kind)}>
         <Icon name={KIND_ICON[d.kind]} size={20} strokeWidth={1.6} />
       </div>
-      <div className="min-w-0 flex-1">
+      <div className="@container min-w-0 flex-1">
         <button className="block max-w-full truncate text-start text-[14px] font-semibold hover:underline" title={d.filename} onClick={() => onOpen(d.id)}>
           {d.filename}
         </button>
         <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-dim">
           {d.fileMissing ? (
             <Icon name="alert" size={13} className="shrink-0 text-warn" />
+          ) : d.verify ? (
+            <VerifyBadge verify={d.verify} narrow className="shrink-0" />
           ) : (
             <Icon name="checkCircle" size={13} className="shrink-0 text-ok" />
           )}

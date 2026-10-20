@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-publisher-check"
+description = "Enables the set_publisher_check command without any pre-configured scope."
+commands.allow = ["set_publisher_check"]
+
+[[permission]]
+identifier = "deny-set-publisher-check"
+description = "Denies the set_publisher_check command without any pre-configured scope."
+commands.deny = ["set_publisher_check"]

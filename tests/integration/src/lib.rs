@@ -18,7 +18,7 @@
 //! | `/huge/..` | claims to be one petabyte (`Content-Length` / `Content-Range`) |
 //! | `/big-header/..` | answers with a huge (`State::junk_header_bytes`) header value |
 //! | `/html/..` | the file, but announced as `Content-Type: text/html` (a sign-in page where a file was expected) |
-//! | `/signed/<token>/..` | the file, or `403` once `<token>` is in `State::expired` (a signed link that expired) |
+//! | `/signed/<token>/..` | the file, or `403` once `<token>` is in `State::expired` (a signed link that expired) or to a client from `State::refuse_peer` |
 //! | `/noetag/..` | the file, without an `ETag` (nothing proves its version) |
 //! | `../dated/..` | (anywhere in the path) also sends a fixed `Last-Modified` |
 //!
@@ -81,6 +81,13 @@ pub struct State {
     turn: tokio::sync::Semaphore,
     /// For every answer the client stopped reading: the 32 KiB body chunks it had been sent before.
     pub cut_after_chunks: Mutex<Vec<usize>>,
+    /// Raised by a test: every data answer under way goes quiet at its next chunk (the connection stays open and sends
+    /// nothing more: a server or a network that stopped sending without closing); answers started after are fine.
+    pub quiet_gen: AtomicUsize,
+    /// Body bytes written per client address (which network a request came through).
+    pub bytes_by_peer: Mutex<std::collections::HashMap<std::net::IpAddr, u64>>,
+    /// `/signed/..` links are refused (`403`) to a client from this address (a link signed for another address).
+    pub refuse_peer: Mutex<Option<std::net::IpAddr>>,
 }
 
 pub struct Server {
@@ -172,6 +179,9 @@ pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
         one_at_a_time: AtomicBool::new(false),
         turn: tokio::sync::Semaphore::new(1),
         cut_after_chunks: Mutex::new(Vec::new()),
+        quiet_gen: AtomicUsize::new(0),
+        bytes_by_peer: Mutex::new(Default::default()),
+        refuse_peer: Mutex::new(None),
     });
     let l = TcpListener::bind(addr).await.unwrap();
     let addr = l.local_addr().unwrap();
@@ -190,6 +200,12 @@ pub async fn serve_on(addr: SocketAddr, data: Arc<Vec<u8>>) -> Server {
 #[allow(deprecated)]
 fn take(counter: &AtomicUsize) -> bool {
     counter.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| v.checked_sub(1)).is_ok()
+}
+
+fn count_peer(s: &tokio::net::TcpStream, st: &State, n: usize) {
+    if let Ok(peer) = s.peer_addr() {
+        *st.bytes_by_peer.lock().unwrap().entry(peer.ip()).or_default() += n as u64;
+    }
 }
 
 async fn handle(mut s: tokio::net::TcpStream, st: Arc<State>) {
@@ -255,7 +271,8 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         }
     }
     if let Some(token) = path.strip_prefix("/signed/").and_then(|r| r.split('/').next()) {
-        if st.expired.lock().unwrap().contains(token) {
+        let refused = s.peer_addr().ok().is_some_and(|p| *st.refuse_peer.lock().unwrap() == Some(p.ip()));
+        if st.expired.lock().unwrap().contains(token) || refused {
             return s.write_all(simple("403 Forbidden", "").as_bytes()).await.is_ok() && keep_alive;
         }
     }
@@ -328,6 +345,7 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
                 return false;
             }
             st.bytes_served.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+            count_peer(s, st, chunk.len());
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
@@ -362,6 +380,7 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
         return false;
     }
     let cut = is_data_get && take(&st.truncate_next);
+    let gen = st.quiet_gen.load(Ordering::SeqCst);
     let body = if cut { &body[..body.len() / 2] } else { body };
     let delay = *st.chunk_delay.lock().unwrap();
 
@@ -376,6 +395,15 @@ async fn handle_one(s: &mut tokio::net::TcpStream, st: &Arc<State>) -> bool {
             break;
         }
         st.bytes_served.fetch_add(chunk.len() as u64, Ordering::SeqCst);
+        count_peer(s, st, chunk.len());
+        if is_data_get && st.quiet_gen.load(Ordering::SeqCst) != gen {
+            // Open and silent until the client closes it (it still counts against `max_concurrent` meanwhile).
+            let mut buf = [0u8; 512];
+            let _ =
+                tokio::time::timeout(Duration::from_secs(600), async { while matches!(s.read(&mut buf).await, Ok(n) if n > 0) {} }).await;
+            ok = false;
+            break;
+        }
         // Pace between chunks only: the request must not look "active" after its last byte is out.
         if !delay.is_zero() && i + 1 < chunks {
             tokio::time::sleep(delay).await;

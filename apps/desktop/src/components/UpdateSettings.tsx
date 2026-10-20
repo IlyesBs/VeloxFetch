@@ -72,11 +72,21 @@ export function UpdateSettings() {
     }
   };
   const check = () => run(async () => store.dispatch({ type: "update", update: await api.checkForUpdates() }));
-  const download = () => run(async () => store.dispatch({ type: "update", update: await api.downloadUpdate() }));
-  const install = () =>
+  // One click: download the verified package (unless one is already waiting), then install it. Installing is
+  // silent where it can be (the AppImage and the portable copy replace themselves and relaunch); on Windows and
+  // the .deb / .rpm it hands off to the system installer, which asks for permission. No file is ever downloaded
+  // by hand and no web page is opened. If the download fails, run() shows the error and nothing is installed.
+  const updateNow = () =>
     run(async () => {
-      const how = await api.installUpdate();
-      if (how === "opened") setOpened(true);
+      let status = u;
+      if (status?.phase !== "ready") {
+        status = await api.downloadUpdate();
+        store.dispatch({ type: "update", update: status });
+      }
+      if (status?.phase === "ready") {
+        const how = await api.installUpdate();
+        if (how === "opened") setOpened(true);
+      }
     });
   const toggle = async (enabled: boolean) => {
     const next = await act(() => api.setUpdateAuto(enabled), enabled ? t("upd.autoOn") : t("upd.autoOff"));
@@ -85,6 +95,9 @@ export function UpdateSettings() {
 
   const tone = !u ? "text-dim" : u.phase === "failed" || u.error ? "text-bad" : u.phase === "available" || u.phase === "ready" ? "text-accent" : "text-dim";
   const working = busy || u?.phase === "checking" || u?.phase === "downloading";
+  // A newer version is in hand to install now: available to download (but not the portable "page" kind), or
+  // already downloaded and verified. This is when the button is "Update now" instead of "Check now".
+  const canUpdateNow = !!u?.supported && ((u.phase === "available" && u.install !== "page") || u.phase === "ready" || u.phase === "downloading");
   return (
     <Panel title={t("upd.title")} hint={t("upd.hint")}>
       <p className="num text-[13px]" data-testid="update-current">
@@ -107,19 +120,16 @@ export function UpdateSettings() {
         </p>
       )}
       <div className="mt-3 flex flex-wrap gap-2">
-        {u?.supported && u.phase !== "ready" && (
+        {/* The button flips: "Check now" until a newer version is found, then a single "Update now" that does the
+            whole download-and-install. ("Open the release page" only for the portable copy, which replaces nothing.) */}
+        {u?.supported && !canUpdateNow && (
           <button className="btn" data-testid="update-check" disabled={working} onClick={() => void check()}>
             {u.phase === "checking" ? t("upd.checking") : t("upd.checkNow")}
           </button>
         )}
-        {u?.supported && u.phase === "available" && u.install !== "page" && (
-          <button className="btn btn-primary" data-testid="update-download" disabled={working} onClick={() => void download()}>
-            {t("upd.download")}
-          </button>
-        )}
-        {u?.supported && u.phase === "ready" && (
-          <button className="btn btn-primary" data-testid="update-install" disabled={working} onClick={() => void install()}>
-            {u.install === "restart" ? t("upd.installRestart") : t("upd.installPackage")}
+        {canUpdateNow && (
+          <button className="btn btn-primary" data-testid="update-now" disabled={working} onClick={() => void updateNow()}>
+            {t("upd.updateNow")}
           </button>
         )}
         {u && u.releasePage && (!u.supported || u.phase === "elsewhere" || (u.phase === "available" && u.install === "page")) && (

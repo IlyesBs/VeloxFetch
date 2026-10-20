@@ -13,6 +13,7 @@ const LINES = [
   "Started again (attempt 3)",
   "Resumed (attempt 2)",
   "Retried (attempt 2)",
+  "Trying again on its own (try 3 of 20)",
   "Finished: 600.0 KB received at 1.2 MB/s",
   "Paused (progress kept)",
   "Cancelled",
@@ -33,6 +34,10 @@ const LINES = [
   "New transfer over one connection",
   "The name was taken meanwhile: saved as video (1).mp4",
   "The server is preparing the file (it answers when it is ready): waiting for it",
+  "Checking the file against the publisher's checksum (SHA256SUMS)",
+  "Checking the file against the checksum you gave",
+  "The file matches the publisher's checksum (SHA256SUMS)",
+  "The file matches the checksum you gave",
   "The saved part changed since it was last saved (a crash or an outside change): 12 finished parts checked again, all intact",
   "The saved part changed since it was last saved (a crash or an outside change): 12 finished parts checked again, all intact; 2 older parts could not be checked",
   "The saved part changed since it was last saved: 1 of 12 finished parts no longer match their check and are downloaded again (1.0 MB)",
@@ -48,13 +53,17 @@ describe("the diagnostics timeline in the user's language", () => {
     for (const l of LINES) expect(localEvent(l)).toBe(l);
   });
 
-  it("says every kind of line in French and Arabic, without English words left", () => {
-    for (const lang of ["fr", "ar"] as const) {
+  it("says every kind of line in every other language, without English words left", () => {
+    // Words both languages share ("Link", "Problem", "Server" in German; "link" in Brazilian Portuguese) are not English left over.
+    const shared: Record<string, string[]> = { de: ["link", "problem", "server"], "pt-br": ["link"] };
+    const words = ["the", "and", "failed", "started", "server", "parts", "trying", "again", "link", "file", "attempt", "retry", "problem"];
+    const english = (lang: string) => new RegExp(`\\b(${words.filter((w) => !shared[lang]?.includes(w)).join("|")})\\b`, "i");
+    for (const lang of ["fr", "ar", "es", "pt-br", "de", "ru", "tr"] as const) {
       setLang(lang);
       for (const l of LINES) {
         const said = localEvent(l);
         expect(said, l).not.toBe(l);
-        expect(said, `${lang}: ${l} -> ${said}`).not.toMatch(/\b(the|and|failed|started|server|parts|trying|again|link|file|attempt|retry|problem)\b/i);
+        expect(said, `${lang}: ${l} -> ${said}`).not.toMatch(english(lang));
         expect(said, l).not.toMatch(/\{\w+\}/);
       }
     }
