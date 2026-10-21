@@ -17,6 +17,7 @@ const BY_CODE: Record<string, Key> = {
   access_denied: "e.access",
   folder_not_allowed: "e.folder",
   web_page: "e.webPage",
+  browser_only_link: "e.browserOnlyLink",
   checksum_mismatch: "e.checksum",
   publisher_checksum_mismatch: "e.publisherChecksum",
   source_changed: "e.sourceChanged",

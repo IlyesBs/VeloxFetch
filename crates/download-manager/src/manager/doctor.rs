@@ -110,6 +110,7 @@ fn record_evidence(rec: &DownloadRecord, ev: &mut Evidence) {
         let x = crate::intelligence::expiring(&u);
         ev.temporary_link = x.temporary;
         ev.link_expired = x.at_ms.is_some_and(|at| at <= now_ms());
+        ev.browser_only_link = crate::intelligence::browser_only_link(&u);
         ev.session |= !u.username().is_empty();
     }
     ev.session |= rec.request_headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("cookie") || k.eq_ignore_ascii_case("authorization"));

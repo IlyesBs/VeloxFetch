@@ -46,6 +46,12 @@ fn http_status(raw: &str) -> Option<u16> {
     rest.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
 }
 
+/// The sentence for a browser-only Office Online export (see `intelligence::browser_only_link`). Kept here next to
+/// the other error sentences and identical to `e.browserOnlyLink` in the locale files (the UI shows this English
+/// text as-is, and the localized string by the `browser_only_link` code). The manager uses it in place of the
+/// generic "web page" message when the link's host is an Office Online one.
+pub const BROWSER_ONLY_LINK: &str = "This is a Microsoft Office Online export link (Excel, Word or PowerPoint for the web). The file is created live inside your browser session, not stored, so it cannot be downloaded on its own. Save it from your browser, or download the actual file from SharePoint or OneDrive instead.";
+
 /// A plain sentence for `raw`, plus what the user can do about it. Unknown errors are passed through.
 pub fn explain(raw: &str) -> (String, Option<Needs>) {
     let (text, needs, _) = classify(raw);

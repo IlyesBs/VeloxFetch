@@ -955,6 +955,18 @@ impl DownloadManager {
     fn to_dto(&self, rec: &DownloadRecord) -> DownloadDto {
         let id = rec.id.unwrap_or_default();
         let explained = rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::explain);
+        let mut error_code = rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::error_code);
+        let mut error = explained.as_ref().map(|(text, _)| text.clone());
+        let mut needs = explained.as_ref().and_then(|(_, needs)| *needs);
+        // A "web page instead of the file" on a browser-only Office Online export: say so precisely (the generic
+        // "turn on Send cookies" advice does not apply — a live export can only be saved from the browser).
+        if error_code.as_deref() == Some("web_page")
+            && url::Url::parse(&rec.url).is_ok_and(|u| crate::intelligence::browser_only_link(&u))
+        {
+            error_code = Some("browser_only_link".into());
+            error = Some(crate::explain::BROWSER_ONLY_LINK.into());
+            needs = None;
+        }
         let (live, running, retrying, progress) = {
             let active = self.inner.active.lock().unwrap();
             let a = active.get(&id);
@@ -990,10 +1002,10 @@ impl DownloadManager {
             category: rec.category.clone(),
             speed_limit: rec.speed_limit,
             resumable: rec.resumable,
-            error: explained.as_ref().map(|(text, _)| text.clone()),
+            error,
             error_detail: rec.last_error.clone(),
-            needs: explained.and_then(|(_, needs)| needs),
-            error_code: rec.last_error.as_deref().filter(|e| !e.is_empty()).map(crate::explain::error_code),
+            needs,
+            error_code,
             kind: downloader_core::classify_file(&display_name(rec), rec.content_type.as_deref()),
             idle: rec.status == DownloadStatus::Queued && !running,
             queue_id: place.queue_id,

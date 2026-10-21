@@ -105,6 +105,9 @@ pub enum Category {
     Persistence,
     /// A web page instead of the file (no session evidence).
     WebPage,
+    /// A link that only works inside the browser (a live Office Online / Web Apps export), which cannot be
+    /// re-fetched on its own, however the user is signed in.
+    BrowserOnlyLink,
     InvalidResource,
     ProxyInvalid,
     Cancelled,
@@ -254,6 +257,9 @@ pub struct Evidence {
     /// The previous attempt ended with the same error code.
     pub same_as_before: bool,
     pub session: bool,
+    /// The link only works inside the browser (a live Microsoft Office Online / Web Apps export: the file is
+    /// generated in the user's Office session, not stored, so no external downloader can re-fetch it).
+    pub browser_only_link: bool,
     /// The link is signed / temporary; `link_expired`: its stated expiry has passed.
     pub temporary_link: bool,
     pub link_expired: bool,
@@ -356,6 +362,8 @@ pub fn diagnose(e: &Evidence) -> Diagnosis {
         Failure::Checksum => (C::Integrity, Src::Content, R::Retryable),
         Failure::Incomplete => (C::Incomplete, Src::Server, R::Retryable),
         Failure::Persistence => (C::Persistence, Src::ThisComputer, R::Unknown),
+        // A live Office Online export can never be re-fetched, even signed in, so this comes before the session check.
+        Failure::WebPage if e.browser_only_link => (C::BrowserOnlyLink, Src::Link, R::NotRetryable),
         Failure::WebPage if session_lost => (C::SessionExpired, Src::Account, R::RetryAfterUserAction),
         Failure::WebPage => (C::WebPage, Src::Link, R::RetryAfterUserAction),
         Failure::InvalidRequest => (C::InvalidResource, Src::Link, R::NotRetryable),
@@ -419,6 +427,8 @@ pub fn diagnose(e: &Evidence) -> Diagnosis {
         C::Integrity if retry == R::Retryable => vec![RestartSafely],
         C::Integrity => vec![NewLink],
         C::WebPage => vec![ReauthInBrowser, NewLink],
+        // A fresh link would be browser-only too; the only way is to save it from the browser.
+        C::BrowserOnlyLink => vec![ReauthInBrowser],
         C::Cancelled => vec![],
     };
     if category != C::Cancelled {
@@ -449,6 +459,7 @@ pub fn diagnose(e: &Evidence) -> Diagnosis {
         C::Integrity => "checksum_mismatch".to_string(),
         C::Persistence => "persistence".to_string(),
         C::InvalidResource => "invalid_request".to_string(),
+        C::BrowserOnlyLink => "browser_only_link".to_string(),
         C::WriteFailed => "write_failed".to_string(),
         C::Cancelled => "cancelled".to_string(),
         _ => match failure {
@@ -562,6 +573,18 @@ mod tests {
         // A sign-in page after it worked with a session.
         assert_eq!(diagnose(&Evidence { session: true, worked_before: true, ..ev(Failure::WebPage) }).category, Category::SessionExpired);
         assert_eq!(diagnose(&ev(Failure::WebPage)).category, Category::WebPage);
+    }
+
+    #[test]
+    fn a_browser_only_office_export_is_never_retried_and_is_not_the_generic_web_page() {
+        // A live Office Online export: not retryable, no "get a fresh link" (a new link is browser-only too), and
+        // the only advice is to save it from the browser. It wins even when a session was sent.
+        let d = diagnose(&Evidence { browser_only_link: true, ..ev(Failure::WebPage) });
+        assert_eq!((d.category, d.source, d.retry, d.code.as_str()), (Category::BrowserOnlyLink, Source::Link, RetryClass::NotRetryable, "browser_only_link"));
+        assert_eq!(d.actions, vec![Action::ReauthInBrowser, Action::Cancel]);
+        assert_eq!(d.severity, Severity::Blocking);
+        let signed_in = diagnose(&Evidence { browser_only_link: true, session: true, worked_before: true, ..ev(Failure::WebPage) });
+        assert_eq!(signed_in.category, Category::BrowserOnlyLink);
     }
 
     #[test]

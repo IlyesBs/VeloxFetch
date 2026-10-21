@@ -87,7 +87,7 @@ export type DoctorCategory =
   | "accessDenied" | "sessionExpired" | "linkExpired" | "notFound" | "requestTimeout" | "conflict" | "rateLimited"
   | "serverTemporary" | "serverError" | "httpOther" | "redirect" | "rangeFailure" | "diskFull" | "permission"
   | "folderNotAllowed" | "writeFailed" | "fileExists" | "integrity" | "incomplete" | "persistence" | "webPage"
-  | "invalidResource" | "proxyInvalid" | "cancelled" | "unknown";
+  | "browserOnlyLink" | "invalidResource" | "proxyInvalid" | "cancelled" | "unknown";
 export type DoctorSource = "server" | "network" | "thisComputer" | "link" | "account" | "content" | "unknown";
 export type RetryClass = "retryable" | "retryableWithDelay" | "retryAfterUserAction" | "notRetryable" | "unknown";
 export type DoctorSeverity = "info" | "warning" | "recoverable" | "blocking" | "critical";

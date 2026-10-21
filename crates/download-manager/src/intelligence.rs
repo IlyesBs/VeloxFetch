@@ -567,6 +567,16 @@ fn looks_like_sign_in(u: &Url) -> bool {
         || ["login.", "signin.", "accounts.", "auth.", "sso."].iter().any(|p| host.starts_with(p))
 }
 
+/// A link that only works inside the browser: a Microsoft Office Online / Web Apps export (Excel, Word or
+/// PowerPoint for the web — `*.officeapps.live.com`, e.g. `XlFileHandler.aspx?...downloadAsCsvEnabled=1`). The
+/// file is generated live in the user's Office session and is not stored, so re-fetching the link from outside
+/// the browser returns a sign-in / error page: no external downloader can get it. A real SharePoint or OneDrive
+/// *file* lives on `*.sharepoint.com` / `*.live.com` and is a plain authenticated download — never flagged here.
+pub fn browser_only_link(u: &Url) -> bool {
+    let host = u.host_str().unwrap_or("").to_ascii_lowercase();
+    host == "officeapps.live.com" || host.ends_with(".officeapps.live.com")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Expiry {
     pub temporary: bool,
@@ -1044,6 +1054,17 @@ mod tests {
         let a = run(&url("https://v.example.com/x"), Some(&info(|i| i.content_type = Some("application/dash+xml".into()))), None, None);
         assert_eq!(a.kind, ResourceKind::Stream);
         assert_eq!(a.size, None, "a playlist's size is not the video's");
+    }
+
+    #[test]
+    fn office_online_exports_are_browser_only_but_real_sharepoint_files_are_not() {
+        // The user's case: Excel-for-the-web "Download as CSV".
+        assert!(browser_only_link(&url("https://frc-excel.officeapps.live.com/x/_layouts/XlFileHandler.aspx?sheetName=DATA&downloadAsCsvEnabled=1&W=1")));
+        assert!(browser_only_link(&url("https://officeapps.live.com/p/PptFileHandler.aspx?a=b")));
+        // A genuine SharePoint / OneDrive file (a plain authenticated download) must stay downloadable.
+        assert!(!browser_only_link(&url("https://contoso.sharepoint.com/sites/x/Shared%20Documents/report.xlsx")));
+        assert!(!browser_only_link(&url("https://contoso-my.sharepoint.com/personal/u/_layouts/15/download.aspx?SourceUrl=/a.zip")));
+        assert!(!browser_only_link(&url("https://example.com/officeapps.live.com.zip")));
     }
 
     #[test]
