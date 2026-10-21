@@ -105,12 +105,23 @@ function openMenu(select: HTMLSelectElement) {
     const h = Math.min(menu.scrollHeight, 320);
     const up = below < Math.min(h, 160) && above > below;
     menu.style.maxHeight = `${Math.max(120, Math.min(320, up ? above : below))}px`;
-    menu.style.top = up ? "" : `${r.bottom + 4}px`;
-    menu.style.bottom = up ? `${vh - r.top + 4}px` : "";
-    // Same side as the field; kept inside the window.
+    // `position: fixed` is read from the viewport — unless an ancestor establishes a containing block for fixed
+    // descendants (a non-`none` transform, filter, backdrop-filter, perspective, contain or will-change). The dialog
+    // we mount into is a glass `.card` (backdrop-filter), so it is that containing block, and our viewport
+    // coordinates would otherwise be read from the dialog's corner, opening the list shifted. Measure the corner by
+    // pinning the menu to (0, 0) and reading where that lands, then subtract it. On the body the corner is (0, 0),
+    // so nothing changes there. Done every open (the dialog may have moved), with the final size already applied.
+    menu.style.top = "0px";
+    menu.style.left = "0px";
+    menu.style.bottom = "";
+    const origin = menu.getBoundingClientRect();
     const w = menu.offsetWidth;
-    const left = menu.dir === "rtl" ? r.right - w : r.left;
-    menu.style.left = `${Math.min(Math.max(8, left), Math.max(8, vw - w - 8))}px`;
+    // Below the field, or above it (anchored by the menu's own height) when there is no room below.
+    const topVp = up ? r.top - 4 - menu.offsetHeight : r.bottom + 4;
+    // Same side as the field; kept inside the window.
+    const leftVp = menu.dir === "rtl" ? r.right - w : r.left;
+    menu.style.top = `${topVp - origin.top}px`;
+    menu.style.left = `${Math.min(Math.max(8, leftVp), Math.max(8, vw - w - 8)) - origin.left}px`;
   };
   place();
 
