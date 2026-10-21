@@ -66,7 +66,10 @@ finished, marking it **Verified**. A damaged file is never kept.
 Chrome, Edge and Brave get the extension from the **Chrome Web Store**; Firefox from **Firefox Add-ons (AMO)**.
 Installing VeloxFetch asks the browser to add it. A download started in the browser while VeloxFetch is closed
 launches the app — including for browsers installed as Snap or Flatpak packages. The confirmation dialog can also
-take a site's username and password when the server asks for them.
+take a site's username and password when the server asks for them. A file a site only gives to your signed-in
+browser — SharePoint, OneDrive, an Office for the web "Download as CSV", a members-only page — is checked first
+and, when VeloxFetch cannot get it on its own, left to the browser, which downloads it with your session: such a
+download never fails in VeloxFetch.
 
 ### Video downloads and playlists
 With the extension installed, a **Download video** bar appears over videos — files, HLS / DASH streams, and video
