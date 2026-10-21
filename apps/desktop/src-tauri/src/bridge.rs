@@ -8,13 +8,13 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::identity::FIREFOX_STORE_URL;
 use browser_bridge::launch as app_start;
 use browser_bridge::server::{BoxFuture, DownloadAccepted, Handler, HandlerError, ServerConfig};
 use browser_bridge::{
-    chromium_ids, serve, Allowlist, Caller, DownloadRequest, Endpoint, Listener, MediaHint, Token, CHROME_EXTENSION_ID, CHROME_STORE_ID,
-    FIREFOX_EXTENSION_ID, HOST_NAME,
+    chromium_ids, serve, Allowlist, Caller, DownloadRequest, Endpoint, Listener, MediaHint, Source, Token, CHROME_EXTENSION_ID,
+    CHROME_STORE_ID, FIREFOX_EXTENSION_ID, HOST_NAME,
 };
-use crate::identity::FIREFOX_STORE_URL;
 use download_manager::{ApiError, BrowserContext, DownloadManager, ManagerError, NewDownload};
 
 /// Called when a download is waiting for the user (brings the window to the front).
@@ -147,6 +147,13 @@ impl Handler for AppHandler {
             let media = req.media.or(stream.then_some(MediaHint::Stream));
             let new = NewDownload { url: req.url, filename: req.filename, ..Default::default() };
             let ctx = BrowserContext { referrer: req.referrer, cookies: req.cookies, user_agent: req.user_agent, incognito: req.incognito };
+            // A download taken from the browser that only the signed-in browser can get (SharePoint, Office Online,
+            // members-only sites) is declined: the extension then lets the browser download it with its own session.
+            if media.is_none() && req.source == Source::Intercept {
+                if let Err(ManagerError::InvalidInput(m)) = self.manager.browser_can_take_over(&new, &ctx).await {
+                    return Err(HandlerError { code: "invalid_input", message: m });
+                }
+            }
             let result = if let Some(hint) = media {
                 // A video always waits for the user: the quality is chosen in the video dialog.
                 self.manager.add_pending_media(&new.url, ctx, hint == MediaHint::Page).await.map(|p| {
