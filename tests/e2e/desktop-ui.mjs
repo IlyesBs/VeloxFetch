@@ -283,6 +283,10 @@ try {
   await waitFor(() => q("[data-testid=select-menu]"), "the list to open inside the dialog");
   const inDialog = (await page(`(() => { const d = document.querySelector('dialog[open]'); const m = document.querySelector('[data-testid=select-menu]'); return !!d && !!m && d.contains(m); })()`)).ok;
   check("a drop-down inside the options dialog opens inside it (the top layer), not under the dialog", inDialog === true, String(inDialog));
+  // ...and it must land ON its field, not shifted: the dialog is a glass .card (backdrop-filter), which makes it the
+  // containing block for the `position: fixed` list, so viewport coordinates have to be offset by the dialog's corner.
+  const aligned = (await page(`(() => { const f = document.querySelector('dialog[open] [data-testid=add-when]'); const m = document.querySelector('[data-testid=select-menu]'); const fr = f.getBoundingClientRect(); const mr = m.getBoundingClientRect(); const dx = Math.abs(mr.left - fr.left); const dy = Math.min(Math.abs(mr.top - fr.bottom), Math.abs(mr.bottom - fr.top)); return { dx, dy, ok: dx <= 2 && dy <= 8 }; })()`)).ok;
+  check("the drop-down opens aligned to its field inside the dialog (not shifted by the containing block)", aligned?.ok === true, JSON.stringify(aligned));
   await page(`(document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })), true)`);
   await waitFor(async () => !(await q("[data-testid=select-menu]")), "Escape to close the list");
   await page(`(() => { const d = document.querySelector('dialog[open]'); if (d) d.close(); return true; })()`);
