@@ -151,8 +151,9 @@ for (const kind of installers) {
 }
 if (made.length === 0) die(`no installer found in ${BUNDLE}: did the tauri build run?`);
 
-// 2. portable: the programs + the extension folder (+ the compressed video tools when the build packed them: the
-// first start unpacks them, offline), kept together (the app looks beside itself)
+// 2. portable: the programs (+ the compressed video tools when the build packed them: the first start unpacks them,
+// offline), kept together (the app looks beside itself). No extension folder: like the installed app, it gets the
+// extension from the Chrome Web Store and Firefox Add-ons (Settings > Browser).
 const VIDEO_TOOLS = path.join(ROOT, process.env.CARGO_TARGET_DIR ?? "target", "video-tools");
 const videoTools = (top) => (fs.existsSync(path.join(VIDEO_TOOLS, "video-tools.json")) ? tree(VIDEO_TOOLS, `${top}/video-tools`) : []);
 const portableName = os === "windows" ? "VeloxFetch-portable.zip" : `VeloxFetch-portable-${os}-${arch}.zip`;
@@ -167,9 +168,6 @@ if (os === "macos") {
     { name: top, dir: true },
     { name: `${top}/velox-desktop${exe}`, file: desktop, exec: true },
     { name: `${top}/velox-native-host${exe}`, file: host, exec: true },
-    { name: `${top}/extension`, dir: true },
-    ...tree(path.join(EXT, "chrome"), `${top}/extension/chromium`),
-    ...tree(path.join(EXT, "firefox"), `${top}/extension/firefox`),
     ...videoTools(top),
   ]);
 }
