@@ -495,7 +495,7 @@ function downloadMedia(tab, itemId) {
     // Cookies (when that setting is on) need access to the video's site, which detection already holds.
     return handoff([item], "videoBar", { referrer: tab.url, incognito: !!tab.incognito }).then(function (results) {
       var r = results[0];
-      return r.ok ? { ok: true } : { ok: false, error: explain(r.code) };
+      return r.ok ? { ok: true } : { ok: false, error: explain(r.code), code: r.code };
     });
   });
 }
