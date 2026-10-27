@@ -10,6 +10,7 @@ import { PendingDialog } from "./components/PendingDialog";
 import { NewLinkHost } from "./components/NewLinkDialog";
 import { GameModeBanner, toggleGameMode } from "./components/GameMode";
 import { PowerBanner } from "./components/PowerBanner";
+import { ToolsUpdateBanner } from "./components/ToolsUpdateBanner";
 import { Sidebar, type NavTarget, type RouteName } from "./components/shell/Sidebar";
 import { StatusBar } from "./components/shell/StatusBar";
 import { TitleBar } from "./components/shell/TitleBar";
@@ -199,6 +200,7 @@ export default function App() {
           <PowerBanner />
           <GameModeBanner />
           <ExtensionBanner />
+          <ToolsUpdateBanner />
           <ClipboardBanner onReviewMany={(links) => setBatch({ links: links.join("\n") })} onStream={(url) => setStream({ url })} />
           {/* Never scrolls sideways: right to left, the Linux web view puts the bar on the left but lays the content out as
               if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers

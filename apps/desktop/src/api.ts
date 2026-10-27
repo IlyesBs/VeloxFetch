@@ -178,6 +178,8 @@ export const api = {
   getSmartThrottle: () => call<SmartThrottle>("get_smart_throttle"),
   getVideoTools: () => call<VideoTools>("get_video_tools"),
   fetchVideoTools: () => call<VideoTools>("fetch_video_tools"),
+  /** The user's answer to the dependency update offered: true downloads and installs it, false skips that version. */
+  answerVideoToolsUpdate: (accept: boolean) => call<VideoTools>("answer_video_tools_update", { accept }),
   /** Updates: only Rust talks to the release server and checks the signature; the UI asks and shows. */
   getUpdateStatus: () => call<UpdateStatus>("get_update_status"),
   checkForUpdates: () => call<UpdateStatus>("check_for_updates"),

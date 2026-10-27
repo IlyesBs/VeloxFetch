@@ -32,7 +32,14 @@ serde_json = "1"
 # Video tools fetched on first use (manager/tools.rs): checksum, and one entry out of a ZIP.
 sha2 = "0.10"
 flate2 = "1"
+# The installer's own compressed copies of the video tools (xz with the x86 / ARM64 filters): unpacked offline.
+# Pure, safe Rust (no `optimization`: no unsafe code), decoder only (no C library to build on any system).
+lzma-rust2 = { version = "0.24", default-features = false, features = ["std", "xz"] }
 futures-util.workspace = true
 # The dashboard's live network (whole computer) and disk (download folder's drive) activity: counters only.
 sysinfo = { version = "0.39", default-features = false, features = ["disk", "network"] }
 
+
+[dev-dependencies]
+# Tests pack their own stand-in programs (the shipped program only ever unpacks).
+lzma-rust2 = { version = "0.24", default-features = false, features = ["std", "xz", "encoder"] }
