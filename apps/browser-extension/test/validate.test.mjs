@@ -117,3 +117,15 @@ test("error text never echoes hostile input", () => {
   assert.ok(!V.describeError("__proto__").includes("undefined"));
   assert.equal(typeof V.describeError("constructor"), "string");
 });
+
+test("the browser's reasons for not reaching the helper are told apart (Chromium and Firefox)", () => {
+  assert.equal(V.hostErrorCode("Specified native messaging host not found."), "host_missing");
+  assert.equal(V.hostErrorCode("No such native application app.velox.fetch"), "host_missing");
+  assert.equal(V.hostErrorCode("Access to the specified native messaging host is forbidden."), "host_forbidden");
+  assert.equal(V.hostErrorCode("Native host has exited."), "host_exited");
+  assert.equal(V.hostErrorCode("Attempt to postMessage on disconnected port"), "host_exited");
+  assert.equal(V.hostErrorCode("Failed to start native messaging host."), "host_failed");
+  assert.equal(V.hostErrorCode("An unexpected error occurred"), "host_failed");
+  assert.equal(V.hostErrorCode(undefined), "host_failed");
+  assert.match(V.describeError("host_failed"), /Open VeloxFetch/);
+});
