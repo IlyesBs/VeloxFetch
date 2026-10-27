@@ -64,7 +64,8 @@ export default function App() {
   /** What the Downloads list shows (its tabs). */
   const [filter, setFilter] = useState<Filter>("all");
   // The sidebar folds to an icon rail on narrow windows, or when the user folds it.
-  const wide = useMedia("(min-width: 900px)");
+  // The window opens wide (1360 x 860, at most 92 % of the screen): its page has no size yet at the first render.
+  const wide = useMedia("(min-width: 900px)", true);
   const { sideFolded } = usePrefs();
   const folded = !wide || sideFolded;
   const routeRef = useRef(route);

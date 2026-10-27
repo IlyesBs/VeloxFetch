@@ -57,14 +57,25 @@ export function usePrefs(): UiPrefs {
   return useSyncExternalStore(subscribe, () => current);
 }
 
-/** Whether a media query matches, kept up to date (window width breakpoints). */
-export function useMedia(query: string): boolean {
+/**
+ * Whether a media query matches, kept up to date (window width breakpoints). `whenUnsized`: the answer while the page
+ * has no size yet. On Linux the window is created hidden and its page is 0 x 0 until it is shown: a width query then
+ * says "narrow" and the first render drew the narrow layout (folded sidebar), which jumped to the real one when the
+ * window appeared ("the UI flashes when I open the app"). The window opens at its full size, so the caller says what
+ * to assume; the real answer follows as soon as the page has a size (a resize, even one that does not change the
+ * query's answer).
+ */
+export function useMedia(query: string, whenUnsized?: boolean): boolean {
   return useSyncExternalStore(
     (f) => {
       const mq = matchMedia(query);
       mq.addEventListener("change", f);
-      return () => mq.removeEventListener("change", f);
+      addEventListener("resize", f);
+      return () => {
+        mq.removeEventListener("change", f);
+        removeEventListener("resize", f);
+      };
     },
-    () => matchMedia(query).matches,
+    () => (whenUnsized !== undefined && innerWidth === 0 ? whenUnsized : matchMedia(query).matches),
   );
 }
