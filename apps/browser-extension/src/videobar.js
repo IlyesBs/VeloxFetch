@@ -24,6 +24,12 @@
   var ext = typeof browser !== "undefined" ? browser : chrome;
   var MIN_W = 220;
   var MIN_H = 124;
+  // Where to get VeloxFetch when it is not on this computer (a fixed address: nothing from the page).
+  var GET_URL = "https://github.com/IlyesBs/VeloxFetch/releases/latest";
+  // The answers that mean VeloxFetch is not there (not installed, or it could not start).
+  var NOT_THERE = ["host_missing", "host_failed", "host_exited", "app_not_running", "timeout"];
+  // A download gets this long for an answer: the helper waits up to 30 s for the app to start.
+  var ANSWER_WITHIN = 40000;
 
   var host = document.createElement("velox-video-bar");
   // Inline and !important, so the page's own style sheets cannot move, show or hide it.
@@ -50,6 +56,9 @@
     "button:active{transform:scale(.94)}",
     ".go{background:linear-gradient(180deg,#5b93ff,#2563eb);font-weight:600;letter-spacing:.01em;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 6px 16px -4px rgba(37,99,235,.7)}",
     ".go:hover,.go:focus-visible{background:linear-gradient(180deg,#6ea0ff,#2f6df0);filter:brightness(1.05)}",
+    ".get{all:unset;cursor:pointer;display:flex;align-items:center;box-sizing:border-box;min-height:30px;padding:0 14px;margin-right:2px;border-radius:999px;white-space:nowrap;font-weight:600;color:#0b0b10;background:linear-gradient(180deg,#fff,#dfe7f5);box-shadow:0 4px 14px -4px rgba(255,255,255,.45);transition:transform .18s ease,filter .2s ease}",
+    ".get:hover,.get:focus-visible{filter:brightness(1.06)}.get:active{transform:scale(.94)}",
+    ".note.warn{color:#fde68a}",
     ".x{padding:0 10px;opacity:.7;font-size:16px}.x:hover{opacity:1}",
     ".grip{cursor:grab;padding:0 4px 0 8px;opacity:.55;touch-action:none}.grip:hover,.grip:focus-visible{opacity:1;background:none}",
     ".dragging,.dragging .grip{cursor:grabbing}",
@@ -57,12 +66,12 @@
     ".note.busy{background:linear-gradient(90deg,rgba(255,255,255,.45) 0,#fff 50%,rgba(255,255,255,.45) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 1.3s linear infinite}",
     "@keyframes shine{to{background-position:-200% 0}}",
     // Idle: only the download button, round, breathing softly. Open: the rest fades in from a blur.
-    ".island .grip,.island .label,.island .x,.island .note{display:none}",
+    ".island .grip,.island .label,.island .x,.island .note,.island .get{display:none}",
     ".island .go{width:30px;padding:0;justify-content:center;animation:breathe 2.6s ease-in-out infinite}",
     "@keyframes breathe{0%,100%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 0 0 0 rgba(59,130,246,.55)}50%{box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 0 0 7px rgba(59,130,246,0)}}",
-    ".bar:not(.island) .grip,.bar:not(.island) .label,.bar:not(.island) .x,.bar:not(.island) .note{animation:reveal .42s cubic-bezier(.2,.8,.2,1) .09s both}",
+    ".bar:not(.island) .grip,.bar:not(.island) .label,.bar:not(.island) .x,.bar:not(.island) .note,.bar:not(.island) .get{animation:reveal .42s cubic-bezier(.2,.8,.2,1) .09s both}",
     "@keyframes reveal{from{opacity:0;filter:blur(5px);transform:scale(.86)}to{opacity:1;filter:none;transform:none}}",
-    ".leaving .grip,.leaving .label,.leaving .x,.leaving .note{animation:none;opacity:0;filter:blur(4px);transition:opacity .12s ease,filter .12s ease}",
+    ".leaving .grip,.leaving .label,.leaving .x,.leaving .note,.leaving .get{animation:none;opacity:0;filter:blur(4px);transition:opacity .12s ease,filter .12s ease}",
     ".menu{margin-top:8px;display:flex;flex-direction:column;gap:2px;padding:5px;border-radius:16px;max-width:420px;background:linear-gradient(180deg,rgba(30,30,36,.97),rgba(6,6,10,.97));" +
       "box-shadow:inset 0 0 0 1px rgba(255,255,255,.08),0 16px 38px -8px rgba(0,0,0,.6);transform-origin:top center;animation:drop .38s cubic-bezier(.3,1.35,.4,1) both}",
     "@keyframes drop{from{opacity:0;transform:scale(.7) translateY(-8px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}",
@@ -116,7 +125,17 @@
   close.type = "button";
   close.title = "Hide on this page";
   close.textContent = "×";
-  bar.append(grip, go, note, close);
+  var get = document.createElement("a");
+  get.className = "get";
+  get.textContent = "Get VeloxFetch";
+  get.setAttribute("href", GET_URL);
+  get.setAttribute("target", "_blank");
+  get.setAttribute("rel", "noopener noreferrer");
+  get.hidden = true;
+  get.addEventListener("click", function (ev) {
+    ev.stopPropagation(); // the bar's, not the page's
+  });
+  bar.append(grip, go, note, get, close);
   var menu = document.createElement("div");
   menu.className = "menu";
   menu.hidden = true;
@@ -132,11 +151,11 @@
   var spot = null; // where the user put the bar: { fx, fy }, its centre's place on the video (0..1 of its size)
   var drag = null; // a drag going on: { id, dx, dy, x, y, moved, onGrip } (the pointer's offset from the bar's middle and top, where it started)
   var expanded = false; // open (hovered, or saying something) or the idle island
-  var hovering = false;
   var idleTimer = 0;
   var shrinkTimer = 0;
   var morphTimer = 0;
   var hideAnim = 0;
+  var noteTimer = 0;
   var openWidth = 0; // the open bar's width, last measured: the island's place is the open bar's middle
   var still = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   var lastTap = 0; // when the handle was last pressed without moving it (two in a row: back to the usual place)
@@ -274,10 +293,19 @@
     }
   }
 
+  /** The pointer is on the bar now (asked of the browser: a tab left and come back to sends no "leave"). */
+  function hovered() {
+    try {
+      return bar.matches(":hover");
+    } catch (e) {
+      return false;
+    }
+  }
+
   function idleLater() {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(function () {
-      if (hovering || busy || drag || !menu.hidden || !note.hidden) return idleLater();
+      if (hovered() || busy || drag || !menu.hidden || !note.hidden) return idleLater();
       setOpen(false);
     }, 1100);
   }
@@ -293,11 +321,15 @@
     return { fx: clamp((b.left + b.width / 2 - r.left) / r.width), fy: clamp((b.top + b.height / 2 - r.top) / r.height) };
   }
 
-  function setNote(text) {
+  /** Say something in the bar (it opens for it); `warn` also offers the link to get VeloxFetch. */
+  function setNote(text, warn) {
+    clearTimeout(noteTimer);
     var update = function () {
       note.textContent = text || "";
       note.hidden = !text;
       note.classList.toggle("busy", busy);
+      note.classList.toggle("warn", !!(text && warn));
+      get.hidden = !(text && warn);
     };
     if (text && !expanded) {
       expanded = true;
@@ -358,7 +390,6 @@
       menu.hidden = true;
       menu.textContent = "";
       target = null;
-      hovering = false;
       if (host.style.display !== "block" || still) return host.style.setProperty("display", "none", "important");
       // It shrinks away, then goes.
       wrap.classList.add("out");
@@ -374,7 +405,7 @@
   function later() {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(function () {
-      if (!menu.hidden || busy || drag || hovering) return later();
+      if (!menu.hidden || busy || drag || hovered() || !note.hidden) return later();
       hide(true);
     }, 3500);
   }
@@ -385,12 +416,34 @@
     menu.textContent = "";
     setNote("Sending to VeloxFetch…");
     note.classList.add("busy");
-    ask({ type: "bar:download", itemId: itemId }).then(function (r) {
+    var waited = new Promise(function (resolve) {
+      setTimeout(function () {
+        resolve({ ok: false, code: "timeout" });
+      }, ANSWER_WITHIN);
+    });
+    Promise.race([ask({ type: "bar:download", itemId: itemId }), waited]).then(function (r) {
       busy = false;
       note.classList.remove("busy");
-      setNote(r && r.ok ? "Sent: choose the quality in VeloxFetch" : (r && r.error) || "VeloxFetch did not answer.");
+      var missing = !r || NOT_THERE.indexOf(r.code) >= 0;
+      if (r && r.ok) setNote("Sent: choose the quality in VeloxFetch");
+      else if (missing) setNote("VeloxFetch is not installed on this computer.", true);
+      else setNote(r.error || "VeloxFetch did not answer.");
+      // The message stays a moment (longer for the link), then the bar closes back to the island.
+      clearAfter(r && r.ok ? 2600 : missing ? 8000 : 5000);
       later();
     });
+  }
+
+  function clearAfter(ms) {
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(function () {
+      if (busy) return;
+      // Not while the pointer is on it (the user may be about to press the link): a little after it leaves.
+      if (hovered()) return clearAfter(1500);
+      setNote("");
+      setOpen(false);
+      later(); // the island stays a moment before it goes
+    }, ms);
   }
 
   function openMenu(s) {
@@ -420,6 +473,7 @@
       if (!worthShowing(s)) return hide(true);
       if (s.protected) {
         setNote(s.protected + " protects its videos with DRM (copy protection): they cannot be downloaded.");
+        clearAfter(5000);
         return later();
       }
       var count = (s.page ? 1 : 0) + s.items.length;
@@ -485,11 +539,9 @@
   // Hovered or focused: it opens. Left alone: back to the island after a moment.
   bar.addEventListener("pointerenter", function (ev) {
     if (!ev.isTrusted) return;
-    hovering = true;
     setOpen(true);
   });
   bar.addEventListener("pointerleave", function () {
-    hovering = false;
     idleLater();
     later();
   });

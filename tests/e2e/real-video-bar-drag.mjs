@@ -7,6 +7,7 @@
 // from the background script, and the extension's storage). What is checked:
 //  * the bar shows over a large video as a small island at its usual place (the video's top right); hovered it
 //    grows into the full bar from its middle, left alone it shrinks back; its button still works;
+//  * VeloxFetch not installed: a warning and a link to get it (it opens the download page), then back to the island;
 //  * dragging its handle moves it, and it stays where it was dropped; the page sees none of the drag's events;
 //  * the place is kept as a place on the video: a fresh page (a new copy of the script) puts it there again;
 //  * a page's synthetic events cannot drag it; the arrow keys on the handle move it; a double click puts it back.
@@ -39,7 +40,7 @@ const PAGE = `<!doctype html><meta charset="utf-8"><style>body{margin:0;backgrou
   for (const t of ["pointerdown", "pointerup", "click", "dblclick", "mousedown"]) addEventListener(t, (e) => pageSaw.push(t));
   const stored = ${"__STORED__"};
   window.sent = [];
-  window.chrome = { runtime: { sendMessage: async (m) => (sent.push(m.type), m.type === "bar:state" ? { ok: true, page: "Example", items: [] } : { ok: true }) },
+  window.chrome = { runtime: { sendMessage: async (m) => (sent.push(m.type), m.type === "bar:state" ? { ok: true, page: "Example", items: [] } : (window.answer ?? { ok: true })) },
     storage: { local: {
       get: async (k) => (k in stored ? { [k]: stored[k] } : {}),
       set: async (o) => { Object.assign(stored, o); await fetch("/store", { method: "POST", body: JSON.stringify(stored) }); },
@@ -85,11 +86,11 @@ const barAt = () =>
     let b = y + 2; while (b < innerHeight && document.elementsFromPoint(x, b + 1).includes(h)) b++;
     return { x, y, left: l, w: on(x) ? r - l + 1 : 0, cx: Math.round((l + r) / 2), cy: Math.round((y + b) / 2), shown: h.style.display === "block" }; })()`);
 
-// VELOX_BAR_SHOTS=<folder>: also saves pictures of the bar (idle, open, while sending), to look at its design.
+// VELOX_BAR_SHOTS=<folder>: also saves pictures of the bar (idle, open, sent, VeloxFetch not installed), to look at its design.
 const shot = async (name) => {
   if (!process.env.VELOX_BAR_SHOTS) return;
   const b = await barAt();
-  const clip = { x: Math.max(0, b.x - 260), y: Math.max(0, b.y - 30), width: 520, height: 110, scale: 2 };
+  const clip = { x: Math.max(0, b.x - 380), y: Math.max(0, b.y - 30), width: 760, height: 110, scale: 2 };
   const { data } = await cdp("Page.captureScreenshot", { format: "png", clip });
   fs.writeFileSync(path.join(process.env.VELOX_BAR_SHOTS, `bar-${name}.png`), Buffer.from(data, "base64"));
 };
@@ -214,6 +215,34 @@ try {
   await sleep(400);
   const back = await barAt();
   check("a double click puts it back at the video's top right", Math.abs(back.x - island.x) <= 3 && Math.abs(back.y - island.y) <= 2 && !("videoBarSpot" in stored), JSON.stringify({ back, island, stored }));
+
+  // VeloxFetch not installed: the bar says so, offers the link to get it, then closes back to the island.
+  await evaluate(`(window.answer = { ok: false, code: "host_missing", error: "not connected" }, true)`);
+  await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: back.x, y: back.y + 19 });
+  await sleep(900);
+  const before = await barAt();
+  await mouse("mousePressed", before.left + 80, before.y + 19);
+  await mouse("mouseReleased", before.left + 80, before.y + 19);
+  await sleep(900);
+  const warned = await barAt();
+  await shot("not-installed");
+  check("not installed: the bar answers at once with a warning and a link (it widens for them)", warned.w > before.w + 150, JSON.stringify({ before, warned }));
+  const tabsBefore = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).length;
+  const right = warned.left + warned.w;
+  await mouse("mousePressed", right - 95, warned.y + 19);
+  await mouse("mouseReleased", right - 95, warned.y + 19);
+  const opened = await waitFor(async () => {
+    const all = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    return all.length > tabsBefore && all.find((t) => t.type === "page" && /^https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases/.test(t.url));
+  }, "the download page to open", 10000).catch(() => null);
+  check("its link opens the page to download VeloxFetch, in a new tab", !!opened, JSON.stringify(opened?.url));
+  await cdp("Page.bringToFront"); // back to the video's tab
+  await cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: 300, y: 300 });
+  const closed = await waitFor(async () => {
+    const b = await barAt();
+    return b && b.shown && b.w > 0 && b.w <= 48 ? b : null;
+  }, "the bar to close back to the island", 15000).catch(() => null);
+  check("then the message goes and the bar shrinks back to the island", !!closed, JSON.stringify(closed ?? (await barAt())));
 } catch (e) {
   check(`unexpected error: ${e?.stack ?? e}`, false);
 } finally {
