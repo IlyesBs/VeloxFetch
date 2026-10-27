@@ -359,6 +359,14 @@ elif [ "$os" = macos ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" target/release/velox-native-host
   codesign --verify --strict target/release/velox-native-host
   [ -n "${APPLE_ID:-}" ] && note "the app will be notarized with Apple ($APPLE_TEAM_ID)" || note "APPLE_ID not set: signed, not notarized"
+elif [ "$os" = macos ]; then
+  # No Developer ID: sign ad hoc (the bundle's own seal, tauri.release.macos.conf.json "signingIdentity": "-"). An
+  # unsigned or half-signed app downloaded from the internet is refused by macOS as "damaged"; sealed ad hoc, macOS
+  # opens it once the user allows it (Open Anyway). APPLE_SIGNING_IDENTITY, when set, replaces the ad-hoc identity.
+  step "Signing the browser helper (ad hoc: no Developer ID configured)"
+  codesign --force --sign - target/release/velox-native-host
+  codesign --verify --strict target/release/velox-native-host
+  note "no Developer ID: the app is sealed ad hoc (macOS asks the user to allow it once: Open Anyway)"
 else
   note "no signing certificate configured: the installers are unsigned"
 fi
@@ -381,6 +389,13 @@ fi
 step "Building the app and its installer ($conf)"
 # runs the UI build (tsc + vite) first, then compiles velox-desktop and bundles it
 npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"} ${media_args[@]+"${media_args[@]}"} ${tools_args[@]+"${tools_args[@]}"}
+
+if [ "$os" = macos ]; then
+  step "Checking the app's seal (a broken one makes macOS call it damaged)"
+  for app in "${CARGO_TARGET_DIR:-target}"/release/bundle/macos/*.app; do
+    codesign --verify --deep --strict --verbose=2 "$app" || die "$app is not sealed correctly: macOS would call it damaged"
+  done
+fi
 
 step "Packaging release/ (installer, portable zip, extension zips, SHA256SUMS.txt)"
 node scripts/package-release.mjs

@@ -10,6 +10,7 @@
       "../../browser-extension/dist/firefox": "extension/firefox"
     },
     "macOS": {
+      "signingIdentity": "-",
       "hardenedRuntime": true,
       "entitlements": "packaging/macos/Entitlements.plist",
       "infoPlist": "packaging/macos/Info.plist"
