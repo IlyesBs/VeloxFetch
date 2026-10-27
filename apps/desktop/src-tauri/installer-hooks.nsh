@@ -1,10 +1,12 @@
 ; Extra steps of the Windows setup (Tauri NSIS installer hooks).
 ;
-; After the files are copied, the setup downloads the programs video sites need (yt-dlp, Deno, ffmpeg)
-; into "<install folder>\tools", so videos work as soon as VeloxFetch opens. The app does the download
-; itself (fixed official HTTPS sources, every file checked against its published SHA-256, see
-; crates/download-manager/src/manager/tools.rs) and prints its progress, shown in the setup's details.
-; It never makes the setup fail: whatever could not be downloaded (no internet), the app gets at start-up.
+; After the files are copied, the setup puts the programs video sites need (yt-dlp, Deno, ffmpeg) into
+; "<install folder>\tools", so videos work as soon as VeloxFetch opens. They are inside this setup, compressed
+; ("<install folder>\video-tools", scripts/bundle-video-tools.mjs): the app unpacks them with no internet, checks
+; each against the SHA-256 in its list, then removes the compressed copies (see
+; crates/download-manager/src/manager/tools.rs). Only a setup built without them downloads them (fixed official
+; HTTPS sources, every file checked against its published SHA-256). The app prints its progress, shown in the
+; setup's details. It never makes the setup fail: whatever could not be done, the app does at start-up.
 ;
 ; It also points Chrome, Edge and Brave at the VeloxFetch extension in the Chrome Web Store, for every user of this
 ; computer (Chromium's documented "external extensions": HKLM\Software\<browser>\Extensions\<id>, value update_url,
@@ -43,7 +45,7 @@
   WriteRegStr HKLM "Software\BraveSoftware\Brave-Browser\Extensions\${VELOX_EXTENSION_ID}" "update_url" "${VELOX_STORE_UPDATE_URL}"
   !insertmacro VELOX_REG_VIEW_BACK
 
-  DetailPrint "Downloading required dependencies (about 300 MB). This can take a few minutes..."
+  DetailPrint "Installing required dependencies..."
   SetDetailsPrint both
   nsExec::ExecToLog '"$INSTDIR\${MAINBINARYNAME}.exe" --install-video-tools'
   Pop $0
@@ -65,6 +67,7 @@
   ; when this uninstall is part of an update: the new version uses them).
   ${If} $UpdateMode <> 1
     RMDir /r "$INSTDIR\tools"
+    RMDir /r "$INSTDIR\video-tools"
     RMDir "$INSTDIR"
   ${EndIf}
 !macroend

@@ -334,6 +334,10 @@ command!(get_video_tools, GetVideoTools, () -> VideoToolsDto, |m| async { Ok::<_
 command!(fetch_video_tools, FetchVideoTools, () -> VideoToolsDto, |m| async {
     Ok::<_, download_manager::ManagerError>(m.fetch_video_tools().await)
 });
+// The user's answer to a video tool update offered (true: download and install it; false: not this version).
+command!(answer_video_tools_update, AnswerVideoToolsUpdate, (accept: bool) -> VideoToolsDto, |m| async move {
+    Ok::<_, download_manager::ManagerError>(m.answer_video_tools_update(accept).await)
+});
 
 // Updates (Phase 19, docs/auto-update.md): the manager checks the signed manifest and downloads the package; the
 // install itself (a verified installer, an AppImage replaced, the system's package installer) is done here.
@@ -791,12 +795,33 @@ fn shared_tools_dir() -> Option<PathBuf> {
     Some(dir.join("tools"))
 }
 
-/// `velox-desktop --install-video-tools`: run by the installer (Windows setup, Linux packages) to download
-/// yt-dlp, Deno and ffmpeg next to the program, so videos work right after installing. Prints its progress
-/// (the installer shows it) and never fails the installation: whatever is missing, the app fetches later.
+/// The installer's compressed copies of the video tools (`video-tools/`, a bundle resource made by
+/// scripts/bundle-video-tools.mjs), where the bundler puts resources: beside the program on Windows and in
+/// portable copies, `/usr/lib/VeloxFetch` for the Linux packages, `$APPDIR/usr/lib/VeloxFetch` in an AppImage,
+/// `Contents/Resources` on macOS. `None` when this copy carries none (development builds).
+fn bundled_tools_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let mut places = vec![dir.join("video-tools")];
+    if cfg!(target_os = "linux") {
+        places.push(dir.join("../lib/VeloxFetch/video-tools"));
+        if let Some(app) = std::env::var_os("APPDIR") {
+            places.push(PathBuf::from(app).join("usr/lib/VeloxFetch/video-tools"));
+        }
+    }
+    if cfg!(target_os = "macos") {
+        places.push(dir.join("../Resources/video-tools"));
+    }
+    places.into_iter().find(|p| p.join(download_manager::BUNDLED_TOOLS_MANIFEST).is_file())
+}
+
+/// `velox-desktop --install-video-tools`: run by the installer (Windows setup, Linux packages) to put yt-dlp, Deno
+/// and ffmpeg next to the program, so videos work right after installing. They are unpacked from the installer's
+/// own compressed copies (no internet needed); only what a copy does not carry is downloaded, as before. Prints
+/// its progress (the installer shows it) and never fails the installation: whatever is missing, the app gets later.
 fn install_video_tools_cli() -> i32 {
     let Some(dir) = shared_tools_dir() else {
-        println!("The required dependencies are downloaded when VeloxFetch starts.");
+        println!("The required dependencies are installed when VeloxFetch starts.");
         return 0;
     };
     let tmp = std::env::temp_dir().join(format!("velox-install-{}", std::process::id()));
@@ -804,8 +829,17 @@ fn install_video_tools_cli() -> i32 {
         let mut cfg = ManagerConfig::new(tmp.join("velox.db"), tmp.join("downloads"));
         cfg.tools = download_manager::ToolSources::official();
         cfg.tools_dir = Some(dir.clone());
+        cfg.bundled_tools_dir = bundled_tools_dir();
         let m = DownloadManager::new(cfg).await.map_err(|e| e.to_string())?;
-        println!("Downloading required dependencies...");
+        if m.has_bundled_video_tools() {
+            println!("Installing required dependencies (no download needed)...");
+            if m.install_bundled_video_tools().await {
+                // Unpacked and checked: the compressed copies are not needed any more (their list stays).
+                m.remove_bundled_video_tools();
+            }
+        }
+        // Only what is still missing (a copy that carries none, or one that could not be unpacked).
+        println!("Checking required dependencies...");
         let job = {
             let m = m.clone();
             tokio::spawn(async move { m.fetch_video_tools().await })
@@ -824,6 +858,8 @@ fn install_video_tools_cli() -> i32 {
                     let received: u64 = all.iter().map(|s| s.received).sum();
                     let line = if ready == all.len() {
                         "Required dependencies: ready".to_string()
+                    } else if all.iter().any(|s| s.unpacking) {
+                        format!("Required dependencies: {ready} of {} ready, installing...", all.len())
                     } else {
                         format!("Required dependencies: {ready} of {} ready, {} MB downloaded", all.len(), received / 1_048_576)
                     };
@@ -909,8 +945,10 @@ pub fn run() {
             if fetch_tools {
                 cfg.tools = download_manager::ToolSources::official();
             }
-            // The copies the installer downloaded next to the program.
+            // The copies the installer put next to the program, and its compressed copies (unpacked at the first
+            // start where the installer could not: AppImage, macOS, portable copies).
             cfg.shared_tools_dir = shared_tools_dir();
+            cfg.bundled_tools_dir = bundled_tools_dir();
             cfg.update = update_config();
             dev_overrides(&mut cfg);
             // The key that seals cookies and credentials in the database lives in the operating
@@ -966,9 +1004,9 @@ pub fn run() {
             smart_throttle::spawn(app.handle().clone(), manager.clone());
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             tauri::async_runtime::spawn(preview_server::loopback::start(manager.clone()));
-            if fetch_tools {
-                // Whatever the installer could not get (no internet then, a source down) is fetched right after
-                // start-up, and continued from where it stopped if the app was closed in the middle.
+            if fetch_tools || manager.has_bundled_video_tools() {
+                // Whatever the installer could not put in place is unpacked from its copies (offline), else fetched
+                // right after start-up and continued from where it stopped if the app was closed in the middle.
                 let m = manager.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -1097,6 +1135,7 @@ pub fn run() {
             get_preview_base,
             get_video_tools,
             fetch_video_tools,
+            answer_video_tools_update,
             get_desktop_options,
             set_desktop_options,
             get_update_status,

@@ -370,3 +370,266 @@ async fn tools_from_the_installer_are_used() {
     let vid = format!("shared{}", std::process::id());
     m.analyze_media(format!("https://www.youtube.com/watch?v={vid}")).await.expect("read with the installer's yt-dlp");
 }
+
+// ---------------------------------------------------------------------------------------------
+// The installer's copies (offline) and the updates offered
+
+/// `data` as the installer carries it (xz behind the x86 branch filter, like scripts/bundle-video-tools.mjs).
+fn xz_of(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut options = lzma_rust2::XzOptions::with_preset(1); // fast: the format is the same
+    options.prepend_pre_filter(lzma_rust2::filter::FilterType::BcjX86, 0);
+    let mut w = lzma_rust2::XzWriter::new(Vec::new(), options).unwrap();
+    w.write_all(data).unwrap();
+    w.finish().unwrap()
+}
+
+/// A `video-tools/` folder for this computer: the three programs, compressed, and their list. Returns the folder and
+/// the stand-in programs (yt-dlp, Deno, ffmpeg).
+fn installers_copy(base: &std::path::Path, ytdlp_version: &str) -> (PathBuf, [Vec<u8>; 3]) {
+    let dir = base.join("program").join("video-tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    let programs = [
+        std::fs::read(env!("CARGO_BIN_EXE_fake-ytdlp")).unwrap(),
+        b"stand-in deno from the installer".to_vec(),
+        std::fs::read(env!("CARGO_BIN_EXE_fake-ffmpeg")).unwrap(),
+    ];
+    let mut tools = Vec::new();
+    for ((key, name, version), program) in
+        [("ytdlp", "yt-dlp", ytdlp_version), ("deno", "deno", "9.9.0"), ("ffmpeg", "ffmpeg", "2026.10.27")].into_iter().zip(&programs)
+    {
+        std::fs::write(dir.join(format!("{}.xz", exe(name))), xz_of(program)).unwrap();
+        tools.push(serde_json::json!({ "tool": key, "version": version, "size": program.len(), "sha256": hex(program) }));
+    }
+    let list = serde_json::json!({ "format": 1, "os": std::env::consts::OS, "arch": std::env::consts::ARCH, "tools": tools });
+    std::fs::write(dir.join("video-tools.json"), serde_json::to_vec_pretty(&list).unwrap()).unwrap();
+    (dir, programs)
+}
+
+fn requests_for(srv: &Server, path: &str) -> usize {
+    srv.state.request_heads.lock().unwrap().iter().filter(|h| h.contains(&path.to_ascii_lowercase())).count()
+}
+
+/// Installed from the installer's copies with no network at all (no source known): used for a video page, and
+/// the version each one is noted.
+#[tokio::test]
+async fn tools_come_from_the_installers_copy_with_nothing_downloaded() {
+    if on_path("yt-dlp") {
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("velox-tools-{}-bundled", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (bundle, programs) = installers_copy(&base, "2025.10.22");
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.bundled_tools_dir = Some(bundle);
+    let m = DownloadManager::new(c).await.unwrap();
+    let before = m.video_tools();
+    assert!(!before.ytdlp.installed && before.ytdlp.can_fetch, "it can be had without a server: {before:?}");
+    let vid = format!("bundled{}", std::process::id());
+    m.analyze_media(format!("https://www.youtube.com/watch?v={vid}")).await.expect("read with the installer's yt-dlp");
+    let st = m.fetch_video_tools().await;
+    assert!(st.ytdlp.installed && st.deno.installed && st.ffmpeg.installed, "{st:?}");
+    let tools = base.join("state").join("tools");
+    for (name, program) in ["yt-dlp", "deno", "ffmpeg"].iter().zip(&programs) {
+        if *name == "ffmpeg" && on_path("ffmpeg") {
+            continue; // the system's own ffmpeg is used, as always: nothing to unpack
+        }
+        assert_eq!(&std::fs::read(tools.join(exe(name))).unwrap(), program, "{name} unpacked byte-exact");
+    }
+    let versions: serde_json::Value = serde_json::from_slice(&std::fs::read(tools.join("versions.json")).unwrap()).unwrap();
+    assert_eq!(versions["ytdlp"]["version"], "2025.10.22");
+    assert_eq!(versions["ytdlp"]["from"], "bundle");
+    assert_eq!(versions["deno"]["sha256"], hex(&programs[1]));
+    let mut names: Vec<String> = std::fs::read_dir(&tools).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert!(names.iter().all(|n| !n.starts_with('.')), "no half-written file left: {names:?}");
+}
+
+/// A copy that does not match its list (changed or damaged) is never installed: the download takes over.
+#[tokio::test]
+async fn a_damaged_installers_copy_is_never_installed() {
+    if on_path("yt-dlp") {
+        return;
+    }
+    let (srv, ytdlp, _) = tool_server(true, true).await;
+    let (m0, _) = manager("bundled-damaged-unused", &srv).await;
+    drop(m0);
+    let base = std::env::temp_dir().join(format!("velox-tools-{}-bundled-damaged", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (bundle, _) = installers_copy(&base, "2025.10.22");
+    // Another program in place of the installer's yt-dlp (its list still names the real one).
+    std::fs::write(bundle.join(format!("{}.xz", exe("yt-dlp"))), xz_of(b"not the program the list names")).unwrap();
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.bundled_tools_dir = Some(bundle.clone());
+    c.tools = ToolSources { ytdlp: Some(srv.url("/yt")), deno: None, ffmpeg: None, ffmpeg_fallback: None, ffmpeg_unix: None };
+    let m = DownloadManager::new(c).await.unwrap();
+    let st = m.fetch_video_tools().await;
+    let tools = base.join("state").join("tools");
+    assert!(st.ytdlp.installed, "{st:?}");
+    assert_eq!(std::fs::read(tools.join(exe("yt-dlp"))).unwrap(), ytdlp, "the checked download, never the changed copy");
+    assert!(requests_for(&srv, &format!("/yt/{}", ytdlp_asset())) > 0, "downloaded instead");
+    // A list for another computer is not used at all.
+    let base2 = std::env::temp_dir().join(format!("velox-tools-{}-bundled-other", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base2);
+    let (bundle2, _) = installers_copy(&base2, "2025.10.22");
+    let list = std::fs::read_to_string(bundle2.join("video-tools.json")).unwrap().replace(std::env::consts::ARCH, "sparc");
+    std::fs::write(bundle2.join("video-tools.json"), list).unwrap();
+    let mut c = ManagerConfig::new(base2.join("state").join("velox.db"), base2.join("downloads"));
+    c.bundled_tools_dir = Some(bundle2);
+    let m2 = DownloadManager::new(c).await.unwrap();
+    assert!(!m2.video_tools().ytdlp.can_fetch && !m2.has_bundled_video_tools());
+}
+
+/// The installer's step: unpacked into the program's folder, the compressed copies removed (their list kept); a
+/// second run (repair) changes nothing; a newer installer's copy replaces the older one.
+#[tokio::test]
+async fn the_installer_step_unpacks_beside_the_program_and_removes_the_copies() {
+    let base = std::env::temp_dir().join(format!("velox-tools-{}-installer-step", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (bundle, programs) = installers_copy(&base, "2025.10.22");
+    let shared = base.join("program").join("tools");
+    let make = |bundle: PathBuf| {
+        let mut c = ManagerConfig::new(base.join("installer").join("velox.db"), base.join("installer-downloads"));
+        c.tools_dir = Some(shared.clone());
+        c.bundled_tools_dir = Some(bundle);
+        DownloadManager::new(c)
+    };
+    let m = make(bundle.clone()).await.unwrap();
+    assert!(m.has_bundled_video_tools());
+    assert!(m.install_bundled_video_tools().await);
+    for (name, program) in ["yt-dlp", "deno", "ffmpeg"].iter().zip(&programs) {
+        assert_eq!(&std::fs::read(shared.join(exe(name))).unwrap(), program, "{name}");
+    }
+    m.remove_bundled_video_tools();
+    assert!(bundle.join("video-tools.json").is_file(), "the list stays");
+    let left: Vec<_> = std::fs::read_dir(&bundle).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left.len(), 1, "only the list is left: {left:?}");
+    assert!(!m.has_bundled_video_tools());
+    // The app then uses them from the program's folder.
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.shared_tools_dir = Some(shared.clone());
+    c.bundled_tools_dir = Some(bundle.clone());
+    let app = DownloadManager::new(c).await.unwrap();
+    let st = app.video_tools();
+    assert!(st.ytdlp.installed && st.deno.installed && st.ffmpeg.installed, "{st:?}");
+    // A repair of the same version: nothing to do.
+    let (bundle, _) = installers_copy(&base, "2025.10.22");
+    let stamp = std::fs::metadata(shared.join(exe("deno"))).unwrap().modified().unwrap();
+    assert!(make(bundle.clone()).await.unwrap().install_bundled_video_tools().await);
+    assert_eq!(std::fs::metadata(shared.join(exe("deno"))).unwrap().modified().unwrap(), stamp, "the same program is not written again");
+    // A newer VeloxFetch with another Deno: replaced.
+    let list = std::fs::read_to_string(bundle.join("video-tools.json")).unwrap();
+    let newer = b"a newer stand-in deno".to_vec();
+    std::fs::write(bundle.join(format!("{}.xz", exe("deno"))), xz_of(&newer)).unwrap();
+    let list = list.replace(&hex(&programs[1]), &hex(&newer)).replace(&format!("\"size\": {}", programs[1].len()), &format!("\"size\": {}", newer.len()));
+    std::fs::write(bundle.join("video-tools.json"), list).unwrap();
+    assert!(make(bundle).await.unwrap().install_bundled_video_tools().await);
+    assert_eq!(std::fs::read(shared.join(exe("deno"))).unwrap(), newer);
+}
+
+/// Updates are found by small files only, offered, and never downloaded before the user accepts; a skipped version
+/// is not offered again (a newer one is); an accepted one is downloaded, checked and used.
+#[tokio::test]
+async fn tool_updates_are_offered_never_fetched_by_themselves() {
+    if on_path("yt-dlp") {
+        return;
+    }
+    let (srv, published, _) = tool_server(true, true).await;
+    let base = std::env::temp_dir().join(format!("velox-tools-{}-offers", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    // The installer's yt-dlp is an older build than the one published (another program: another checksum).
+    let (bundle, _) = installers_copy(&base, "2025.10.22");
+    let older = std::fs::read(env!("CARGO_BIN_EXE_fake-ffmpeg")).unwrap();
+    let list = std::fs::read_to_string(bundle.join("video-tools.json")).unwrap();
+    let ytdlp_line = hex(&std::fs::read(env!("CARGO_BIN_EXE_fake-ytdlp")).unwrap());
+    let ytdlp_size = std::fs::metadata(env!("CARGO_BIN_EXE_fake-ytdlp")).unwrap().len();
+    let list = list.replacen(&ytdlp_line, &hex(&older), 1).replacen(&format!("\"size\": {ytdlp_size}"), &format!("\"size\": {}", older.len()), 1);
+    std::fs::write(bundle.join("video-tools.json"), list).unwrap();
+    std::fs::write(bundle.join(format!("{}.xz", exe("yt-dlp"))), xz_of(&older)).unwrap();
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.bundled_tools_dir = Some(bundle);
+    c.tools = ToolSources { ytdlp: Some(srv.url("/yt")), deno: Some(srv.url("/deno")), ffmpeg: None, ffmpeg_fallback: None, ffmpeg_unix: None };
+    let m = DownloadManager::new(c).await.unwrap();
+    let st = m.fetch_video_tools().await;
+    assert!(st.ytdlp.installed && st.deno.installed, "{st:?}");
+    let tools = base.join("state").join("tools");
+    assert_eq!(std::fs::read(tools.join(exe("yt-dlp"))).unwrap(), older, "from the installer");
+    let asset = format!("/yt/{}", ytdlp_asset());
+    assert_eq!(requests_for(&srv, &asset), 0, "nothing downloaded to install");
+
+    // Found: yt-dlp (another checksum published). Deno 9.9.9 over 9.9.0 is a patch release: not offered.
+    let mut events = m.subscribe();
+    let st = m.check_video_tools_updates().await;
+    let offer = st.update.clone().expect("an update is offered");
+    assert_eq!(offer.tools, vec!["ytdlp".to_string()]);
+    assert_eq!(offer.size, published.len() as u64, "with its download size");
+    assert!(requests_for(&srv, &asset) <= 2, "only the size was asked (no download)");
+    assert_eq!(std::fs::read(tools.join(exe("yt-dlp"))).unwrap(), older, "nothing replaced by itself");
+    let told = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(download_manager::ManagerEvent::VideoTools { tools }) = events.recv().await {
+                break tools;
+            }
+        }
+    })
+    .await
+    .expect("the UI hears of it");
+    assert!(told.update.is_some());
+
+    // Skipped: gone, and not offered again for that version.
+    assert!(m.answer_video_tools_update(false).await.update.is_none());
+    assert!(m.check_video_tools_updates().await.update.is_none(), "a skipped version is not offered again");
+    // A newer one is published: offered again; a newer minor Deno too.
+    let newer = [published.clone(), b"#!a newer build".to_vec()].concat();
+    srv.put(&asset, newer.clone());
+    srv.put("/yt/SHA2-256SUMS", format!("{}  {}\n", hex(&newer), ytdlp_asset()));
+    let deno_zip = zip_of(&[(&exe("deno"), b"stand-in deno 9.10")]);
+    srv.put("/deno/release-latest.txt", "v9.10.0\n");
+    srv.put(&format!("/deno/release/v9.10.0/{}", deno_asset()), deno_zip.clone());
+    srv.put(&format!("/deno/release/v9.10.0/{}.sha256sum", deno_asset()), hex(&deno_zip));
+    let offer = m.check_video_tools_updates().await.update.expect("offered again");
+    assert_eq!(offer.tools, vec!["ytdlp".to_string(), "deno".to_string()]);
+
+    // Accepted: downloaded, checked, used, and its version noted.
+    let st = m.answer_video_tools_update(true).await;
+    assert!(st.update.is_none() && st.ytdlp.fetching, "{st:?}");
+    let t = Instant::now();
+    loop {
+        let st = m.video_tools();
+        if !st.ytdlp.fetching && !st.deno.fetching {
+            assert!(st.ytdlp.error.is_none() && st.deno.error.is_none(), "{st:?}");
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(20), "{st:?}");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(std::fs::read(tools.join(exe("yt-dlp"))).unwrap(), newer);
+    assert_eq!(std::fs::read(tools.join(exe("deno"))).unwrap(), b"stand-in deno 9.10");
+    let versions: serde_json::Value = serde_json::from_slice(&std::fs::read(tools.join("versions.json")).unwrap()).unwrap();
+    assert_eq!(versions["deno"]["version"], "9.10.0");
+    assert_eq!(versions["ytdlp"]["from"], "online");
+    assert!(m.check_video_tools_updates().await.update.is_none(), "up to date now");
+}
+
+/// Against the real servers (needs the internet; run by hand): an old yt-dlp is offered the newest, with its version
+/// and size, from small files only:
+/// `VELOX_TEST_REAL_TOOLS=1 cargo test -p velox-integration-tests --test tools real_update -- --nocapture`
+#[tokio::test]
+async fn real_update_check_names_the_version_and_size() {
+    if std::env::var_os("VELOX_TEST_REAL_TOOLS").is_none() {
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("velox-tools-real-offer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("state").join("tools")).unwrap();
+    std::fs::write(base.join("state").join("tools").join(exe("yt-dlp")), b"an old yt-dlp").unwrap();
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.tools = ToolSources::official();
+    let m = DownloadManager::new(c).await.unwrap();
+    let st = m.check_video_tools_updates().await;
+    eprintln!("{:?}", st.update);
+    let offer = st.update.expect("an update is offered");
+    assert_eq!(offer.tools, vec!["ytdlp".to_string()]);
+    assert!(offer.size > 1_000_000, "{offer:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}

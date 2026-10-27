@@ -805,8 +805,50 @@ test("video tools are fetched only from fixed https sources, checked against the
   assert.match(tools, /\[\(method, csize, size, crc, local\)\] = found\.as_slice\(\)/, "exactly one matching entry");
   assert.match(tools, /crc32\.sum\(\) != \*crc/, "the entry's CRC is checked");
   assert.ok(!/Command::new/.test(tools), "the installer starts nothing");
-  // No UI command can choose a source or a path: the two commands take nothing.
-  assert.match(read("apps", "desktop", "src-tauri", "src", "lib.rs"), /command!\(fetch_video_tools, FetchVideoTools, \(\) -> VideoToolsDto/);
+  // No UI command can choose a source or a path: two commands take nothing, the answer to an update a yes or a no.
+  const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  assert.match(lib, /command!\(fetch_video_tools, FetchVideoTools, \(\) -> VideoToolsDto/);
+  assert.match(lib, /command!\(answer_video_tools_update, AnswerVideoToolsUpdate, \(accept: bool\) -> VideoToolsDto/);
+});
+
+test("the installer's copies of the video tools: fixed names, checked before use, the list pinned in the program", () => {
+  const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
+  // The compressed file is opened by a fixed name: nothing in the list names a file.
+  assert.match(tools, /let packed = dir\.join\(format!\("\{\}\.xz", tool\.file_name\(\)\)\);/);
+  // The list is for this computer, and its SHA-256 is compiled into release builds.
+  assert.match(tools, /manifest\.os != std::env::consts::OS \|\| manifest\.arch != std::env::consts::ARCH/);
+  assert.match(tools, /option_env!\("VELOX_VIDEO_TOOLS_SHA256"\)/);
+  assert.match(tools, /if !to_hex\(&Sha256::digest\(&text\)\)\.eq_ignore_ascii_case\(pinned\)/);
+  // Unpacked to a temporary name; size and SHA-256 checked; only then made runnable and put in place.
+  assert.match(tools, /if written != size \|\| hash != want \{\s*return Err\(bad\("the unpacked program is damaged"\)\);/);
+  assert.match(tools, /unpack_xz\(&packed, &fresh, entry\.size, &entry\.sha256, got\)\s*\.and_then\(\|\(\)\| make_runnable\(&fresh\)\)\s*\.and_then\(\|\(\)\| std::fs::rename\(&fresh, &target\)\)/);
+  assert.match(tools, /XzReader::new_mem_limit\(input, false, UNPACK_MEMORY_KB\)/, "the decoder's memory is bounded");
+  // The decoder is safe Rust only, and the shipped program carries no encoder.
+  const cargo = read("crates", "download-manager", "Cargo.toml");
+  const dep = cargo.slice(0, cargo.indexOf("[dev-dependencies]")).match(/^lzma-rust2 = .*$/m)?.[0] ?? "";
+  assert.match(dep, /default-features = false, features = \["std", "xz"\]/, dep);
+  // The release build pins the list it made.
+  const build = read("scripts", "build-release.sh");
+  assert.match(build, /export VELOX_VIDEO_TOOLS_SHA256/);
+  assert.ok(build.indexOf("export VELOX_VIDEO_TOOLS_SHA256") < build.indexOf("tauri -- build"), "pinned before the app is compiled");
+});
+
+test("video tool updates are offered, never downloaded or installed by themselves", () => {
+  const tools = withoutTestModules(read("crates", "download-manager", "src", "manager", "tools.rs"));
+  const updates = withoutTestModules(read("crates", "download-manager", "src", "manager", "tool_updates.rs"));
+  const media = withoutTestModules(read("crates", "download-manager", "src", "manager", "media.rs"));
+  // Nothing replaces an installed tool from the internet on its own: no refresh at start-up or from a video page.
+  const prefetch = tools.slice(tools.indexOf("pub fn prefetch_video_tools"), tools.indexOf("/// Fetch every missing tool now"));
+  assert.ok(!/, true\)/.test(prefetch), "start-up only fills in what is missing");
+  assert.ok(!/ensure_tool\(Tool::YtDlp, true\)|fetch_in_background\(Tool::YtDlp, true\)/.test(media), "a video page only asks for a check");
+  // An update is installed only from the user's answer.
+  assert.equal((updates.match(/self\.install\(/g) ?? []).length, 1);
+  assert.match(updates, /async fn apply_offer\(&self, offer: Offer\)[\s\S]*let result = self\.install\(tool\)\.await;/);
+  assert.match(updates, /if accept \{\s*for offer in offers \{/);
+  assert.equal((updates.match(/\.apply_offer\(/g) ?? []).length, 1, "only from an accepted answer");
+  // The checks read the same fixed sources, over https (join -> secure), and send nothing about the user.
+  assert.ok(!/https?:\/\//.test(updates), "no address of its own");
+  assert.ok(!/Command::new/.test(updates));
 });
 
 test("only ffmpeg and yt-dlp are ever started by the media engine, both found by absolute path", () => {

@@ -10,7 +10,9 @@
 #    crates/system-integration/src/store_extension.rs (a test keeps them in step).
 #
 # 2. The programs video sites need (yt-dlp, Deno, ffmpeg), into /usr/lib/velox-fetch/tools, so videos work as soon as
-#    VeloxFetch opens. VeloxFetch does the download itself (fixed official HTTPS sources, SHA-256 checked).
+#    VeloxFetch opens. They are in this package, compressed (/usr/lib/VeloxFetch/video-tools): VeloxFetch unpacks them
+#    with no internet and checks each against the SHA-256 in its list, then removes the compressed copies. Only a
+#    package built without them downloads them (fixed official HTTPS sources, SHA-256 checked).
 #
 # Never fails the installation: whatever could not be done, the app does at start-up (or from Settings > Browser).
 VELOX_EXTENSION_ID=keobnkoppcchnbpmmfodidkcedglbhnn

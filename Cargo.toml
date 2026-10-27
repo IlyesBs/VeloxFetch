@@ -18,6 +18,10 @@ serde = { version = "1", features = ["derive"] }
 url = "2"
 tracing = "0.1"
 
+# The xz decoder is slow unoptimized: development builds and tests unpack the video tools at a usable speed.
+[profile.dev.package.lzma-rust2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
