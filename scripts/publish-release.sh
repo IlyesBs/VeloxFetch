@@ -29,7 +29,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # The public download repository (the source repository stays private). The app's update feed names the same one.
-PUBLIC_REPO="IlyesBs/VeloxFetch-releases"
+PUBLIC_REPO="IlyesBs/VeloxFetch"
 
 key="$HOME/.config/veloxfetch-release/update-signing-key.json"
 build=1
@@ -127,8 +127,7 @@ ls -la "$files"
 cat <<EOF
 
 Publish it (docs/publishing.md):
-  1. Public repository https://github.com/$PUBLIC_REPO
-     - first time: copy $stage/repo/* (README.md, screenshots/) into it and push
+  1. Repository https://github.com/$PUBLIC_REPO (its releases are what users download and the app watches)
   2. Release v$version: $( [ "$draft" = 1 ] && echo "the draft is there: check it, then press Publish release" || echo "Releases > Draft a new release > tag v$version, title \"VeloxFetch $version\", text from RELEASE_NOTES.md, attach every file of $files" )
      - keep latest.json and latest.json.sig in it: installed copies update from them
   3. Download sites: texts in $stage/LISTINGS.md, pictures in $stage/repo/screenshots

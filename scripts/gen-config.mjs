@@ -39,6 +39,7 @@ function values(cfg) {
     releasePage: `${repo}/releases`,
     updateFeed: `${repo}/releases/latest/download/latest.json`,
     updatePackages: `${repo}/releases/download/`,
+    latestRelease: `${repo}/releases/latest`,
     chromeExtensionId: cfg.chrome_extension_id,
     chromeStoreId: cfg.chrome_store_id || "",
     firefoxExtensionId: cfg.firefox_extension_id,
@@ -81,6 +82,9 @@ function artifacts(v) {
       `pub const UPDATE_FEED: &str = ${rustStr(v.updateFeed)};\n` +
       "/// The prefix every update package address must start with.\n" +
       `pub const UPDATE_PACKAGES: &str = ${rustStr(v.updatePackages)};\n` +
+      "/// GitHub's newest release: redirects to its tag (`.../releases/tag/v<x.y.z>`), watched when there is no signed\n" +
+      "/// manifest to read (a newer version is announced with the release page, never installed that way).\n" +
+      `pub const LATEST_RELEASE: &str = ${rustStr(v.latestRelease)};\n` +
       "/// The Firefox Add-ons (AMO) listing to open for a Firefox user (`None` = not published yet).\n" +
       `pub const FIREFOX_STORE_URL: Option<&str> = ${rustOpt(v.firefoxStoreUrl)};\n`,
   };

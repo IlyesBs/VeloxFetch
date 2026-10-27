@@ -20,7 +20,7 @@ const base: UpdateStatus = {
   checkedAt: null,
   error: null,
   install: "restart",
-  releasePage: "https://github.com/IlyesBs/VeloxFetch-releases/releases",
+  releasePage: "https://github.com/IlyesBs/VeloxFetch/releases",
 };
 
 describe("updates", () => {
