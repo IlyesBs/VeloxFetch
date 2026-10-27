@@ -43,6 +43,13 @@ export async function startFileServer(sizeBytes) {
     if (req.url.startsWith("/auth/") && req.headers.authorization !== `Basic ${Buffer.from("user:pass").toString("base64")}`) {
       return void res.writeHead(401, { "WWW-Authenticate": 'Basic realm="e2e"' }).end();
     }
+    // `/signin/..` gives the file only to the signed-in browser, like SharePoint / Office Online: anyone else gets a
+    // sign-in page (200, text/html) where the file should be.
+    if (req.url.startsWith("/signin/")) {
+      const page = "<!doctype html><title>Sign in</title><p>Sign in to your account</p>";
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page) });
+      return void res.end(req.method === "HEAD" ? undefined : page);
+    }
     const total = FILE.length;
     const m = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? "");
     let [start, end, status] = [0, total - 1, 200];

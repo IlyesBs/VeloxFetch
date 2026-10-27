@@ -399,6 +399,41 @@ impl DownloadManager {
         self.create_inner(req, headers).await
     }
 
+    /// Can VeloxFetch fetch a download the browser was starting, on its own? Asked before taking it over from the
+    /// browser. Some sites give the file only to the signed-in browser — a SharePoint / OneDrive / Office Online
+    /// export, a members-only page — and answer anyone else with a sign-in page, 401 or 403. Taken over, such a
+    /// download could only fail; declined, the extension gives it back to the browser, which downloads it with its
+    /// own session. One quick check with the headers the browser sent (the same requests the download would
+    /// start with). Declined only on that evidence: no answer, a slow server or any other trouble takes the download
+    /// as before, and a link the browser cannot hand over is refused later like any other.
+    pub async fn browser_can_take_over(&self, req: &NewDownload, ctx: &BrowserContext) -> Result<(), ManagerError> {
+        let Ok(url) = validate::url(&req.url) else { return Ok(()) };
+        let (url, _) = validate::split_credentials(url);
+        let url = crate::links::direct(&url).unwrap_or(url);
+        let headers = validate::browser_headers(ctx)?;
+        let probe = tokio::time::timeout(Duration::from_secs(15), self.inner.downloader.probe_quick(url.as_str(), &headers)).await;
+        let browser_only = match probe {
+            Ok(Ok(info)) => {
+                // The browser's name for the file (it read the server's answer with the user's sign-in) decides what
+                // a file is expected to be; without one, the name the download itself would choose.
+                let name = req
+                    .filename
+                    .as_deref()
+                    .map(downloader_core::filename::sanitize_filename)
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or_else(|| downloader_core::filename::choose_filename(&info, &url));
+                downloader_core::filename::web_page_instead_of_file(&info, &name)
+            }
+            Ok(Err(DownloadError::Http(http_client::HttpError::Status { status: 401 | 403, .. }))) => true,
+            _ => false,
+        };
+        if browser_only {
+            tracing::info!(host = url.host_str().unwrap_or("?"), "this file is only given to the signed-in browser: left to the browser");
+            return Err(ManagerError::invalid("this file is only given to the signed-in browser: the browser downloads it"));
+        }
+        Ok(())
+    }
+
     async fn create_inner(&self, req: NewDownload, request_headers: Vec<(String, String)>) -> Result<DownloadDto, ManagerError> {
         let (url, credentials) = validate::split_credentials(validate::url(&req.url)?);
         let url = crate::links::direct(&url).unwrap_or(url);

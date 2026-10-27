@@ -254,3 +254,32 @@ async fn without_a_sign_in_the_protected_download_fails_asking_for_one() {
         "the card and details offer Sign in"
     );
 }
+
+/// A file only the signed-in browser can get (SharePoint / OneDrive / Office Online, members-only sites) is not
+/// taken over from the browser: the check declines it, and the extension lets the browser download it with its
+/// own session. Everything VeloxFetch can fetch itself, or cannot tell, is taken as before.
+#[tokio::test]
+async fn a_file_only_the_signed_in_browser_gets_is_left_to_the_browser() {
+    let srv = serve(random_data(MB, 11)).await;
+    let m = manager("browser-only").await;
+    let named = |path: &str, name: &str| NewDownload { url: srv.url(path), filename: Some(name.into()), ..Default::default() };
+
+    // A sign-in page where the browser was getting a file (the Office Online "Download as CSV" case).
+    let page = m.browser_can_take_over(&named("/html/XlFileHandler.aspx", "Template test case(DATA).csv"), &ctx()).await;
+    assert!(page.is_err(), "a sign-in page instead of the file is left to the browser");
+    // 401 and 403: the server wants the browser's sign-in.
+    assert!(m.browser_can_take_over(&req(&srv, "/auth/a.bin"), &ctx()).await.is_err(), "401");
+    srv.state.expired.lock().unwrap().insert("tok".into());
+    assert!(m.browser_can_take_over(&req(&srv, "/signed/tok/a.bin"), &ctx()).await.is_err(), "403");
+
+    // What VeloxFetch can fetch is taken over.
+    assert!(m.browser_can_take_over(&named("/report.csv", "report.csv"), &ctx()).await.is_ok());
+    // A web page the user meant to save as a page is not a sign-in page.
+    assert!(m.browser_can_take_over(&req(&srv, "/html/page.html"), &BrowserContext::default()).await.is_ok());
+    // No answer at all: nothing proves the browser is needed, so the download is taken as before.
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+    let gone = NewDownload { url: format!("http://{closed}/a.bin"), ..Default::default() };
+    assert!(m.browser_can_take_over(&gone, &ctx()).await.is_ok());
+    // The check never adds anything.
+    assert!(m.list_downloads(ListFilter::default()).await.unwrap().is_empty());
+}
