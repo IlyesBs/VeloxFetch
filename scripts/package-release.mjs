@@ -5,6 +5,7 @@
 // build; it can also be run on its own once `npm run release` (or the per-OS tauri build) has run.
 //
 //   node scripts/package-release.mjs
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -136,6 +137,62 @@ for (const f of [desktop, host]) if (!fs.existsSync(f)) die(`missing ${f}: build
 fs.mkdirSync(REL, { recursive: true });
 for (const n of fs.readdirSync(REL)) if (SHIPPED.test(n)) fs.rmSync(path.join(REL, n));
 
+/**
+ * The AppImage's packer (linuxdeploy) gives every program it finds a library search path (patchelf). The browser
+ * helper is built self-contained (static, so it also runs inside snap and Flatpak browsers), and that edit breaks
+ * it: it crashes as soon as a browser starts it, and the extension cannot reach the app. So the AppImage is unpacked,
+ * the helper put back exactly as it was built, and packed again with its own runtime and compression; then the
+ * helper inside is checked against the build's and run once.
+ */
+function restoreAppImageHelper(appimage) {
+  const run = (cmd, args, opts = {}) => {
+    const r = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 1 << 26, ...opts });
+    if (r.error || r.status !== 0) die(`${cmd} ${args.join(" ")} failed: ${r.error?.message ?? r.stderr?.slice(-400)}`);
+    return r.stdout;
+  };
+  const inside = "usr/lib/VeloxFetch/velox-native-host";
+  const work = fs.mkdtempSync(path.join(path.dirname(appimage), ".appimage-"));
+  try {
+    const offset = Number(run(appimage, ["--appimage-offset"], { env: { ...process.env, APPIMAGE_EXTRACT_AND_RUN: "" } }).trim());
+    if (!Number.isInteger(offset) || offset <= 0) die(`cannot read the AppImage's layout: ${appimage}`);
+    run(appimage, ["--appimage-extract"], { cwd: work });
+    const root = path.join(work, "squashfs-root");
+    const helper = path.join(root, inside);
+    if (!fs.existsSync(helper)) die(`the AppImage carries no browser helper (${inside})`);
+    if (Buffer.compare(fs.readFileSync(helper), fs.readFileSync(host)) === 0) return; // untouched: nothing to do
+    fs.copyFileSync(host, helper);
+    fs.chmodSync(helper, 0o755);
+    const comp = /Compression (\w+)/.exec(run("unsquashfs", ["-s", "-o", String(offset), appimage]))?.[1] ?? "zstd";
+    const fsImage = path.join(work, "fs.squashfs");
+    run("mksquashfs", [root, fsImage, "-root-owned", "-noappend", "-comp", comp, "-quiet", "-no-progress"]);
+    const runtime = Buffer.alloc(offset);
+    const fd = fs.openSync(appimage, "r");
+    fs.readSync(fd, runtime, 0, offset, 0);
+    fs.closeSync(fd);
+    const fresh = path.join(work, "new.AppImage");
+    fs.writeFileSync(fresh, Buffer.concat([runtime, fs.readFileSync(fsImage)]), { mode: 0o755 });
+    // Check: the helper inside is the build's, byte for byte, and it runs (a ping with no app: a refusal, not a crash).
+    const check = path.join(work, "check");
+    fs.mkdirSync(check);
+    run(fresh, ["--appimage-extract", inside], { cwd: check });
+    const got = path.join(check, "squashfs-root", inside);
+    if (Buffer.compare(fs.readFileSync(got), fs.readFileSync(host)) !== 0) die("the repacked AppImage's helper is not the build's");
+    const body = Buffer.from('{"command":"ping"}');
+    const head = Buffer.alloc(4);
+    head.writeUInt32LE(body.length);
+    const ping = spawnSync(got, ["chrome-extension://gbcanjaaelioalfdggkhbbnbinmfgdbc/"], {
+      input: Buffer.concat([head, body]),
+      env: { PATH: "/usr/bin:/bin", HOME: work },
+      timeout: 20000,
+    });
+    if (ping.status !== 0 || ping.stdout.length < 5) die(`the AppImage's helper does not run (exit ${ping.status}, signal ${ping.signal})`);
+    fs.renameSync(fresh, appimage);
+    console.log(`AppImage: browser helper restored as built (the packer had broken it), ${path.basename(appimage)}`);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
 // 1. installers made by `tauri build`
 const installers = { windows: ["nsis", "msi"], macos: ["dmg"], linux: ["deb", "rpm", "appimage"] }[os];
 const made = [];
@@ -146,6 +203,7 @@ for (const kind of installers) {
     // only this version's installers (an older version's can linger in the bundle folder)
     if (!SHIPPED.test(n) || !n.includes(VERSION)) continue;
     fs.copyFileSync(path.join(d, n), path.join(REL, n));
+    if (kind === "appimage") restoreAppImageHelper(path.join(REL, n));
     made.push(n);
   }
 }

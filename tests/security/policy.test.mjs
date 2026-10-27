@@ -683,6 +683,14 @@ test("Phases 16-18: tray, start at login and notifications stay per user, opt-in
   assert.ok(!/echo "\$(WINDOWS_CERT|APPLE_CERTIFICATE|APPLE_PASSWORD)/.test(build.replace(/echo "\$APPLE_CERTIFICATE" \| base64 --decode/, "")), "no secret is echoed to the log");
 });
 
+test("the AppImage ships the browser helper exactly as built (its packer's edit made it crash)", () => {
+  const pkg = read("scripts", "package-release.mjs");
+  assert.match(pkg, /if \(kind === "appimage"\) restoreAppImageHelper\(path\.join\(REL, n\)\);/);
+  // Checked after repacking: the same bytes as the build's helper, and it runs.
+  assert.match(pkg, /the repacked AppImage's helper is not the build's/);
+  assert.match(pkg, /the AppImage's helper does not run/);
+});
+
 test("Smart Download Queue: main window only, ids and plain rules only, nothing is sent to find out the connection", () => {
   const api = read("crates", "download-manager", "src", "api.rs");
   const rules = read("crates", "scheduler", "src", "queue_rules.rs");
