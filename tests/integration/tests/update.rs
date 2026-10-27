@@ -75,6 +75,7 @@ impl Release {
             policy: Policy { product: "VeloxFetch".into(), url_prefix: self.prefix(), allow_loopback_http: true },
             feed: self.server.url("/feed/latest.json"),
             release_page: "https://example.invalid/releases".into(),
+            latest_release: None,
             current: Version(1, 0, 0),
             kind: Some(kind().0.into()),
             allow_loopback_http: true,
@@ -238,4 +239,68 @@ async fn automatic_checks_follow_the_setting_and_a_copy_without_keys_never_check
     assert!(m.download_update().await.is_err());
     assert_eq!(rel.server.state.request_heads.lock().unwrap().len(), hits, "no request at all");
     m.shutdown().await;
+}
+
+/// A copy watching the newest release (no trusted key built in, or no signed manifest on the release).
+async fn watcher(rel: &Release, dir: &Path, keys: TrustedKeys) -> DownloadManager {
+    let mut cfg = ManagerConfig::new(dir.join("state.db"), dir.join("dl"));
+    cfg.update = Some(UpdateConfig {
+        keys,
+        policy: Policy { product: "VeloxFetch".into(), url_prefix: rel.prefix(), allow_loopback_http: true },
+        feed: rel.server.url("/feed/latest.json"),
+        release_page: rel.server.url("/page"),
+        latest_release: Some(rel.server.url("/redirext/latest")),
+        current: Version(2, 0, 0),
+        kind: Some(kind().0.into()),
+        allow_loopback_http: true,
+        first_check: Duration::from_secs(3600),
+        every: Duration::from_secs(3600),
+        dir: Some(dir.join("updates")),
+    });
+    DownloadManager::new(cfg).await.unwrap()
+}
+
+/// The newest GitHub release is announced (version, release page) when there is no signed manifest: never
+/// downloaded or installed that way; only a tag of the release page counts.
+#[tokio::test]
+async fn the_newest_release_is_announced_without_a_signed_manifest() {
+    let rel = Release::new().await;
+    let tag = |v: &str| {
+        rel.server.put(&format!("/page/tag/v{v}"), "the release page");
+        *rel.server.state.redirect_to.lock().unwrap() = rel.server.url(&format!("/page/tag/v{v}"));
+    };
+    // No trusted key in this build: the watch alone.
+    let dir = temp("watch");
+    let m = watcher(&rel, &dir, TrustedKeys::parse("").unwrap()).await;
+    assert!(m.update_status().supported, "watched: Settings > Updates checks");
+    tag("2.0.1");
+    let s = m.check_for_updates().await;
+    assert_eq!((s.phase, s.version.as_deref(), s.size), ("elsewhere", Some("2.0.1"), None), "{s:?}");
+    assert_eq!(s.release_page.as_deref(), Some(rel.server.url("/page").as_str()));
+    assert!(m.download_update().await.is_err(), "nothing is downloaded from a watched release");
+    assert!(!dir.join("updates").exists() || std::fs::read_dir(dir.join("updates")).unwrap().count() == 0);
+    // The same version, or an older one: up to date.
+    tag("2.0.0");
+    assert_eq!(m.check_for_updates().await.phase, "upToDate");
+    tag("1.9.9");
+    assert_eq!(m.check_for_updates().await.phase, "upToDate");
+    // An address that is not a tag of the release page, or not a version: refused, nothing announced.
+    *rel.server.state.redirect_to.lock().unwrap() = rel.server.url("/elsewhere/tag/v9.9.9");
+    rel.server.put("/elsewhere/tag/v9.9.9", "x");
+    let s = m.check_for_updates().await;
+    assert_eq!((s.phase, s.version.as_deref()), ("failed", None), "{s:?}");
+    tag("3.0.0-beta");
+    assert_eq!(m.check_for_updates().await.phase, "failed");
+
+    // A signed build whose release has no latest.json (published by hand): the newest release still says.
+    let dir = temp("watch-signed");
+    let keys = TrustedKeys::parse(&format!("{KEY_PREFIX} {}\n", to_hex(signer().verifying_key().as_bytes()))).unwrap();
+    let m = watcher(&rel, &dir, keys).await;
+    tag("2.1.0");
+    let s = m.check_for_updates().await;
+    assert_eq!((s.phase, s.version.as_deref()), ("elsewhere", Some("2.1.0")), "{s:?}");
+    // With a signed manifest there, it wins: the package is offered as before.
+    rel.publish("2.1.0", 2000, &signer());
+    let s = m.check_for_updates().await;
+    assert_eq!((s.phase, s.version.as_deref()), ("available", Some("2.1.0")), "{s:?}");
 }

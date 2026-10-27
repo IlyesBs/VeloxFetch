@@ -17,10 +17,10 @@
 # The product name (update feed query, window/report labels that use the bare product name).
 product: VeloxFetch
 
-# The PUBLIC download repository on GitHub (the source repository is private). The release page,
-# the update feed (latest.json) and the update packages are all derived from owner/repo below.
+# The repository whose GitHub releases users download and the app watches. The release page, the newest
+# release (watched), the update feed (latest.json) and the update packages are all derived from owner/repo below.
 releases_owner: IlyesBs
-releases_repo: VeloxFetch-releases
+releases_repo: VeloxFetch
 
 # Browser extension identity.
 # The unpacked / developer-mode build, fixed by the public key in the extension's manifest.

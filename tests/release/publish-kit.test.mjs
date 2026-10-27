@@ -215,7 +215,7 @@ test("the whole publish script, in a throwaway copy of the project, with a throw
   // The manifest lists both systems' packages at the public repository, and its signature verifies with the app's key.
   const manifest = JSON.parse(fs.readFileSync(path.join(out, "latest.json"), "utf8"));
   assert.deepEqual(manifest.packages.map((p) => p.target).sort(), ["linux-x86_64-appimage", "linux-x86_64-deb", "linux-x86_64-rpm", "windows-x86_64-nsis"]);
-  for (const p of manifest.packages) assert.equal(p.url, `https://github.com/IlyesBs/VeloxFetch-releases/releases/download/v${V}/${p.name}`);
+  for (const p of manifest.packages) assert.equal(p.url, `https://github.com/IlyesBs/VeloxFetch/releases/download/v${V}/${p.name}`);
   const verify = spawnSync("node", ["scripts/update-key.mjs", "verify", "--manifest", path.join(out, "latest.json")], { cwd: root, encoding: "utf8" });
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
   // The checksum list covers every published file, the manifest and its signature included.
