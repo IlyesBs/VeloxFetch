@@ -9,6 +9,7 @@
 //  * `groups` (which downloads are active / queued / ...) is rebuilt only when a download is added,
 //    removed or changes status, never on progress ticks.
 
+import { markShown } from "./ui/entrance";
 import type { Download, DownloadStatus, ManagerEvent, MediaJob, Metrics, PendingDownload, Profiles, Progress, Queues, QueueState, UpdateStatus } from "./types";
 
 export type GroupName = "active" | "queued" | "paused" | "failed" | "completed" | "cancelled";
@@ -285,6 +286,9 @@ export function createStore(schedule: Scheduler = rafOrTimeout): Store {
       const byId: Record<number, Download> = {};
       for (const d of downloads) byId[d.id] = d;
       const ids = downloads.map((d) => d.id);
+      // The downloads already there when the list loads (opening the app, coming back to the window) are part of the
+      // page, not new: their cards do not fade in, all at once, as the window appears. Only a new download's does.
+      for (const id of ids) markShown(`download:${id}`);
       pending = [];
       set({ ...state, ready: true, byId, ids, groups: buildGroups(ids, byId), metrics, queue: queue ?? state.queue, queues: queues ?? state.queues, pending: waiting ?? state.pending, media: media ?? state.media });
     },

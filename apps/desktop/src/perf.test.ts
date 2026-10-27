@@ -74,6 +74,8 @@ describe("Linux: no shadows (the costly part of every repaint there)", () => {
   const L = ':root[data-platform="linux"]';
   it("turns every box shadow off", () => {
     expect(css).toContain(`${L} *,\n${L} *::before,\n${L} *::after {\n  box-shadow: none !important;\n}`);
+    // No frosted glass on Linux: the blurred layers flickered blank while downloads ran (Ubuntu), at no gain in look.
+    expect(css).toContain(`${L} *,\n${L} *::before,\n${L} *::after {\n  -webkit-backdrop-filter: none !important;\n  backdrop-filter: none !important;\n}`);
   });
 
   it("draws the rings that mean something as outlines instead", () => {
