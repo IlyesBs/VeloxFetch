@@ -41,12 +41,16 @@ pub(crate) struct Offer {
     pub size: u64,
 }
 
-/// The version in a GitHub release download address: `.../releases/download/<version>/<asset>`.
+/// The version a GitHub release address names: its tag page (`.../releases/tag/<version>`, where `.../releases/latest`
+/// leads) or a file of it (`.../releases/download/<version>/<asset>`). The "latest download" address itself ends on
+/// GitHub's file servers, which do not say it.
 pub(crate) fn release_version(final_url: &str, asset: &str) -> Option<String> {
     let url = url::Url::parse(final_url).ok()?;
     let parts: Vec<&str> = url.path_segments()?.collect();
     match parts.as_slice() {
-        [.., "download", version, last] if *last == asset && version_numbers(version).is_some() => Some(version.to_string()),
+        [.., "releases", "tag", version] | [.., "releases", "download", version, _] if version_numbers(version).is_some() => {
+            (parts.last() == Some(version) || parts.last() == Some(&asset)).then(|| version.to_string())
+        }
         _ => None,
     }
 }
@@ -219,7 +223,15 @@ impl DownloadManager {
             return Ok(None);
         }
         let info = self.media_client().probe(&join(base, asset)?).await.ok();
-        let version = info.as_ref().and_then(|i| release_version(&i.final_url, asset));
+        // The version: where the newest release's page leads (`<base>` is `.../releases/latest/download`).
+        let version = match base.trim_end_matches('/').strip_suffix("/download") {
+            Some(latest) => match self.media_client().probe(&super::tools::secure(url::Url::parse(latest).map_err(|_| "bad address".to_string())?)?).await {
+                Ok(page) => release_version(&page.final_url, asset),
+                Err(_) => None,
+            },
+            None => None,
+        }
+        .or_else(|| info.as_ref().and_then(|i| release_version(&i.final_url, asset)));
         let size = info.and_then(|i| i.content_length).unwrap_or(0);
         Ok(Some(Offer { tool: Tool::YtDlp, ident: to_hex(&latest), version, size }))
     }
@@ -261,6 +273,11 @@ mod tests {
         assert_eq!(release_version(u, "yt-dlp.exe").as_deref(), Some("2025.10.22"));
         assert_eq!(release_version(u, "yt-dlp_linux"), None, "another file");
         assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/download/latest/yt-dlp.exe", "yt-dlp.exe"), None);
+        // Where `.../releases/latest` leads: the tag page.
+        assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26", "yt-dlp.exe").as_deref(), Some("2026.10.26"));
+        assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/tag/nightly", "yt-dlp.exe"), None);
+        // GitHub's file servers do not say it.
+        assert_eq!(release_version("https://release-assets.githubusercontent.com/github-production-release-asset/123/abc?sp=r", "yt-dlp.exe"), None);
         assert_eq!(release_version("http://127.0.0.1:9/yt/yt-dlp.exe", "yt-dlp.exe"), None);
         assert_eq!(release_version("not a link", "yt-dlp.exe"), None);
     }

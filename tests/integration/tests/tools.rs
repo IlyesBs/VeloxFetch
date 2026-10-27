@@ -610,3 +610,26 @@ async fn tool_updates_are_offered_never_fetched_by_themselves() {
     assert_eq!(versions["ytdlp"]["from"], "online");
     assert!(m.check_video_tools_updates().await.update.is_none(), "up to date now");
 }
+
+/// Against the real servers (needs the internet; run by hand): an old yt-dlp is offered the newest, with its version
+/// and size, from small files only:
+/// `VELOX_TEST_REAL_TOOLS=1 cargo test -p velox-integration-tests --test tools real_update -- --nocapture`
+#[tokio::test]
+async fn real_update_check_names_the_version_and_size() {
+    if std::env::var_os("VELOX_TEST_REAL_TOOLS").is_none() {
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("velox-tools-real-offer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("state").join("tools")).unwrap();
+    std::fs::write(base.join("state").join("tools").join(exe("yt-dlp")), b"an old yt-dlp").unwrap();
+    let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
+    c.tools = ToolSources::official();
+    let m = DownloadManager::new(c).await.unwrap();
+    let st = m.check_video_tools_updates().await;
+    eprintln!("{:?}", st.update);
+    let offer = st.update.expect("an update is offered");
+    assert_eq!(offer.tools, vec!["ytdlp".to_string()]);
+    assert!(offer.size > 1_000_000, "{offer:?}");
+    let _ = std::fs::remove_dir_all(&base);
+}

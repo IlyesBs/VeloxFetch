@@ -95,11 +95,23 @@ export function parseChecksum(text, name) {
   return all.length === 1 ? all[0].toLowerCase() : null;
 }
 
-/** The version in a GitHub release download address: `.../releases/download/<version>/<asset>`. */
+/** The version a GitHub release address names: its tag page (`.../releases/tag/<version>`, where `.../releases/latest`
+ * leads) or a file of it (`.../releases/download/<version>/<asset>`). The "latest download" address itself ends on
+ * GitHub's file servers, which do not say it. */
 export function releaseVersion(finalUrl, asset) {
   const parts = new URL(finalUrl).pathname.split("/");
   const n = parts.length;
-  return n >= 3 && parts[n - 1] === asset && parts[n - 3] === "download" && /^\d+(\.\d+)*$/.test(parts[n - 2]) ? parts[n - 2] : null;
+  const isVersion = (v) => /^\d+(\.\d+)*$/.test(v);
+  if (n >= 3 && parts[n - 3] === "releases" && parts[n - 2] === "tag" && isVersion(parts[n - 1])) return parts[n - 1];
+  return n >= 3 && parts[n - 1] === asset && parts[n - 3] === "download" && isVersion(parts[n - 2]) ? parts[n - 2] : null;
+}
+
+/** Where `.../releases/latest` leads (its tag page), without reading the page. */
+async function latestTag(latestUrl) {
+  const res = await fetch(secure(latestUrl), { redirect: "follow" });
+  await res.body?.cancel();
+  if (!res.ok) throw new Error(`${latestUrl}: HTTP ${res.status}`);
+  return res.url;
 }
 
 /** The one entry of a zip named `wanted` (or ending in `/wanted`): its bytes, size and CRC checked. */
@@ -130,6 +142,20 @@ export function zipEntry(zip, wanted) {
   const data = method === 8 ? zlib.inflateRawSync(raw) : Buffer.from(raw);
   if (data.length !== size || crc32(data) >>> 0 !== crc >>> 0) throw new Error("the extracted program is damaged");
   return data;
+}
+
+/** `f()`, tried 3 times (some servers answer slowly or drop connections), 5 s and 10 s apart. A wrong checksum is
+ * not retried: it fails the step at once. */
+async function tries(what, f) {
+  for (let i = 1; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (i >= 3) throw new Error(`${what}: ${e.cause?.code ?? e.message}`);
+      console.log(`${what}: ${e.cause?.code ?? e.message}, trying again`);
+      await new Promise((r) => setTimeout(r, 5000 * i));
+    }
+  }
 }
 
 async function getText(url) {
@@ -207,32 +233,46 @@ async function main() {
   };
   try {
     if (p.ytdlp) {
-      const { text } = await getText(`${p.ytdlp.base}/SHA2-256SUMS`);
+      const { text } = await tries("yt-dlp checksums", () => getText(`${p.ytdlp.base}/SHA2-256SUMS`));
       const want = parseChecksum(text, p.ytdlp.asset) ?? die("no checksum published for yt-dlp");
-      const { sha256, finalUrl } = await getFile(`${p.ytdlp.base}/${p.ytdlp.asset}`, path.join(work, "ytdlp.download"));
+      const { sha256, finalUrl } = await tries("yt-dlp", () => getFile(`${p.ytdlp.base}/${p.ytdlp.asset}`, path.join(work, "ytdlp.download")));
       if (sha256 !== want) die("yt-dlp does not match its published checksum");
-      add("ytdlp", "yt-dlp", fs.readFileSync(path.join(work, "ytdlp.download")), releaseVersion(finalUrl, p.ytdlp.asset) ?? today);
+      const tagUrl = await tries("yt-dlp version", () => latestTag(p.ytdlp.base.replace(/\/download$/, "")));
+      const version = releaseVersion(tagUrl, p.ytdlp.asset) ?? releaseVersion(finalUrl, p.ytdlp.asset);
+      if (!version) die(`the newest yt-dlp release does not say its version (${tagUrl})`);
+      add("ytdlp", "yt-dlp", fs.readFileSync(path.join(work, "ytdlp.download")), version);
     }
     if (p.deno) {
-      const version = (await getText(`${p.deno.base}/release-latest.txt`)).text.trim();
+      const version = (await tries("Deno version", () => getText(`${p.deno.base}/release-latest.txt`))).text.trim();
       if (!/^v\d+(\.\d+)*$/.test(version)) die(`unexpected Deno version ${version}`);
-      const want = parseChecksum((await getText(`${p.deno.base}/release/${version}/${p.deno.asset}.sha256sum`)).text, null) ?? die("no checksum published for Deno");
+      const want = parseChecksum((await tries("Deno checksum", () => getText(`${p.deno.base}/release/${version}/${p.deno.asset}.sha256sum`))).text, null) ?? die("no checksum published for Deno");
       const zip = path.join(work, "deno.zip");
-      if ((await getFile(`${p.deno.base}/release/${version}/${p.deno.asset}`, zip)).sha256 !== want) die("Deno does not match its published checksum");
+      if ((await tries("Deno", () => getFile(`${p.deno.base}/release/${version}/${p.deno.asset}`, zip))).sha256 !== want) die("Deno does not match its published checksum");
       add("deno", "deno", zipEntry(fs.readFileSync(zip), p.deno.entry), version.slice(1));
     }
     if (p.ffmpeg) {
       const zip = path.join(work, "ffmpeg.zip");
       let want;
       if (p.ffmpeg.archive) {
-        want = parseChecksum((await getText(`${p.ffmpeg.base}/checksums.sha256`)).text, p.ffmpeg.archive);
-        const got = await getFile(`${p.ffmpeg.base}/${p.ffmpeg.archive}`, zip);
+        want = parseChecksum((await tries("ffmpeg checksums", () => getText(`${p.ffmpeg.base}/checksums.sha256`))).text, p.ffmpeg.archive);
+        const got = await tries("ffmpeg", () => getFile(`${p.ffmpeg.base}/${p.ffmpeg.archive}`, zip));
         if (!want || got.sha256 !== want) die("ffmpeg does not match its published checksum");
       } else {
-        // `latest` redirects to the current build; its checksum sits beside it.
-        const got = await getFile(`${p.ffmpeg.base}/${p.ffmpeg.platform}/release/ffmpeg.zip`, zip);
-        want = parseChecksum((await getText(`${got.finalUrl}.sha256`)).text, null);
-        if (!want || got.sha256 !== want) die("ffmpeg does not match its published checksum");
+        // `latest` redirects to the current build; its checksum sits beside it. The release channel, else the
+        // snapshot one (as the app does).
+        let last;
+        for (const channel of ["release", "snapshot"]) {
+          try {
+            const got = await tries(`ffmpeg (${channel})`, () => getFile(`${p.ffmpeg.base}/${p.ffmpeg.platform}/${channel}/ffmpeg.zip`, zip));
+            want = parseChecksum((await tries("ffmpeg checksum", () => getText(`${got.finalUrl}.sha256`))).text, null);
+            if (!want || got.sha256 !== want) die("ffmpeg does not match its published checksum");
+            last = null;
+            break;
+          } catch (e) {
+            last = e;
+          }
+        }
+        if (last) throw last;
       }
       add("ffmpeg", "ffmpeg", zipEntry(fs.readFileSync(zip), p.ffmpeg.entry), today);
     }

@@ -82,6 +82,8 @@ test("checksums and versions are read like the app reads them", () => {
   assert.equal(parseChecksum(`${h}\n${"b".repeat(64)}\n`, null), null, "two hashes, no name: refused");
   assert.equal(releaseVersion("https://github.com/yt-dlp/yt-dlp/releases/download/2025.10.22/yt-dlp.exe", "yt-dlp.exe"), "2025.10.22");
   assert.equal(releaseVersion("https://github.com/yt-dlp/yt-dlp/releases/download/2025.10.22/yt-dlp.exe", "yt-dlp_linux"), null);
+  assert.equal(releaseVersion("https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26", "yt-dlp.exe"), "2026.10.26");
+  assert.equal(releaseVersion("https://release-assets.githubusercontent.com/github-production-release-asset/1/x?sp=r", "yt-dlp.exe"), null);
 });
 
 test("exactly one entry, by its fixed name, comes out of an archive", () => {
