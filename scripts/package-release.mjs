@@ -5,6 +5,7 @@
 // build; it can also be run on its own once `npm run release` (or the per-OS tauri build) has run.
 //
 //   node scripts/package-release.mjs
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -160,7 +161,10 @@ if (os === "macos") {
   const appDir = path.join(BUNDLE, "macos");
   const app = fs.existsSync(appDir) ? fs.readdirSync(appDir).find((n) => n.endsWith(".app")) : undefined;
   if (!app) die(`no .app in ${appDir}`);
-  writeZip(path.join(REL, portableName), tree(path.join(appDir, app), app));
+  // macOS's own archiver keeps the app's seal (its signature and every attribute) exactly; a seal that does not match
+  // makes macOS call the app damaged. The zip writer below only if ditto is missing.
+  const ditto = spawnSync("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", path.join(appDir, app), path.join(REL, portableName)], { stdio: "inherit" });
+  if (ditto.error || ditto.status !== 0) writeZip(path.join(REL, portableName), tree(path.join(appDir, app), app));
 } else {
   const top = "VeloxFetch-portable";
   writeZip(path.join(REL, portableName), [

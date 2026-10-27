@@ -19,6 +19,9 @@ runs on Windows, Linux and macOS, in eight languages, with a right-to-left inter
 Get the latest build for **Windows** and **Linux** from the releases page:
 **https://github.com/IlyesBs/VeloxFetch-releases/releases** (macOS: in progress).
 
+**macOS, the first time:** VeloxFetch is not notarized by Apple yet, so macOS asks before opening it. Open it once,
+then go to **System Settings › Privacy & Security** and press **Open Anyway** (or right-click the app › **Open**).
+
 Browser extension: **Chrome / Edge / Brave** from the Chrome Web Store, **Firefox** from
 [Firefox Add-ons](https://addons.mozilla.org/addon/veloxfetch/). Installing VeloxFetch points your browser to it.
 

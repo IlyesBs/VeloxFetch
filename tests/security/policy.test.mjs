@@ -676,6 +676,13 @@ test("Phases 16-18: tray, start at login and notifications stay per user, opt-in
   assert.match(ent, /<dict\/>/, "no entitlements at all");
   const mac = JSON.parse(read("apps", "desktop", "src-tauri", "tauri.release.macos.conf.json"));
   assert.equal(mac.bundle.macOS.hardenedRuntime, true);
+  // Never shipped unsealed (macOS calls an unsigned download "damaged"): ad hoc without a Developer ID, the helper
+  // too, the whole bundle checked after the build, and the portable zip made by macOS's own archiver.
+  assert.equal(mac.bundle.macOS.signingIdentity, "-");
+  const release = read("scripts", "build-release.sh");
+  assert.match(release, /codesign --force --sign - target\/release\/velox-native-host/);
+  assert.match(release, /codesign --verify --deep --strict --verbose=2 "\$app" \|\| die/);
+  assert.match(read("scripts", "package-release.mjs"), /spawnSync\("ditto", \["-c", "-k", "--sequesterRsrc", "--keepParent"/);
   // Signing secrets reach only the steps that import them; the build job never prints them.
   const build = read(".github", "workflows", "build.yml");
   assert.match(build, /if: runner\.os == 'Windows' && env\.WINDOWS_CERT_PFX_BASE64 != ''/);
