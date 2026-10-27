@@ -23,6 +23,9 @@ ignore = [
     { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained: build-time dependency of tauri-utils (urlpattern)" },
     { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained: build-time dependency of tauri-utils (urlpattern)" },
     { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained: build-time dependency of tauri-utils (urlpattern)" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (no known vulnerability): D-Bus encoding of zbus 5, used by keyring's Secret Service store and the portal call on Linux; zbus 6 drops it, revisit when keyring moves to zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (no known vulnerability): see RUSTSEC-2026-0370" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (no known vulnerability): see RUSTSEC-2026-0370" },
 ]
 
 [licenses]

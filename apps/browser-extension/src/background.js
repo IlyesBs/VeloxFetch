@@ -73,8 +73,7 @@ function nativeCall(payload) {
       var m = String((err && err.message) || "");
       // Anything else ("Error when communicating with the native messaging host", ...) means the helper
       // program did not start or did not speak: a broken install, not a dropped connection.
-      var code = /not found/i.test(m) ? "host_missing" : /forbidden/i.test(m) ? "host_forbidden" : /exited/i.test(m) ? "host_exited" : "host_failed";
-      return { ok: false, code: code, detail: m.slice(0, 120) };
+      return { ok: false, code: V.hostErrorCode(m), detail: m.slice(0, 120) };
     }
   );
 }

@@ -2,7 +2,8 @@
 //!
 //! A registration tells the browser "this program may be started by extension X". That is a grant
 //! of the ability to run an executable, so:
-//! * it only ever happens through an explicit user action (never at install time or silently);
+//! * it is done for this user's own browsers only: from Settings, and by the app itself for a browser installed on
+//!   this computer that the user did not disconnect (never at install time, never system-wide);
 //! * the executable path comes from our own installation, never from user or browser input;
 //! * the manifest lists exactly the extension ids we ship (`allowed_origins` /
 //!   `allowed_extensions`), which the browser enforces;
@@ -119,6 +120,54 @@ pub fn default_target(browser: Browser, platform: Platform, name: &str, home: Op
         }
         Platform::Other => None,
     }
+}
+
+/// The other browsers that read their registration from a folder of their own but belong to `browser`'s settings
+/// line (Linux / macOS): Chrome's beta and dev channels, Edge's, and on the Chromium line Chromium itself, Vivaldi,
+/// Opera, Arc and Brave's other channels; Firefox's forks. Only those this user has (their profile folder exists):
+/// nothing is created for a browser that is not there. Windows has none: the forks read the Chromium key.
+pub fn sibling_targets(browser: Browser, platform: Platform, name: &str, home: Option<&Path>) -> Vec<Target> {
+    let Some(home) = home else { return Vec::new() };
+    let profiles: &[&str] = match (platform, browser) {
+        (Platform::Linux, Browser::Chrome) => &[".config/google-chrome-beta", ".config/google-chrome-unstable"],
+        (Platform::Linux, Browser::Edge) => &[".config/microsoft-edge-beta", ".config/microsoft-edge-dev"],
+        (Platform::Linux, Browser::Brave) => &[
+            ".config/chromium",
+            ".config/vivaldi",
+            ".config/vivaldi-snapshot",
+            ".config/opera",
+            ".config/opera-beta",
+            ".config/BraveSoftware/Brave-Browser-Beta",
+            ".config/BraveSoftware/Brave-Browser-Nightly",
+        ],
+        (Platform::Linux, Browser::Firefox) => &[".librewolf", ".waterfox", ".floorp"],
+        (Platform::MacOs, Browser::Chrome) => &[
+            "Library/Application Support/Google/Chrome Beta",
+            "Library/Application Support/Google/Chrome Dev",
+            "Library/Application Support/Google/Chrome Canary",
+        ],
+        (Platform::MacOs, Browser::Edge) => &[
+            "Library/Application Support/Microsoft Edge Beta",
+            "Library/Application Support/Microsoft Edge Dev",
+            "Library/Application Support/Microsoft Edge Canary",
+        ],
+        (Platform::MacOs, Browser::Brave) => &[
+            "Library/Application Support/Chromium",
+            "Library/Application Support/Vivaldi",
+            "Library/Application Support/Arc/User Data",
+            "Library/Application Support/BraveSoftware/Brave-Browser-Beta",
+            "Library/Application Support/BraveSoftware/Brave-Browser-Nightly",
+        ],
+        (Platform::MacOs, Browser::Firefox) => &["Library/Application Support/LibreWolf"],
+        _ => &[],
+    };
+    let folder = if browser == Browser::Firefox && platform == Platform::Linux { "native-messaging-hosts" } else { "NativeMessagingHosts" };
+    profiles
+        .iter()
+        .map(|p| home.join(p))
+        .filter(|p| p.is_dir())
+        .map(|p| Target::File { path: p.join(folder).join(format!("{name}.json")) })
+        .collect()
 }
 
 /// Where our own copy of the manifest lives (Windows registers a path to it).
@@ -370,6 +419,36 @@ mod tests {
         assert!(!needs_refresh(Browser::Chrome, &now, &target));
         std::fs::write(target_path(&target), "garbage").unwrap();
         assert!(!needs_refresh(Browser::Chrome, &now, &target));
+    }
+
+    #[test]
+    fn the_other_browsers_of_a_line_only_where_this_user_has_them() {
+        let d = scratch("siblings");
+        let n = "app.velox.fetch";
+        assert!(sibling_targets(Browser::Brave, Platform::Linux, n, Some(&d)).is_empty(), "none installed: nothing");
+        assert!(sibling_targets(Browser::Brave, Platform::Linux, n, None).is_empty());
+        std::fs::create_dir_all(d.join(".config/chromium")).unwrap();
+        std::fs::create_dir_all(d.join(".config/vivaldi")).unwrap();
+        std::fs::create_dir_all(d.join(".librewolf")).unwrap();
+        assert_eq!(
+            sibling_targets(Browser::Brave, Platform::Linux, n, Some(&d)),
+            vec![
+                Target::File { path: d.join(".config/chromium/NativeMessagingHosts/app.velox.fetch.json") },
+                Target::File { path: d.join(".config/vivaldi/NativeMessagingHosts/app.velox.fetch.json") },
+            ]
+        );
+        assert_eq!(
+            sibling_targets(Browser::Firefox, Platform::Linux, n, Some(&d)),
+            vec![Target::File { path: d.join(".librewolf/native-messaging-hosts/app.velox.fetch.json") }]
+        );
+        assert!(sibling_targets(Browser::Chrome, Platform::Linux, n, Some(&d)).is_empty());
+        assert!(sibling_targets(Browser::Brave, Platform::Windows, n, Some(&d)).is_empty(), "Windows: the Chromium key serves them");
+        std::fs::create_dir_all(d.join("Library/Application Support/Vivaldi")).unwrap();
+        assert_eq!(
+            sibling_targets(Browser::Brave, Platform::MacOs, n, Some(&d)),
+            vec![Target::File { path: d.join("Library/Application Support/Vivaldi/NativeMessagingHosts/app.velox.fetch.json") }]
+        );
+        let _ = std::fs::remove_dir_all(d);
     }
 
     fn target_path(t: &Target) -> PathBuf {

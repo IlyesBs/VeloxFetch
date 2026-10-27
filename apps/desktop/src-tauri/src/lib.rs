@@ -1036,7 +1036,12 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(4)).await;
                 let resources = handle.path().resource_dir().ok();
-                let task = tokio::task::spawn_blocking(move || handle.state::<AppState>().bridge.auto_install_once(resources.as_deref()));
+                let task = tokio::task::spawn_blocking(move || {
+                    let bridge = &handle.state::<AppState>().bridge;
+                    bridge.auto_install_once(resources.as_deref());
+                    // Then every other browser on this computer, so the extension reaches the app from any of them.
+                    bridge.connect_found_browsers();
+                });
                 if let Err(e) = task.await {
                     tracing::warn!(error = %e, "setting up the browser extension stopped unexpectedly");
                     // the app goes on

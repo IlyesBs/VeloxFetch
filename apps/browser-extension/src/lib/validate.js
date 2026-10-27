@@ -201,7 +201,7 @@
     host_missing: "This browser is not connected to VeloxFetch yet. Open VeloxFetch, go to Settings > Browser integration and press Connect.",
     host_forbidden: "This browser is not allowed to use the VeloxFetch helper. In VeloxFetch > Settings > Browser integration press Disconnect, then Connect again.",
     host_exited: "The VeloxFetch helper stopped unexpectedly. Restart VeloxFetch and try again.",
-    host_failed: "The VeloxFetch helper program could not start. Update or reinstall VeloxFetch, then press Connect again in Settings > Browser integration.",
+    host_failed: "The VeloxFetch helper program could not start. Open VeloxFetch (it repairs the connection when it starts), then try again. If it still fails, press Connect again in Settings > Browser integration.",
     app_not_running: "VeloxFetch is not running and could not be started.",
     auth_failed: "VeloxFetch could not verify this browser. Restart VeloxFetch and try again.",
     link_error: "The connection to VeloxFetch was lost. Try again.",
@@ -218,6 +218,21 @@
     return Object.prototype.hasOwnProperty.call(ERROR_TEXT, code) ? ERROR_TEXT[code] : "Something went wrong talking to VeloxFetch.";
   }
 
+  /**
+   * Why the browser could not reach the helper, from its own error text. Chromium: "Specified native messaging host
+   * not found.", "Access to ... is forbidden.", "Native host has exited.", "Failed to start native messaging host.".
+   * Firefox: "No such native application app.velox.fetch" (not connected), "An unexpected error occurred".
+   */
+  function hostErrorCode(message) {
+    var m = String(message || "");
+    if (/not found|no such native application/i.test(m)) return "host_missing";
+    if (/forbidden/i.test(m)) return "host_forbidden";
+    if (/exited|disconnected port/i.test(m)) return "host_exited";
+    // Anything else ("Error when communicating with the native messaging host", ...) means the helper program did
+    // not start or did not speak: a broken install, not a dropped connection.
+    return "host_failed";
+  }
+
   var api = {
     MAX_ITEMS: MAX_ITEMS,
     MAX_URL: MAX_URL,
@@ -228,7 +243,8 @@
     buildDownloadPayload: buildDownloadPayload,
     isDownloadWorthy: isDownloadWorthy,
     validateInternalMessage: validateInternalMessage,
-    describeError: describeError
+    describeError: describeError,
+    hostErrorCode: hostErrorCode
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = api;

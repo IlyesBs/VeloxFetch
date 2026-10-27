@@ -256,6 +256,9 @@ pub struct Bridge {
     spec: HostSpec,
     targets: Vec<(Browser, Option<Target>)>,
     home: Option<PathBuf>,
+    /// The home the other browsers of each line are looked for in (`nm::sibling_targets`): the real one in release
+    /// builds, a test's scratch home in debug builds (none otherwise).
+    sibling_home: Option<PathBuf>,
     /// Debug builds only (tests): where the store pointer goes instead of the real place (a scratch home, or a
     /// scratch registry key on Windows).
     store_scratch: Option<StoreScratch>,
@@ -406,6 +409,11 @@ impl Bridge {
             manifest_dir: data_dir.join("native-messaging"),
             spec,
             targets,
+            sibling_home: match (&scratch_home, cfg!(debug_assertions)) {
+                (Some(h), _) => Some(h.clone()),
+                (None, false) => home.clone(),
+                (None, true) => None,
+            },
             home,
             store_scratch,
             // Tests give a scratch root; a debug build never relies on the real system folders.
@@ -440,6 +448,26 @@ impl Bridge {
                 match nm::install(*b, &self.spec, &self.manifest_dir, t) {
                     Ok(()) => tracing::info!(browser = ?b, "browser registration brought up to date"),
                     Err(e) => tracing::warn!(error = %e, browser = ?b, "could not bring a browser registration up to date"),
+                }
+            }
+            // A connected line: its other browsers (installed since, or connected by an older version) too.
+            if nm::status(*b, &self.spec, &self.manifest_dir, t).registered {
+                self.install_siblings(*b);
+            }
+        }
+    }
+
+    /// The other browsers of `browser`'s line this user has (Chromium, Vivaldi, Opera... on the Brave line; Firefox's
+    /// forks), each in its own folder. Only rewritten when it differs.
+    fn siblings(&self, browser: Browser) -> Vec<Target> {
+        nm::sibling_targets(browser, Platform::current(), HOST_NAME, self.sibling_home.as_deref())
+    }
+
+    fn install_siblings(&self, browser: Browser) {
+        for t in self.siblings(browser) {
+            if !nm::status(browser, &self.spec, &self.manifest_dir, &t).registered {
+                if let Err(e) = nm::install(browser, &self.spec, &self.manifest_dir, &t) {
+                    tracing::warn!(error = %e, browser = ?browser, "could not connect another browser of this line");
                 }
             }
         }
@@ -711,7 +739,58 @@ impl Bridge {
         }
     }
 
-    /// Register or remove the host for one browser. Only ever called from an explicit user action.
+    /// The browsers the user disconnected in Settings (`native-messaging/disconnected`, one name per line): the app
+    /// never connects them again by itself.
+    fn disconnected(&self) -> HashSet<String> {
+        std::fs::read_to_string(self.manifest_dir.join("disconnected"))
+            .map(|s| s.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    }
+
+    fn remember_disconnected(&self, browser: Browser, disconnected: bool) -> std::io::Result<()> {
+        let mut all = self.disconnected();
+        let changed = if disconnected { all.insert(browser.as_str().to_string()) } else { all.remove(browser.as_str()) };
+        if !changed {
+            return Ok(());
+        }
+        let mut lines: Vec<String> = all.into_iter().collect();
+        lines.sort();
+        std::fs::create_dir_all(&self.manifest_dir)?;
+        std::fs::write(self.manifest_dir.join("disconnected"), lines.join("\n"))
+    }
+
+    /// Every start: connect each browser installed on this computer (normal, snap or Flatpak package, or another
+    /// browser of its line) that is not connected yet, so the extension added to it reaches the app with nothing to
+    /// press. Never one the user disconnected. Release builds (debug builds only when a test asks), and it never
+    /// fails the app: whatever goes wrong is logged, and Settings > Browser still has the buttons.
+    pub fn connect_found_browsers(&self) {
+        let wanted = !cfg!(debug_assertions) || dev_var("VELOX_AUTO_EXTENSION").is_some();
+        if !wanted || !self.spec.host_exe.is_file() {
+            return;
+        }
+        let platform = Platform::current();
+        let disconnected = self.disconnected();
+        let sandboxed = self.sandboxed();
+        for (b, t) in &self.targets {
+            let Some(t) = t else { continue };
+            if disconnected.contains(b.as_str()) || nm::status(*b, &self.spec, &self.manifest_dir, t).registered {
+                continue;
+            }
+            let found = launch::find_browser(*b, platform).is_some()
+                || sandboxed.iter().any(|s| s.browser == *b)
+                || !self.siblings(*b).is_empty();
+            if !found {
+                continue;
+            }
+            match self.set(SetBrowserIntegration { browser: *b, enabled: true }) {
+                Ok(_) => tracing::info!(browser = ?b, "browser found on this computer: connected to the app"),
+                Err(e) => tracing::warn!(browser = ?b, error = %e.message, "could not connect a browser found on this computer"),
+            }
+        }
+    }
+
+    /// Register or remove the host for one browser: from the user's buttons, and on its own only to connect (the
+    /// first start's set-up, [`Self::connect_found_browsers`]), never a browser the user disconnected.
     pub fn set(&self, req: SetBrowserIntegration) -> Result<BrowserIntegrationDto, ApiError> {
         let target = self
             .targets
@@ -721,6 +800,7 @@ impl Bridge {
             .ok_or_else(|| ApiError { code: "invalid_input", message: "this browser is not supported on this system".into() })?;
         let res = if req.enabled {
             nm::install(req.browser, &self.spec, &self.manifest_dir, target).and_then(|_| {
+                self.install_siblings(req.browser);
                 for b in self.sandboxed().iter().filter(|b| b.browser == req.browser) {
                     sandboxed::install(b, &self.spec)?;
                     self.serve_in(b);
@@ -739,8 +819,18 @@ impl Bridge {
                     tracing::warn!(error = %e, "could not withdraw the store extension offer");
                 }
             }
+            for t in self.siblings(req.browser) {
+                if let Err(e) = nm::uninstall(req.browser, &self.spec, &self.manifest_dir, &t) {
+                    tracing::warn!(error = %e, browser = ?req.browser, "could not disconnect another browser of this line");
+                }
+            }
             nm::uninstall(req.browser, &self.spec, &self.manifest_dir, target)
         };
+        if res.is_ok() {
+            if let Err(e) = self.remember_disconnected(req.browser, !req.enabled) {
+                tracing::warn!(error = %e, "could not remember the browser's connection choice");
+            }
+        }
         res.map_err(|e| {
             tracing::warn!(error = %e, browser = ?req.browser, "browser registration failed");
             // No paths or OS error text to the UI.
