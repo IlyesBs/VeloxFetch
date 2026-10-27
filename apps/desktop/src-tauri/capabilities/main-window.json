@@ -92,6 +92,7 @@
     "allow-get-preview-base",
     "allow-get-video-tools",
     "allow-fetch-video-tools",
+    "allow-answer-video-tools-update",
     "allow-set-video-bar",
     "allow-window-control",
     "allow-get-update-status",

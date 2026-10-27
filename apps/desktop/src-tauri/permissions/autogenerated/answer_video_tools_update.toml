@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-answer-video-tools-update"
+description = "Enables the answer_video_tools_update command without any pre-configured scope."
+commands.allow = ["answer_video_tools_update"]
+
+[[permission]]
+identifier = "deny-answer-video-tools-update"
+description = "Denies the answer_video_tools_update command without any pre-configured scope."
+commands.deny = ["answer_video_tools_update"]

@@ -630,6 +630,10 @@ pub enum ManagerEvent {
     Update {
         update: UpdateDto,
     },
+    /// The video tools changed: an update was found or answered, or one finished installing.
+    VideoTools {
+        tools: VideoToolsDto,
+    },
 }
 
 /// Where updates come from and what they are checked against (Phase 19, `manager/update.rs`). Every value is
@@ -1349,6 +1353,10 @@ impl From<ManagerError> for ApiError {
     }
 }
 
+/// The list of the installer's compressed copies of the video tools, in their folder (`video-tools/`): each one's
+/// version, size and SHA-256 (`scripts/bundle-video-tools.mjs` writes it).
+pub const BUNDLED_TOOLS_MANIFEST: &str = "video-tools.json";
+
 /// Base addresses of the video tools' official downloads. `None` = never fetch that tool.
 #[derive(Debug, Clone, Default)]
 pub struct ToolSources {
@@ -1372,6 +1380,8 @@ pub struct ToolSources {
 pub struct ToolStatus {
     pub installed: bool,
     pub fetching: bool,
+    /// Being unpacked from the installer's copy (no download).
+    pub unpacking: bool,
     /// VeloxFetch can fetch it on this computer.
     pub can_fetch: bool,
     /// Why the last attempt failed.
@@ -1387,6 +1397,18 @@ pub struct VideoToolsDto {
     pub ytdlp: ToolStatus,
     pub deno: ToolStatus,
     pub ffmpeg: ToolStatus,
+    /// An update was found and waits for the user's answer (`answer_video_tools_update`).
+    pub update: Option<ToolsUpdateDto>,
+}
+
+/// Updates of the video tools offered to the user (`manager/tool_updates.rs`): never downloaded before they accept.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolsUpdateDto {
+    /// Which ones (`ytdlp`, `deno`).
+    pub tools: Vec<String>,
+    /// Bytes to download (0: not known).
+    pub size: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -1421,6 +1443,9 @@ pub struct ManagerConfig {
     /// Tools the installer put next to the app (read-only for the app: used when the user has no copy of
     /// their own; a refresh goes to `tools_dir`).
     pub shared_tools_dir: Option<PathBuf>,
+    /// The installer's compressed copies of the tools (`video-tools/`: `video-tools.json` and `<name>.xz`), unpacked
+    /// offline before anything is downloaded (`manager/tools.rs`). `None`: this copy carries none.
+    pub bundled_tools_dir: Option<PathBuf>,
     /// How long yt-dlp may read a page with Deno before the page is read again without it (default 45 s).
     pub site_js_timeout: std::time::Duration,
     /// Where the key that seals cookies and credentials on disk is kept. The desktop app passes the
@@ -1470,6 +1495,7 @@ impl ManagerConfig {
             tools: ToolSources::default(),
             tools_dir: None,
             shared_tools_dir: None,
+            bundled_tools_dir: None,
             site_js_timeout: std::time::Duration::from_secs(45),
             key_store: Arc::new(secrets::MemoryKeyStore::default()),
             media_scratch_max_age: std::time::Duration::from_secs(15 * 60),

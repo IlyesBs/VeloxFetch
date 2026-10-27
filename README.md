@@ -73,8 +73,9 @@ With the extension installed, a **Download video** bar appears over videos — f
 pages on YouTube, Vimeo and similar sites. Choose the quality and the container (MP4 by default, MKV or WebM; MP3,
 M4A or Opus for audio only). **Whole playlists** too: open a playlist link, or press *Download the whole playlist*
 on one of its videos, tick the ones you want, and they download into a folder named after the playlist, numbered in
-order, a few at a time. The helper programs video sites need (yt-dlp, Deno, ffmpeg) are fetched and kept up to date
-automatically, with nothing to install by hand. A video can be paused, resumed and watched while it downloads, is
+order, a few at a time. The required dependencies video sites need come inside the installer, compressed, and are set
+up during installation with **nothing more to download** (good news on mobile data). Their updates are offered with
+their size, and downloaded only if you accept. A video can be paused, resumed and watched while it downloads, is
 retried by itself when the site or network fails part-way, and lands in the history. DRM-protected videos cannot be
 downloaded, and the app says so.
 

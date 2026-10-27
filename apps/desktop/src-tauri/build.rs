@@ -86,6 +86,7 @@ const COMMANDS: &[&str] = &[
     "get_preview_base",
     "get_video_tools",
     "fetch_video_tools",
+    "answer_video_tools_update",
     "set_video_bar",
     "window_control",
     "get_desktop_options",

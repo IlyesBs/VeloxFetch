@@ -93,6 +93,7 @@ pub enum Command {
     GetPreviewBase,
     GetVideoTools,
     FetchVideoTools,
+    AnswerVideoToolsUpdate,
     SetVideoBar,
     WindowControl,
     GetQueues,
@@ -110,7 +111,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 94] = [
+    pub const ALL: [Command; 95] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -192,6 +193,7 @@ impl Command {
         Command::GetPreviewBase,
         Command::GetVideoTools,
         Command::FetchVideoTools,
+        Command::AnswerVideoToolsUpdate,
         Command::SetVideoBar,
         Command::WindowControl,
         Command::GetQueues,
@@ -291,6 +293,7 @@ impl Command {
             Command::GetPreviewBase => "get_preview_base",
             Command::GetVideoTools => "get_video_tools",
             Command::FetchVideoTools => "fetch_video_tools",
+            Command::AnswerVideoToolsUpdate => "answer_video_tools_update",
             Command::SetVideoBar => "set_video_bar",
             Command::WindowControl => "window_control",
             Command::GetQueues => "get_queues",
@@ -450,6 +453,7 @@ mod tests {
             Command::GetPreviewBase,
             Command::GetVideoTools,
             Command::FetchVideoTools,
+            Command::AnswerVideoToolsUpdate,
             Command::SetVideoBar,
             Command::WindowControl,
             Command::GetUpdateStatus,

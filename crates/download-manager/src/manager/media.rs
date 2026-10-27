@@ -206,7 +206,8 @@ impl DownloadManager {
         };
         tokio::join!(ytdlp, deno);
         if self.tool_stale(Tool::YtDlp) {
-            self.fetch_in_background(Tool::YtDlp, true);
+            // An old yt-dlp is not replaced by itself any more: its update is looked for, and offered.
+            self.check_tool_updates_soon();
         }
         let tool = self.ytdlp().ok_or_else(|| ManagerError::invalid(self.no_ytdlp_message()))?;
         let ffmpeg_coming = self.ffmpeg().is_none() && self.tool_installing(Tool::Ffmpeg);
@@ -257,8 +258,8 @@ impl DownloadManager {
                 // Offer the HD qualities now: the download waits for ffmpeg.
                 tool = self.with_js(SiteTool::new(tool.program().to_path_buf(), Some(self.tools_dir().join(Tool::Ffmpeg.file_name()))));
             }
-            // Reading a page fails now and then (the site is slow, a check times out): try once more, after
-            // updating yt-dlp when the error says the site changed.
+            // Reading a page fails now and then (the site is slow, a check times out): try once more. When the error
+            // says the site changed, an update of yt-dlp is looked for and offered (the user accepts it or not).
             //
             // Deno (YouTube's JavaScript challenges) hangs or fails on some computers while yt-dlp itself works:
             // then the page is read again without any JavaScript runtime (fewer formats, but the video downloads),
@@ -287,15 +288,8 @@ impl DownloadManager {
                     }
                     Err(e) if tries < 2 && worth_retrying(&e) => {
                         tracing::warn!(error = %e, "reading the video page failed; trying again");
-                        if looks_outdated(&e) && self.can_fetch(Tool::YtDlp) {
-                            self.ensure_tool(Tool::YtDlp, true).await;
-                            if let Some(fresh) = self.ytdlp() {
-                                tool = SiteTool::new(fresh.program().to_path_buf(), Some(self.tools_dir().join(Tool::Ffmpeg.file_name())));
-                                tool = if dropped_js { tool.without_js() } else { self.with_js(tool) };
-                                if !ffmpeg_coming {
-                                    tool = if dropped_js { fresh.without_js() } else { fresh };
-                                }
-                            }
+                        if looks_outdated(&e) {
+                            self.check_tool_updates_soon();
                         }
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
@@ -715,12 +709,12 @@ impl DownloadManager {
             match r {
                 Err(e) if attempt < TRIES && worth_retrying(&e) && !cancel.is_cancelled() => {
                     tracing::warn!(id, attempt, error = %e, "video download failed; trying again");
-                    // Sites change: an old yt-dlp is a common reason. Get the newest once, then try again.
+                    // Sites change: an old yt-dlp is a common reason. Its update is looked for and offered (never
+                    // downloaded without the user); one the user accepted meanwhile is used for the next try.
                     if let Work::Site(tool, _, _) = &mut work {
-                        if !refreshed && looks_outdated(&e) && self.can_fetch(Tool::YtDlp) {
+                        if !refreshed && looks_outdated(&e) {
                             refreshed = true;
-                            self.media_update(id, |d| d.notes = vec!["Updating required dependencies (the site changed)…".into()]);
-                            self.ensure_tool(Tool::YtDlp, true).await;
+                            self.check_tool_updates_soon();
                             if let Some(fresh) = self.ytdlp() {
                                 *tool = fresh;
                             }

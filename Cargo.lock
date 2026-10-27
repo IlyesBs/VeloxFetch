@@ -1200,6 +1200,7 @@ dependencies = [
  "fs4",
  "futures-util",
  "http-client",
+ "lzma-rust2",
  "media-engine",
  "path-safety",
  "percent-encoding",
@@ -2682,6 +2683,15 @@ name = "lru-slab"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
+
+[[package]]
+name = "lzma-rust2"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490750560fa7851fbbf5d3ab1a8750f09350ed361ed8aed85b1e1e40587812ee"
+dependencies = [
+ "sha2 0.11.0",
+]
 
 [[package]]
 name = "markup5ever"
@@ -5438,6 +5448,7 @@ dependencies = [
  "ed25519-dalek",
  "failpoint",
  "http-client",
+ "lzma-rust2",
  "persistence",
  "scheduler",
  "secrets",

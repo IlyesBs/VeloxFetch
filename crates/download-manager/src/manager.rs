@@ -34,6 +34,7 @@ mod relink;
 mod smart_throttle;
 mod storage;
 mod sysio;
+mod tool_updates;
 mod tools;
 mod update;
 mod usage;
@@ -351,6 +352,7 @@ impl DownloadManager {
             tokio::spawn(async move { m.refresh_networks(true).await });
         }
         mgr.spawn_update_checks();
+        mgr.spawn_tool_update_checks();
         Ok(mgr)
     }
 
