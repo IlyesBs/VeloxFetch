@@ -1092,3 +1092,14 @@ test("the packages' extension lines really write the pointer and remove it again
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("the portable copy gets the extension from the stores, like the installed app (no extension folder in it)", () => {
+  const pkg = read("scripts", "package-release.mjs");
+  const portable = pkg.slice(pkg.indexOf("// 2. portable"), pkg.indexOf("// 3. the extension on its own"));
+  assert.ok(!/extension\/(chromium|firefox)/.test(portable), "no extension folder in the portable zip");
+  assert.match(portable, /velox-native-host\$\{exe\}/, "the browser helper is still beside the app");
+  // Settings > Browser installs from the stores: both store addresses are compiled into the app.
+  const ids = read("apps", "desktop", "src-tauri", "src", "generated", "identity.rs");
+  assert.match(ids, /FIREFOX_STORE_URL: Option<&str> = Some\("https:\/\/addons\.mozilla\.org\//);
+  assert.match(read("crates", "browser-bridge", "src", "generated", "identity.rs"), /CHROME_STORE_ID: Option<&str> = Some\("keobnkoppcchnbpmmfodidkcedglbhnn"\)/);
+});
