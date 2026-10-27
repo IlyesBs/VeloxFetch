@@ -712,7 +712,8 @@ export type ManagerEvent =
   | { type: "media"; job: MediaJob }
   | { type: "mediaRemoved"; id: number }
   | { type: "profiles"; profiles: Profiles }
-  | { type: "update"; update: UpdateStatus };
+  | { type: "update"; update: UpdateStatus }
+  | { type: "videoTools"; tools: VideoTools };
 
 /** Updates of VeloxFetch itself (Settings > Updates, the status bar). Checked in Rust against the publisher's signature. */
 export interface UpdateStatus {
@@ -1050,6 +1051,8 @@ export interface ApiError {
 export interface ToolStatus {
   installed: boolean;
   fetching: boolean;
+  /** Being unpacked from the installer's copy (nothing downloaded). */
+  unpacking: boolean;
   canFetch: boolean;
   error: string | null;
   /** While fetching: bytes received and the file's size (0 = not known yet). */
@@ -1061,6 +1064,18 @@ export interface VideoTools {
   ytdlp: ToolStatus;
   deno: ToolStatus;
   ffmpeg: ToolStatus;
+  /** An update was found: downloaded only if the user accepts (`answerVideoToolsUpdate`). */
+  update: ToolsUpdate | null;
+}
+
+/** One of the required dependencies. */
+export type ToolKey = "ytdlp" | "deno" | "ffmpeg";
+
+/** Updates of the required dependencies offered to the user (crates/download-manager/src/manager/tool_updates.rs). */
+export interface ToolsUpdate {
+  tools: ToolKey[];
+  /** Bytes to download (0: not known). */
+  size: number;
 }
 
 /** "Use a new link": whether the new link gives the file the download started with (crates/download-manager/src/relink.rs). */

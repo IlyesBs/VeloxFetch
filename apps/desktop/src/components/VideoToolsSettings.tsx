@@ -1,27 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, normalizeError } from "../api";
 import { formatBytes } from "../format";
-import { store } from "../hooks";
+import { act, store, useStore } from "../hooks";
 import { useT, type Key } from "../i18n";
-import type { ToolStatus, VideoTools } from "../types";
+import type { ToolKey, ToolStatus, VideoTools } from "../types";
 import { Panel } from "../ui/primitives";
 import { Rich } from "../ui/rich";
 
 // Shown by what each one is for, never by the program's name.
-const TOOLS: { key: keyof VideoTools; name: Key; what: Key }[] = [
+const TOOLS: { key: ToolKey; name: Key; what: Key }[] = [
   { key: "ytdlp", name: "deps.sites", what: "deps.sitesWhat" },
   { key: "deno", name: "deps.checks", what: "deps.checksWhat" },
   { key: "ffmpeg", name: "deps.join", what: "deps.joinWhat" },
 ];
 
 function state(s: ToolStatus, t: ReturnType<typeof useT>): { text: string; tone: string } {
-  if (s.installed) return { text: t("deps.ready"), tone: "text-ok" };
+  // Unpacked from the installer's copy: nothing is downloaded.
+  if (s.unpacking && s.total > 0) return { text: t("deps.installingPct", { pct: Math.floor((s.received / s.total) * 100) }), tone: "text-dim" };
+  if (s.unpacking) return { text: t("deps.installing"), tone: "text-dim" };
+  if (s.installed && !s.fetching) return { text: t("deps.ready"), tone: "text-ok" };
   if (s.fetching && s.total > 0)
     return {
       text: t("deps.downloadingPct", { pct: Math.floor((s.received / s.total) * 100), got: formatBytes(s.received), total: formatBytes(s.total) }),
       tone: "text-dim",
     };
   if (s.fetching) return { text: s.received > 0 ? t("deps.downloadingBytes", { got: formatBytes(s.received) }) : t("deps.downloading"), tone: "text-dim" };
+  if (s.installed) return { text: t("deps.ready"), tone: "text-ok" };
   if (s.error) return { text: t("deps.failed"), tone: "text-bad" };
   if (!s.canFetch) return { text: t("deps.system"), tone: "text-dim" };
   return { text: t("deps.waiting"), tone: "text-dim" };
@@ -36,6 +40,12 @@ export function VideoToolsSettings() {
   const t = useT();
   const [tools, setTools] = useState<VideoTools | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // An update found (or answered) while this page is open arrives as an event.
+  const live = useStore((s) => s.videoTools);
+  useEffect(() => {
+    if (live) setTools(live);
+  }, [live]);
 
   const refresh = useCallback(async () => {
     try {
@@ -65,7 +75,16 @@ export function VideoToolsSettings() {
     }
   };
 
+  const answer = async (accept: boolean) => {
+    const next = await act(() => api.answerVideoToolsUpdate(accept));
+    if (next) {
+      setTools(next);
+      store.dispatch({ type: "videoTools", tools: next });
+    }
+  };
+
   const allReady = !!tools && TOOLS.every((x) => tools[x.key].installed || !tools[x.key].canFetch);
+  const update = tools?.update ?? null;
   return (
     <Panel title={t("deps.title")} hint={t("deps.hint")}>
       <ul className="space-y-2" data-testid="video-tools">
@@ -84,6 +103,19 @@ export function VideoToolsSettings() {
           );
         })}
       </ul>
+      {update && (
+        <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="video-tools-update">
+          <p className="min-w-0 flex-1 text-xs">
+            <Rich text={update.size > 0 ? t("toolsu.text", { size: formatBytes(update.size) }) : t("toolsu.textNoSize")} />
+          </p>
+          <button className="btn btn-primary h-8" data-testid="video-tools-update-accept" onClick={() => void answer(true)}>
+            {t("toolsu.accept")}
+          </button>
+          <button className="btn btn-ghost h-8" data-testid="video-tools-update-decline" onClick={() => void answer(false)}>
+            {t("toolsu.decline")}
+          </button>
+        </div>
+      )}
       {!allReady && (
         <button className="btn btn-primary mt-3" data-testid="video-tools-fetch" disabled={busy || !tools} onClick={() => void fetchNow()}>
           {busy ? t("deps.downloading") : t("deps.fetch")}

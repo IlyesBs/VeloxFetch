@@ -25,6 +25,9 @@
 #                       media plugins still cannot be had, the AppImage is built without them (said loudly; the
 #                       .deb / .rpm depend on them anyway)
 #   macOS               the Xcode command line tools are requested when missing
+#   xz                  packs the video tools into the installer (scripts/bundle-video-tools.mjs): installed with the
+#                       package manager (Homebrew on macOS; Git for Windows has it); without it the installers are
+#                       built without them and the app downloads them as before (said loudly)
 #   gate tools          cargo-audit, cargo-deny, cargo-cyclonedx (cargo install --locked)
 #   --no-auto-setup     only report what is missing
 #
@@ -211,6 +214,23 @@ patchelf_user_install() {
 }
 
 media_args=()
+tools_args=()
+
+# The xz program packs the video tools into the installer (scripts/bundle-video-tools.mjs).
+install_xz() {
+  case "$os" in
+    linux)
+      if have apt-get; then as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y xz-utils
+      elif have dnf; then as_root dnf install -y xz
+      elif have pacman; then as_root pacman -S --needed --noconfirm xz
+      elif have zypper; then as_root zypper --non-interactive install xz
+      else return 1
+      fi
+      ;;
+    macos) have brew && brew install xz ;;
+    *) return 1 ;;
+  esac
+}
 
 step "Checking the build tools"
 if ! node_ok; then
@@ -283,6 +303,11 @@ case "$os" in
     ;;
 esac
 
+if ! have xz && [ "$auto" = 1 ]; then
+  note "xz not found (it packs the video tools into the installer): installing it"
+  install_xz || note "could not install xz"
+fi
+
 if [ "$gate" != none ]; then
   for t in audit deny cyclonedx; do
     if ! cargo "$t" --version >/dev/null 2>&1; then
@@ -338,9 +363,24 @@ else
   note "no signing certificate configured: the installers are unsigned"
 fi
 
+step "Packing the video tools into the installer (nothing to download when installing)"
+# Each program fetched once here from its official server, checked against its published checksum and compressed
+# (xz -9e, branch filter). The list's SHA-256 is compiled into the app (a list changed on disk is refused). Without
+# them the installer works as before: the app downloads them.
+unset VELOX_VIDEO_TOOLS_SHA256
+if bundled="$(node scripts/bundle-video-tools.mjs --out target/video-tools)"; then
+  printf '%s\n' "$bundled"
+  VELOX_VIDEO_TOOLS_SHA256="$(printf '%s\n' "$bundled" | sed -n 's/^VELOX_VIDEO_TOOLS_SHA256=//p' | tail -1)"
+  export VELOX_VIDEO_TOOLS_SHA256
+  tools_args=(--config '{"bundle":{"resources":{"../../../target/video-tools":"video-tools"}}}')
+else
+  rm -rf target/video-tools
+  note "WARNING: the video tools could not be packed: the installers will DOWNLOAD them (about 300 MB) as before"
+fi
+
 step "Building the app and its installer ($conf)"
 # runs the UI build (tsc + vite) first, then compiles velox-desktop and bundles it
-npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"} ${media_args[@]+"${media_args[@]}"}
+npm run --prefix apps/desktop tauri -- build --config "src-tauri/$conf" ${sign_args[@]+"${sign_args[@]}"} ${media_args[@]+"${media_args[@]}"} ${tools_args[@]+"${tools_args[@]}"}
 
 step "Packaging release/ (installer, portable zip, extension zips, SHA256SUMS.txt)"
 node scripts/package-release.mjs

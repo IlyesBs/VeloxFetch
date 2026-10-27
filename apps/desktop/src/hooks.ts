@@ -64,6 +64,11 @@ export async function bootstrap(): Promise<() => void> {
         (update) => store.dispatch({ type: "update", update }),
         () => {},
       );
+      // The required dependencies (an update offered): the notice degrades on its own too.
+      api.getVideoTools().then(
+        (tools) => store.dispatch({ type: "videoTools", tools }),
+        () => {},
+      );
     } catch (e) {
       store.toast("error", normalizeError(e).message);
     }

@@ -34,3 +34,5 @@ sha2 = "0.11.0"
 update-verify = { path = "../../crates/update-verify" }
 # Signs the test manifests with a throwaway key (the app itself only verifies).
 ed25519-dalek = { version = "3", default-features = false, features = ["fast", "zeroize"] }
+# Packs stand-in programs as the installer carries them (xz), to test unpacking them offline.
+lzma-rust2 = { version = "0.24", default-features = false, features = ["std", "xz", "encoder"] }

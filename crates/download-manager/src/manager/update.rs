@@ -127,7 +127,7 @@ impl DownloadManager {
         }
     }
 
-    fn update_auto(&self) -> bool {
+    pub(super) fn update_auto(&self) -> bool {
         self.inner.store.get_setting(AUTO_KEY).ok().flatten().as_deref() != Some("0")
     }
 
