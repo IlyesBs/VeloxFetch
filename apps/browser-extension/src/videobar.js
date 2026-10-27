@@ -8,6 +8,10 @@
  *    an id the background script made). The background script decides everything else;
  *  - it lives in a closed shadow root, builds its elements with createElement / textContent only, and
  *    acts only on real user clicks (`isTrusted`), so the page can neither read nor press it.
+ *
+ * The user can drag it (its handle, or the bar's edge) anywhere over the video, or move it with the arrow keys on
+ * the handle; a double click on the handle puts it back. Where it was put is kept as a place on the video (a fraction
+ * of its width and height), one for every page: nothing about the page is stored.
  */
 (function () {
   "use strict";
@@ -32,6 +36,8 @@
     "button:hover,button:focus-visible{background:rgba(255,255,255,.14)}",
     ".go{background:#2563eb;font-weight:600}.go:hover,.go:focus-visible{background:#1d4ed8}",
     ".x{padding:6px 9px;opacity:.75}",
+    ".grip{cursor:grab;padding:6px 4px 6px 8px;opacity:.7;touch-action:none}.grip:hover,.grip:focus-visible{opacity:1}",
+    ".dragging,.dragging .grip{cursor:grabbing}",
     ".note{padding:6px 12px;max-width:340px;white-space:normal}",
     ".menu{margin-top:6px;display:flex;flex-direction:column;gap:2px;padding:4px;border-radius:12px;background:rgba(17,24,39,.96);box-shadow:0 6px 22px rgba(0,0,0,.4);max-width:420px}",
     ".menu button{border-radius:8px;overflow:hidden;text-overflow:ellipsis}",
@@ -57,6 +63,22 @@
   var goText = document.createElement("span");
   goText.textContent = "Download video";
   go.append(icon, goText);
+  var grip = document.createElement("button");
+  grip.className = "grip";
+  grip.type = "button";
+  grip.title = "Drag to move (double-click: back to its place)";
+  grip.setAttribute("aria-label", "Move the bar");
+  var dots = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  dots.setAttribute("viewBox", "0 0 24 24");
+  dots.setAttribute("fill", "currentColor");
+  [[9, 6], [15, 6], [9, 12], [15, 12], [9, 18], [15, 18]].forEach(function (c) {
+    var dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", String(c[0]));
+    dot.setAttribute("cy", String(c[1]));
+    dot.setAttribute("r", "1.8");
+    dots.appendChild(dot);
+  });
+  grip.appendChild(dots);
   var note = document.createElement("span");
   note.className = "note";
   note.hidden = true;
@@ -65,7 +87,7 @@
   close.type = "button";
   close.title = "Hide on this page";
   close.textContent = "×";
-  bar.append(go, note, close);
+  bar.append(grip, go, note, close);
   var menu = document.createElement("div");
   menu.className = "menu";
   menu.hidden = true;
@@ -78,6 +100,37 @@
   var hideTimer = 0;
   var dismissedFor = null; // the page address the user hid the bar on
   var busy = false;
+  var spot = null; // where the user put the bar: { fx, fy }, its centre's place on the video (0..1 of its size)
+  var drag = null; // a drag going on: { id, dx, dy, x, y, moved, onGrip } (the pointer's offset in the bar, where it started)
+  var lastTap = 0; // when the handle was last pressed without moving it (two in a row: back to the usual place)
+  var SPOT_KEY = "videoBarSpot";
+
+  try {
+    Promise.resolve(ext.storage.local.get(SPOT_KEY))
+      .then(function (r) {
+        spot = validSpot(r && r[SPOT_KEY]);
+      })
+      .catch(function () {});
+  } catch (e) {
+    /* the extension was reloaded: keep the default place */
+  }
+
+  function validSpot(v) {
+    var ok = function (n) {
+      return typeof n === "number" && n >= 0 && n <= 1;
+    };
+    return v && ok(v.fx) && ok(v.fy) ? { fx: v.fx, fy: v.fy } : null;
+  }
+
+  function saveSpot(v) {
+    spot = v;
+    try {
+      if (v) Promise.resolve(ext.storage.local.set({ videoBarSpot: v })).catch(function () {});
+      else Promise.resolve(ext.storage.local.remove(SPOT_KEY)).catch(function () {});
+    } catch (e) {
+      /* orphaned copy of the script: the place is kept for this page only */
+    }
+  }
 
   function ask(message) {
     try {
@@ -114,12 +167,39 @@
 
   function place() {
     if (!target || !target.isConnected) return hide(true);
+    if (drag) return;
     var r = target.getBoundingClientRect();
     if (r.width < MIN_W || r.height < MIN_H || r.bottom < 0 || r.top > innerHeight) return hide(true);
     var w = wrap.offsetWidth || 180;
-    var top = Math.max(4, Math.min(innerHeight - 44, r.top + 10));
-    var left = Math.max(4, Math.min(innerWidth - w - 4, r.right - w - 10));
+    var h = bar.offsetHeight || 36;
+    var left = r.right - w - 10;
+    var top = r.top + 10;
+    if (spot) {
+      // Its centre at the same place on the video (a note that widens it for a moment does not move it), inside it.
+      left = Math.max(r.left, Math.min(r.right - w, r.left + spot.fx * r.width - w / 2));
+      top = Math.max(r.top, Math.min(r.bottom - h, r.top + spot.fy * r.height - h / 2));
+    }
+    moveTo(left, top);
+  }
+
+  function moveTo(left, top) {
+    var w = wrap.offsetWidth || 180;
+    var h = bar.offsetHeight || 36;
+    left = Math.max(4, Math.min(innerWidth - w - 4, left));
+    top = Math.max(4, Math.min(innerHeight - h - 4, top));
     host.style.setProperty("transform", "translate(" + Math.round(left) + "px," + Math.round(top) + "px)", "important");
+    return { left: left, top: top };
+  }
+
+  /** Where the bar is now, as a place on the video (kept for the next videos and pages). */
+  function spotHere() {
+    if (!target || !target.isConnected) return null;
+    var r = target.getBoundingClientRect();
+    var b = bar.getBoundingClientRect();
+    var clamp = function (n) {
+      return Math.max(0, Math.min(1, Math.round(n * 1000) / 1000));
+    };
+    return { fx: clamp((b.left + b.width / 2 - r.left) / r.width), fy: clamp((b.top + b.height / 2 - r.top) / r.height) };
   }
 
   function setNote(text) {
@@ -159,7 +239,7 @@
   function later() {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(function () {
-      if (!menu.hidden || busy) return later();
+      if (!menu.hidden || busy || drag) return later();
       hide(true);
     }, 3500);
   }
@@ -211,6 +291,71 @@
       else menu.hidden = true;
     });
   });
+  // Dragging: from the handle, or the bar's own edge (not its buttons). The page never sees these pointer events.
+  function startDrag(ev) {
+    if (!ev.isTrusted || ev.button !== 0 || (ev.target !== grip && ev.target !== bar && !grip.contains(ev.target))) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var b = bar.getBoundingClientRect();
+    drag = { id: ev.pointerId, dx: ev.clientX - b.left, dy: ev.clientY - b.top, x: ev.clientX, y: ev.clientY, moved: false, onGrip: ev.target !== bar };
+    if (drag.onGrip) grip.focus({ preventScroll: true }); // for the arrow keys
+    try {
+      bar.setPointerCapture(ev.pointerId);
+    } catch (e) {
+      /* the pointer is already gone */
+    }
+    bar.classList.add("dragging");
+    menu.hidden = true;
+  }
+  function moveDrag(ev) {
+    if (!drag || ev.pointerId !== drag.id || !ev.isTrusted) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (!drag.moved && Math.abs(ev.clientX - drag.x) + Math.abs(ev.clientY - drag.y) < 4) return;
+    drag.moved = true;
+    moveTo(ev.clientX - drag.dx, ev.clientY - drag.dy);
+  }
+  function endDrag(ev) {
+    if (!drag || ev.pointerId !== drag.id) return;
+    ev.stopPropagation();
+    var moved = drag.moved;
+    var onGrip = drag.onGrip;
+    drag = null;
+    bar.classList.remove("dragging");
+    if (ev.isTrusted && moved) {
+      saveSpot(spotHere());
+      lastTap = 0;
+    } else if (ev.isTrusted && onGrip) {
+      // Two presses on the handle in a row: back to the usual place.
+      if (Date.now() - lastTap < 450) {
+        saveSpot(null);
+        lastTap = 0;
+      } else lastTap = Date.now();
+    }
+    place();
+    later();
+  }
+  bar.addEventListener("pointerdown", startDrag);
+  bar.addEventListener("pointermove", moveDrag);
+  bar.addEventListener("pointerup", endDrag);
+  bar.addEventListener("pointercancel", endDrag);
+  // A press on the handle or the bar's edge is the bar's, not a click on the page (or its player) below.
+  ["click", "dblclick", "mousedown", "mouseup"].forEach(function (t) {
+    bar.addEventListener(t, function (ev) {
+      if (ev.target === bar || grip.contains(ev.target)) ev.stopPropagation();
+    });
+  });
+  grip.addEventListener("keydown", function (ev) {
+    var step = { ArrowLeft: [-16, 0], ArrowRight: [16, 0], ArrowUp: [0, -16], ArrowDown: [0, 16] }[ev.key];
+    if (!ev.isTrusted || !step) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    var b = bar.getBoundingClientRect();
+    moveTo(b.left + step[0], b.top + step[1]);
+    saveSpot(spotHere());
+    later();
+  });
+
   close.addEventListener("click", function (ev) {
     if (!ev.isTrusted) return;
     dismissedFor = location.href;
