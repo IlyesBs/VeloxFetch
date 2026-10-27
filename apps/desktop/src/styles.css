@@ -1519,6 +1519,18 @@ dialog::backdrop {
 :root[data-platform="linux"] *::after {
   box-shadow: none !important;
 }
+/* No frosted glass either. Every blurred panel (cards, the Active page's tiles, the sidebar) is a layer WebKitGTK
+   blurs again under each change, and while downloads ran it sometimes showed one for a frame or two without its
+   content: a card or a tile went blank and came back ("the cards flash and disappear", Ubuntu). Measured on a real
+   Ubuntu 24.04 screen (Intel UHD 620, WebKitGTK 2.52), the same 23 s of downloads: 13 and 20 such events with the
+   blur, 1 and 0 without; 36-51 / 55 fps (dashboard / Active) against 39-40 / 50-59. Behind the panels is the still,
+   smooth backdrop picture (aurora.ts), whose blur looked the same as the picture itself: the look does not change. */
+:root[data-platform="linux"] *,
+:root[data-platform="linux"] *::before,
+:root[data-platform="linux"] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
 :root[data-platform="linux"] .gauge-arc,
 :root[data-platform="linux"] .logo-mark,
 :root[data-platform="linux"] .spark-line,
