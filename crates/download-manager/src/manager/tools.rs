@@ -527,7 +527,7 @@ pub(crate) fn join(base: &str, rest: &str) -> Result<url::Url, String> {
 }
 
 /// Only encrypted connections, except for the local test servers.
-fn secure(u: url::Url) -> Result<url::Url, String> {
+pub(crate) fn secure(u: url::Url) -> Result<url::Url, String> {
     let local = matches!(u.host_str(), Some("127.0.0.1") | Some("localhost"));
     if u.scheme() != "https" && !(u.scheme() == "http" && local) {
         return Err("tools are only fetched over https".into());
