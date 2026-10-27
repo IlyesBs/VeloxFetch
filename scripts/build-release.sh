@@ -392,6 +392,18 @@ else
   (cd release && shasum -a 256 -c SHA256SUMS.txt)
 fi
 
+if [ "$os" = linux ] && command -v objdump >/dev/null 2>&1; then
+  # The packages run only where the system's C library is at least as new as the one the app was built against.
+  # Built on a recent system, they no longer start on Ubuntu 22.04, Debian 12, Linux Mint 21 and the like.
+  step "Checking which Linux systems the app runs on"
+  needs="$(objdump -T "${CARGO_TARGET_DIR:-target}/release/velox-desktop" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -Vu | tail -1)"
+  note "the app needs glibc $needs or newer"
+  if [ -n "$needs" ] && [ "$(printf '%s\n' "$needs" 2.35 | sort -V | tail -1)" != 2.35 ]; then
+    echo "WARNING: built against glibc $needs: the Linux packages will NOT start on Ubuntu 22.04, Debian 12, Linux Mint 21" >&2
+    echo "         and older systems. Build them on Ubuntu 22.04 (the CI does) to reach every current Linux." >&2
+  fi
+fi
+
 status=0
 case "$gate" in
   full) step "Security gate (full)"; node scripts/security-gate.mjs || status=$? ;;
