@@ -24,7 +24,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let KEYS_FILE = path.join(ROOT, "apps", "desktop", "src-tauri", "update-keys.txt");
 const DEFAULT_KEY = path.join(os.homedir(), ".config", "veloxfetch-release", "update-signing-key.json");
 // The public download repository (the app's UPDATE_PACKAGES); the source repository is private.
-const REPO = "IlyesBs/VeloxFetch-releases";
+const REPO = "IlyesBs/VeloxFetch";
 const PRODUCT = "VeloxFetch";
 const SIGNING_CONTEXT = Buffer.from("VeloxFetch update manifest v1\n");
 const KEY_PREFIX = "velox-update-key-v1";

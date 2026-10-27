@@ -286,15 +286,22 @@ test("updates are only our own signed design (Phase 19, docs/auto-update.md)", (
   }
   // Updates come from the fixed HTTPS release address in the build, never from the UI.
   const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
-  // The public download repository (the source one is private): the app, the manifest tool and the publish script
-  // all name the same one, or the manifest would list packages the app refuses.
-  const PUBLIC = "IlyesBs/VeloxFetch-releases";
+  // The repository whose releases users download: the app, the manifest tool and the publish script all name the
+  // same one, or the manifest would list packages the app refuses.
+  const PUBLIC = "IlyesBs/VeloxFetch";
   // The update addresses are generated into identity.rs from config/veloxfetch.yaml (config.test.mjs checks they
   // are in step); they are still what the built binary trusts, so the invariant is asserted on the compiled values.
   const ids = read("apps", "desktop", "src-tauri", "src", "generated", "identity.rs");
-  assert.match(ids, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/latest\/download\/latest\.json"/);
-  assert.match(ids, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases\/download\/"/);
-  assert.match(ids, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch-releases\/releases"/);
+  assert.match(ids, /const UPDATE_FEED: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases\/latest\/download\/latest\.json"/);
+  assert.match(ids, /const UPDATE_PACKAGES: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases\/download\/"/);
+  assert.match(ids, /const RELEASE_PAGE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases"/);
+  // The newest release is watched (announced only): GitHub's fixed address in this repository, https.
+  assert.match(ids, /const LATEST_RELEASE: &str = "https:\/\/github\.com\/IlyesBs\/VeloxFetch\/releases\/latest"/);
+  const upd = withoutTestModules(read("crates", "download-manager", "src", "manager", "update.rs"));
+  const watch = upd.slice(upd.indexOf("async fn watch_once"), upd.indexOf("async fn check_once"));
+  assert.match(watch, /released_version\(&cfg\.release_page, resp\.url\(\)\.as_str\(\)\)/, "only a tag of this release page counts");
+  assert.match(watch, /Choice::NoPackage\(version\)/, "a watched version is only announced (the release page)");
+  assert.ok(!/fetch_small|download|Package/.test(watch.replace("Choice::NoPackage", "")), "nothing is downloaded from a watched release");
   assert.match(tool, new RegExp(`const REPO = "${PUBLIC}"`));
   assert.match(read("scripts", "publish-release.sh"), new RegExp(`^PUBLIC_REPO="${PUBLIC}"$`, "m"));
   assert.doesNotMatch(lib, /fn (download_update|install_update|check_for_updates)\([^)]*(url|path|String)/);

@@ -10,6 +10,11 @@
 //! Nothing from the network is run, opened or kept under its final name before it matched the signed manifest.
 //! The addresses come from the build (`UpdateConfig`), never from the UI or a page. No cookies, no credentials
 //! and no identifier are sent: the request is the same for every copy of the app.
+//!
+//! Without a signed manifest (no trusted key in this build, or a release published without one), the newest GitHub
+//! release is watched instead (`UpdateConfig::latest_release`): its address redirects to `.../releases/tag/v<x.y.z>`,
+//! nothing else is read. A newer version is announced (`elsewhere`: the release page opens); nothing is downloaded,
+//! kept or run that way.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -112,8 +117,19 @@ fn kind_of(target: &str) -> &str {
 }
 
 impl DownloadManager {
+    /// Signed updates: a trusted key is built in.
     fn update_cfg(&self) -> Option<&UpdateConfig> {
         self.inner.cfg.update.as_ref().filter(|c| !c.keys.is_empty())
+    }
+
+    /// Watching the newest GitHub release (announced only).
+    fn watch_cfg(&self) -> Option<&UpdateConfig> {
+        self.inner.cfg.update.as_ref().filter(|c| c.latest_release.is_some())
+    }
+
+    /// This copy looks for newer versions at all (signed, or watched).
+    fn updates_watched(&self) -> bool {
+        self.update_cfg().is_some() || self.watch_cfg().is_some()
     }
 
     fn update_state(&self) -> std::sync::MutexGuard<'_, UpdateState> {
@@ -136,7 +152,7 @@ impl DownloadManager {
         let s = self.update_state();
         let downloading = s.phase == Phase::Downloading;
         UpdateDto {
-            supported: self.update_cfg().is_some(),
+            supported: self.updates_watched(),
             auto_check: self.update_auto(),
             phase: s.phase.name(),
             current: cfg.map(|c| c.current.to_string()).unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
@@ -211,7 +227,7 @@ impl DownloadManager {
 
     /// Ask the release server whether there is a newer version. Never downloads the package.
     pub async fn check_for_updates(&self) -> UpdateDto {
-        let Some(cfg) = self.update_cfg().cloned() else {
+        let Some(cfg) = self.update_cfg().or(self.watch_cfg()).cloned() else {
             return self.update_status();
         };
         let Ok(_busy) = self.inner.update.busy.try_lock() else {
@@ -228,7 +244,17 @@ impl DownloadManager {
             s.phase = Phase::Checking;
             s.error = None;
         });
-        let outcome = self.check_once(&cfg).await;
+        let outcome = match self.update_cfg().is_some() {
+            true => match self.check_once(&cfg).await {
+                // No signed manifest to read (a release published without one): the newest release still says
+                // whether there is a newer version.
+                Err(code) if cfg.latest_release.is_some() && matches!(code, "network" | "malformed") => {
+                    self.watch_once(&cfg).await.map_err(|_| code)
+                }
+                other => other,
+            },
+            false => self.watch_once(&cfg).await,
+        };
         let at = now();
         let _ = self.inner.store.set_setting(CHECKED_KEY, &at.to_string());
         self.set_update(|s| {
@@ -259,6 +285,21 @@ impl DownloadManager {
             tracing::info!(version = %v, "a newer VeloxFetch is available");
         }
         self.update_status()
+    }
+
+    /// The newest GitHub release's version, from where its address leads (`.../releases/tag/v<x.y.z>`): only the
+    /// answer's address is read, never its page. Newer than this copy: announced (`NoPackage`: the release page).
+    async fn watch_once(&self, cfg: &UpdateConfig) -> Result<Choice, &'static str> {
+        let latest = cfg.latest_release.as_deref().ok_or("rejected")?;
+        let url = url::Url::parse(latest).map_err(|_| "rejected")?;
+        if !self.secure_url(cfg, &url) {
+            return Err("rejected");
+        }
+        let client = self.update_client(cfg)?;
+        let resp = tokio::time::timeout(STALL, client.get(&url)).await.map_err(|_| "network")?.map_err(|_| "network")?;
+        let version = released_version(&cfg.release_page, resp.url().as_str()).ok_or("malformed")?;
+        drop(resp); // the page itself is not needed
+        Ok(if version > cfg.current { Choice::NoPackage(version) } else { Choice::UpToDate })
     }
 
     async fn check_once(&self, cfg: &UpdateConfig) -> Result<Choice, &'static str> {
@@ -457,7 +498,7 @@ impl DownloadManager {
     /// Check now and then, in the background, when the user wants it (on by default). Only a check: the package
     /// is downloaded when the user asks.
     pub(super) fn spawn_update_checks(&self) {
-        let Some(cfg) = self.update_cfg() else {
+        let Some(cfg) = self.update_cfg().or(self.watch_cfg()) else {
             return;
         };
         let (first, every) = (cfg.first_check, cfg.every);
@@ -475,6 +516,16 @@ impl DownloadManager {
             }
         });
     }
+}
+
+/// The version the "latest release" address led to: `final_url` must be a tag of this release page
+/// (`<release page>/tag/v<x.y.z>`, e.g. `https://github.com/<owner>/<repo>/releases/tag/v2.0.1`); an address anywhere
+/// else says nothing.
+fn released_version(release_page: &str, final_url: &str) -> Option<Version> {
+    let tags = format!("{}/tag/", release_page.trim_end_matches('/'));
+    let tag = final_url.strip_prefix(&tags)?;
+    let tag = tag.strip_prefix('v').unwrap_or(tag);
+    (!tag.is_empty() && tag.len() <= 32 && tag.bytes().all(|b| b.is_ascii_digit() || b == b'.')).then(|| Version::parse(tag)).flatten()
 }
 
 /// What a check found.
@@ -504,6 +555,23 @@ fn clear_dir_except(dir: &Path, keep: &[&Path]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_newest_release_is_read_from_its_tag_on_the_release_page_only() {
+        let page = "https://github.com/IlyesBs/VeloxFetch/releases";
+        assert_eq!(released_version(page, &format!("{page}/tag/v2.0.1")), Some(Version(2, 0, 1)));
+        assert_eq!(released_version(&format!("{page}/"), &format!("{page}/tag/2.10.0")), Some(Version(2, 10, 0)));
+        for bad in [
+            format!("{page}"),                                                // no tag
+            format!("{page}/tag/v2.0"),                                       // not x.y.z
+            format!("{page}/tag/v2.0.1-beta"),                                // a pre-release
+            format!("{page}/tag/v2.0.1/../../x"),                             // anything after
+            "https://github.com/someone/else/releases/tag/v9.9.9".to_string(), // another repository
+            "https://evil.example/IlyesBs/VeloxFetch/releases/tag/v9.9.9".to_string(),
+        ] {
+            assert_eq!(released_version(page, &bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn install_styles_follow_the_kind_of_installation() {

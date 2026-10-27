@@ -644,6 +644,11 @@ pub struct UpdateConfig {
     pub feed: String,
     /// The release page, for a copy that cannot install a package itself (portable).
     pub release_page: String,
+    /// GitHub's address of the newest release (`https://github.com/<owner>/<repo>/releases/latest`): it redirects to
+    /// `.../releases/tag/v<version>`. Read when there is no signed manifest to read (no trusted key in this build,
+    /// or a release published without one): a newer version is then *announced*, with the release page to get it,
+    /// never downloaded or installed. `None`: not watched.
+    pub latest_release: Option<String>,
     /// This copy's version.
     pub current: update_verify::Version,
     /// How this copy was installed: `nsis`, `appimage`, `deb`, `rpm`, `dmg`; `None` = portable.

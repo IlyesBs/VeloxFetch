@@ -30,7 +30,7 @@ test("the single source of truth pins the public download repository and a valid
   const yaml = read("config", "veloxfetch.yaml");
   const val = (k) => new RegExp(`^${k}:\\s*(.+?)\\s*$`, "m").exec(yaml)?.[1];
   assert.equal(val("releases_owner"), "IlyesBs");
-  assert.equal(val("releases_repo"), "VeloxFetch-releases");
+  assert.equal(val("releases_repo"), "VeloxFetch");
   assert.match(val("chrome_store_id"), /^[a-p]{32}$/, "the Chrome Web Store id is 32 chars a–p");
   assert.equal(val("native_host_name"), "app.velox.fetch");
   // The Firefox Add-ons listing the app opens for Firefox users: an https addons.mozilla.org page, generated

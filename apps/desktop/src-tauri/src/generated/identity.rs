@@ -3,10 +3,13 @@
 /// The product name.
 pub const PRODUCT: &str = "VeloxFetch";
 /// The public download repository's release page.
-pub const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases";
+pub const RELEASE_PAGE: &str = "https://github.com/IlyesBs/VeloxFetch/releases";
 /// GitHub's "latest release" feed (drafts and pre-releases are never served here).
-pub const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/latest/download/latest.json";
+pub const UPDATE_FEED: &str = "https://github.com/IlyesBs/VeloxFetch/releases/latest/download/latest.json";
 /// The prefix every update package address must start with.
-pub const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch-releases/releases/download/";
+pub const UPDATE_PACKAGES: &str = "https://github.com/IlyesBs/VeloxFetch/releases/download/";
+/// GitHub's newest release: redirects to its tag (`.../releases/tag/v<x.y.z>`), watched when there is no signed
+/// manifest to read (a newer version is announced with the release page, never installed that way).
+pub const LATEST_RELEASE: &str = "https://github.com/IlyesBs/VeloxFetch/releases/latest";
 /// The Firefox Add-ons (AMO) listing to open for a Firefox user (`None` = not published yet).
 pub const FIREFOX_STORE_URL: Option<&str> = Some("https://addons.mozilla.org/addon/veloxfetch/");

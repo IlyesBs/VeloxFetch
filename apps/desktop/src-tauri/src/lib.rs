@@ -407,7 +407,7 @@ const UPDATE_KEYS: &str = include_str!("../update-keys.txt");
 // so an install on an unknown computer cannot be made to fetch its "updates" from somewhere else.
 #[path = "generated/identity.rs"]
 mod identity;
-use identity::{PRODUCT, RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES};
+use identity::{LATEST_RELEASE, PRODUCT, RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES};
 
 /// Where updates come from. Debug builds never ask the real release server: only a local one, when the end-to-end
 /// test sets it up (`VELOX_UPDATE_FEED`, `VELOX_UPDATE_PREFIX`, `VELOX_UPDATE_KEYS`).
@@ -420,6 +420,9 @@ fn update_config() -> Option<download_manager::UpdateConfig> {
         policy: update_verify::Policy { product: PRODUCT.into(), url_prefix: UPDATE_PACKAGES.into(), allow_loopback_http: false },
         feed: UPDATE_FEED.into(),
         release_page: RELEASE_PAGE.into(),
+        // The newest GitHub release is watched too: without a trusted key (or a signed manifest on the release) a
+        // newer version is announced with its release page.
+        latest_release: Some(LATEST_RELEASE.into()),
         current,
         kind: system_integration::update::installation_kind().map(String::from),
         allow_loopback_http: false,
@@ -432,6 +435,11 @@ fn update_config() -> Option<download_manager::UpdateConfig> {
         cfg.keys = update_verify::TrustedKeys::parse(&std::fs::read_to_string(keys).ok()?).ok()?;
         cfg.feed = feed;
         cfg.policy.url_prefix = prefix;
+        // Tests never reach the real release page: only the newest-release address a test gives is watched.
+        cfg.latest_release = dev_only("VELOX_UPDATE_LATEST");
+        if let Some(page) = dev_only("VELOX_UPDATE_PAGE") {
+            cfg.release_page = page;
+        }
         cfg.policy.allow_loopback_http = true;
         cfg.allow_loopback_http = true;
         cfg.first_check = std::time::Duration::from_secs(2);
@@ -1164,15 +1172,17 @@ mod location_tests {
 
 #[cfg(test)]
 mod update_tests {
-    use super::{RELEASE_PAGE, UPDATE_FEED, UPDATE_KEYS, UPDATE_PACKAGES};
+    use super::{LATEST_RELEASE, RELEASE_PAGE, UPDATE_FEED, UPDATE_KEYS, UPDATE_PACKAGES};
 
     #[test]
     fn the_shipped_update_settings_are_valid() {
         // A typo in the keys file would turn updates off for everyone: it must parse.
         update_verify::TrustedKeys::parse(UPDATE_KEYS).unwrap();
-        for u in [RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES] {
-            assert!(u.starts_with("https://github.com/IlyesBs/VeloxFetch-releases/releases"), "{u}");
+        for u in [RELEASE_PAGE, UPDATE_FEED, UPDATE_PACKAGES, LATEST_RELEASE] {
+            assert!(u.starts_with("https://github.com/IlyesBs/VeloxFetch/releases"), "{u}");
         }
+        // The newest release leads to a tag of the release page: the version is read from there.
+        assert_eq!(LATEST_RELEASE, format!("{RELEASE_PAGE}/latest"));
         assert!(update_verify::Version::parse(env!("CARGO_PKG_VERSION")).is_some(), "the app's version must be x.y.z");
     }
 }
