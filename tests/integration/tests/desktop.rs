@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use download_manager::{DownloadManager, ManagerConfig, ManagerError, SetDesktopPrefs, SystemHandle};
+use download_manager::{DownloadManager, LoginStart, ManagerConfig, ManagerError, SetDesktopPrefs, SystemHandle};
 use system_integration::system::SystemCall;
 use system_integration::{DryRunSystem, SystemIntegration};
 
@@ -23,6 +23,7 @@ async fn desktop_defaults_keep_the_app_in_the_tray_and_never_start_it_at_login_o
     let m = DownloadManager::new(config("defaults", Some("/opt/VeloxFetch/velox-desktop"), system.clone())).await.unwrap();
     let p = m.desktop_prefs();
     assert!(p.close_to_tray && p.notify_finished && !p.start_at_login);
+    assert_eq!(p.login_start, LoginStart::Tray, "started at login: hidden in the tray, as before the choice existed");
     assert_eq!(p.language, "en");
     assert!(p.start_at_login_available);
     assert!(!p.tray_available, "unknown until the app has made its icon");
@@ -74,12 +75,14 @@ async fn desktop_choices_survive_a_restart_and_bad_values_are_refused() {
             close_to_tray: Some(false),
             notify_finished: Some(false),
             language: Some("ar".into()),
+            login_start: Some(LoginStart::Minimized),
             ..Default::default()
         })
         .await
         .unwrap();
     assert!(!p.close_to_tray && !p.notify_finished);
     assert_eq!(p.language, "ar");
+    assert_eq!(p.login_start, LoginStart::Minimized);
     m.shutdown().await;
 
     let mut cfg = ManagerConfig::new(db, root);
@@ -88,5 +91,21 @@ async fn desktop_choices_survive_a_restart_and_bad_values_are_refused() {
     let p = m.desktop_prefs();
     assert!(!p.close_to_tray && !p.notify_finished);
     assert_eq!(p.language, "ar");
+    assert_eq!(p.login_start, LoginStart::Minimized, "the way to start at login survives a restart");
     m.shutdown().await;
+}
+
+#[test]
+fn only_the_three_ways_to_start_are_accepted_from_the_window() {
+    for (json, want) in [
+        (r#"{"loginStart":"tray"}"#, LoginStart::Tray),
+        (r#"{"loginStart":"minimized"}"#, LoginStart::Minimized),
+        (r#"{"loginStart":"window"}"#, LoginStart::Window),
+    ] {
+        let req: SetDesktopPrefs = serde_json::from_str(json).unwrap();
+        assert_eq!(req.login_start, Some(want));
+    }
+    for bad in [r#"{"loginStart":"hidden"}"#, r#"{"loginStart":"Tray"}"#, r#"{"loginStart":1}"#, r#"{"loginStart":"tray","x":1}"#] {
+        assert!(serde_json::from_str::<SetDesktopPrefs>(bad).is_err(), "{bad}");
+    }
 }

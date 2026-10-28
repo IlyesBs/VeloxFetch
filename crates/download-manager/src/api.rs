@@ -954,6 +954,41 @@ pub struct DesktopPrefsDto {
     /// This desktop shows tray icons (some Linux desktops do not).
     pub tray_available: bool,
     pub start_at_login_available: bool,
+    /// How the app shows itself when it was started at login.
+    pub login_start: LoginStart,
+}
+
+/// How the app shows itself when the system starts it at login. Only these three values are accepted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LoginStart {
+    /// Hidden in the tray until the user opens it (the behaviour before this choice existed). Without a tray the
+    /// window opens.
+    #[default]
+    Tray,
+    /// The window is there, minimized in the taskbar / Dock.
+    Minimized,
+    /// The window opens normally.
+    Window,
+}
+
+impl LoginStart {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Tray => "tray",
+            Self::Minimized => "minimized",
+            Self::Window => "window",
+        }
+    }
+
+    /// Anything unknown (an older or damaged value) is the default.
+    pub fn from_setting(text: &str) -> Self {
+        match text {
+            "minimized" => Self::Minimized,
+            "window" => Self::Window,
+            _ => Self::Tray,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -964,6 +999,7 @@ pub struct SetDesktopPrefs {
     pub notify_finished: Option<bool>,
     /// A language code like `en`, `fr`, `ar`, `pt-br`.
     pub language: Option<String>,
+    pub login_start: Option<LoginStart>,
 }
 
 /// What the live preview can play so far (see `manager/preview.rs`).

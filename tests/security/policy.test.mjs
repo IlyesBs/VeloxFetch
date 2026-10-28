@@ -653,10 +653,12 @@ test("Phases 16-18: tray, start at login and notifications stay per user, opt-in
   const sys = withoutTestModules(read("crates", "system-integration", "src", "system.rs"));
   // Debug builds (and every test that runs them) never touch the machine's login items.
   assert.match(lib, /cfg\.app_launcher = if cfg!\(debug_assertions\) \{ None \} else \{ desktop::launcher\(\) \};/);
-  // The settings command takes yes / no answers and a language code, nothing else (no path, no program).
-  assert.match(api, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct SetDesktopPrefs \{\s*pub close_to_tray: Option<bool>,\s*pub start_at_login: Option<bool>,\s*pub notify_finished: Option<bool>,[\s\S]{0,80}pub language: Option<String>,\s*\}/);
+  // The settings command takes yes / no answers, a language code and one of three ways to start, nothing else (no path, no program).
+  assert.match(api, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct SetDesktopPrefs \{\s*pub close_to_tray: Option<bool>,\s*pub start_at_login: Option<bool>,\s*pub notify_finished: Option<bool>,[\s\S]{0,80}pub language: Option<String>,\s*pub login_start: Option<LoginStart>,\s*\}/);
   assert.match(mgr, /if !valid_language\(lang\)/, "the language is checked before it is stored");
   assert.match(mgr, /if self\.flag\(START_AT_LOGIN_KEY, false\) && !system\.starts_at_login\(exe\)/, "start at login is only kept up to date once the user turned it on (off by default)");
+  // How it starts at login is a closed list (no free text from the window), stored as one of three words.
+  assert.match(api, /pub enum LoginStart \{[\s\S]{0,200}Tray,[\s\S]{0,120}Minimized,[\s\S]{0,80}Window,\s*\}/);
   // Start at login runs only the app itself, hidden in the tray; macOS never restarts it after the user quits.
   assert.match(sys, /format!\("\\"\{\}\\" \{HIDDEN_ARG\}", exe\.display\(\)\)/, "Windows Run value: the quoted app and --hidden");
   assert.match(sys, /<key>KeepAlive<\/key><false\/>/);
