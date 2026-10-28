@@ -8,13 +8,13 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::identity::FIREFOX_STORE_URL;
 use browser_bridge::launch as app_start;
 use browser_bridge::server::{BoxFuture, DownloadAccepted, Handler, HandlerError, ServerConfig};
 use browser_bridge::{
     chromium_ids, serve, Allowlist, Caller, DownloadRequest, Endpoint, Listener, MediaHint, Token, CHROME_EXTENSION_ID, CHROME_STORE_ID,
     FIREFOX_EXTENSION_ID, HOST_NAME,
 };
-use crate::identity::FIREFOX_STORE_URL;
 use download_manager::{ApiError, BrowserContext, DownloadManager, ManagerError, NewDownload};
 
 /// Called when a download is waiting for the user (brings the window to the front).
@@ -742,9 +742,7 @@ impl Bridge {
     /// The browsers the user disconnected in Settings (`native-messaging/disconnected`, one name per line): the app
     /// never connects them again by itself.
     fn disconnected(&self) -> HashSet<String> {
-        std::fs::read_to_string(self.manifest_dir.join("disconnected"))
-            .map(|s| s.lines().map(str::to_string).collect())
-            .unwrap_or_default()
+        std::fs::read_to_string(self.manifest_dir.join("disconnected")).map(|s| s.lines().map(str::to_string).collect()).unwrap_or_default()
     }
 
     fn remember_disconnected(&self, browser: Browser, disconnected: bool) -> std::io::Result<()> {
@@ -776,9 +774,8 @@ impl Bridge {
             if disconnected.contains(b.as_str()) || nm::status(*b, &self.spec, &self.manifest_dir, t).registered {
                 continue;
             }
-            let found = launch::find_browser(*b, platform).is_some()
-                || sandboxed.iter().any(|s| s.browser == *b)
-                || !self.siblings(*b).is_empty();
+            let found =
+                launch::find_browser(*b, platform).is_some() || sandboxed.iter().any(|s| s.browser == *b) || !self.siblings(*b).is_empty();
             if !found {
                 continue;
             }

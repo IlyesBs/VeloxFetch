@@ -70,7 +70,8 @@ fn main() {
     if args.iter().any(|a| a == "--skip-download") {
         let dir = std::path::PathBuf::from(value("--paths"));
         for lang in value("--sub-langs").split(',').filter(|l| ["ar", "fr", "en-orig"].contains(l)) {
-            std::fs::write(dir.join(format!("sub.{lang}.srt")), format!("1\n00:00:01,000 --> 00:00:02,000\n{lang}\n")).expect("write subtitles");
+            std::fs::write(dir.join(format!("sub.{lang}.srt")), format!("1\n00:00:01,000 --> 00:00:02,000\n{lang}\n"))
+                .expect("write subtitles");
             if url.contains("subs429") {
                 // yt-dlp goes on past a refused language only when told to ignore errors.
                 if !args.iter().any(|a| a == "--ignore-errors") {

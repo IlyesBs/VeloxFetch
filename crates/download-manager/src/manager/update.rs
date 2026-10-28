@@ -562,10 +562,10 @@ mod tests {
         assert_eq!(released_version(page, &format!("{page}/tag/v2.0.1")), Some(Version(2, 0, 1)));
         assert_eq!(released_version(&format!("{page}/"), &format!("{page}/tag/2.10.0")), Some(Version(2, 10, 0)));
         for bad in [
-            format!("{page}"),                                                // no tag
-            format!("{page}/tag/v2.0"),                                       // not x.y.z
-            format!("{page}/tag/v2.0.1-beta"),                                // a pre-release
-            format!("{page}/tag/v2.0.1/../../x"),                             // anything after
+            page.to_string(),                                                  // no tag
+            format!("{page}/tag/v2.0"),                                        // not x.y.z
+            format!("{page}/tag/v2.0.1-beta"),                                 // a pre-release
+            format!("{page}/tag/v2.0.1/../../x"),                              // anything after
             "https://github.com/someone/else/releases/tag/v9.9.9".to_string(), // another repository
             "https://evil.example/IlyesBs/VeloxFetch/releases/tag/v9.9.9".to_string(),
         ] {

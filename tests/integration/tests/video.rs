@@ -131,9 +131,8 @@ async fn a_video_pages_subtitles_are_offered_and_saved_next_to_the_video() {
         "people's first; the site's own captions after; no live chat, no second Arabic or English"
     );
 
-    let job = e
-        .m
-        .start_media(MediaRequest {
+    let job =
+        e.m.start_media(MediaRequest {
             url: url.clone(),
             stream: Some("h720".into()),
             subtitles: vec!["mar".into(), "afr".into(), "aen-orig".into(), "ade".into()],
@@ -157,7 +156,10 @@ async fn a_video_pages_subtitles_are_offered_and_saved_next_to_the_video() {
     let sub = runs.iter().find(|a| a.iter().any(|x| x == "--sub-langs")).expect("a subtitles run");
     let pair = |k: &str, v: &str| sub.windows(2).any(|w| w[0] == k && w[1] == v);
     assert!(pair("--sub-langs", "ar,fr,en-orig,de") && pair("--convert-subs", "srt") && pair("--output", "subtitle:sub.%(ext)s"));
-    assert!(sub.iter().any(|x| x == "--ignore-errors") && !sub.iter().any(|x| x == "--no-warnings"), "one refused language never stops the others");
+    assert!(
+        sub.iter().any(|x| x == "--ignore-errors") && !sub.iter().any(|x| x == "--no-warnings"),
+        "one refused language never stops the others"
+    );
     assert!(sub.iter().any(|x| x == "--write-subs") && sub.iter().any(|x| x == "--write-auto-subs"));
     assert_eq!(&sub[sub.len() - 2..], ["--", url.as_str()]);
     assert!(!sub.iter().any(|x| x == "--exec" || x.starts_with("--cookies")));
@@ -165,11 +167,10 @@ async fn a_video_pages_subtitles_are_offered_and_saved_next_to_the_video() {
     // Only the sound: no subtitles are fetched.
     let id = uid("vidsubsaudio");
     let url = format!("https://www.youtube.com/watch?v={id}");
-    let job = e
-        .m
-        .start_media(MediaRequest { url, stream: Some("audio".into()), subtitles: vec!["mar".into()], ..Default::default() })
-        .await
-        .unwrap();
+    let job =
+        e.m.start_media(MediaRequest { url, stream: Some("audio".into()), subtitles: vec!["mar".into()], ..Default::default() })
+            .await
+            .unwrap();
     assert_eq!(job.subtitles, 0);
     assert_eq!(finish(&e.m, job.id).await.status, MediaStatus::Completed);
     assert!(!calls(&id).iter().any(|a| a.iter().any(|x| x == "--sub-langs")));
@@ -180,9 +181,8 @@ async fn subtitles_the_site_refuses_never_cost_the_video() {
     let e = env("subs429", true, true).await;
     let id = uid("vidsubs429");
     let url = format!("https://www.youtube.com/watch?v={id}");
-    let job = e
-        .m
-        .start_media(MediaRequest {
+    let job =
+        e.m.start_media(MediaRequest {
             url,
             stream: Some("h360".into()),
             filename: Some("Talk".into()),
@@ -208,9 +208,8 @@ async fn subtitle_ids_are_checked_before_anything_runs() {
     let e = env("subsbad", true, true).await;
     for bad in ["m-x", "mall", "men,fr", "men.*", "xen", "m", "men orig", "maaaaaaaaaaaaaaaa"] {
         let id = uid("vidsubsbad");
-        let r = e
-            .m
-            .start_media(MediaRequest {
+        let r =
+            e.m.start_media(MediaRequest {
                 url: format!("https://www.youtube.com/watch?v={id}"),
                 stream: Some("h360".into()),
                 subtitles: vec![bad.into()],
@@ -220,10 +219,9 @@ async fn subtitle_ids_are_checked_before_anything_runs() {
         assert_eq!(invalid(r), "unknown track", "{bad}");
         assert!(calls(&id).is_empty(), "{bad}: nothing ran");
     }
-    let r = e
-        .m
-        .start_media(MediaRequest { url: "https://www.youtube.com/watch?v=x".into(), stream: Some("h-1".into()), ..Default::default() })
-        .await;
+    let r =
+        e.m.start_media(MediaRequest { url: "https://www.youtube.com/watch?v=x".into(), stream: Some("h-1".into()), ..Default::default() })
+            .await;
     assert_eq!(invalid(r), "unknown track", "a dash is for subtitle languages only");
 }
 

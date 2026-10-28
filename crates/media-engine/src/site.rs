@@ -534,7 +534,8 @@ fn subtitles_from_json(json: &Value) -> Vec<TrackOption> {
             .filter_map(|(lang, formats)| {
                 let formats = formats.as_array()?;
                 formats.iter().any(|f| text(f, "ext").is_some_and(|e| SUBTITLE_TYPES.contains(&e))).then(|| {
-                    let name = formats.iter().find_map(|f| text(f, "name")).map(|n| n.chars().filter(|c| !c.is_control()).take(60).collect());
+                    let name =
+                        formats.iter().find_map(|f| text(f, "name")).map(|n| n.chars().filter(|c| !c.is_control()).take(60).collect());
                     (lang.clone(), name)
                 })
             })
@@ -1176,9 +1177,10 @@ async fn save_subtitles(tool: &SiteTool, spec: &SiteSpec, scratch: &Path, files:
             continue;
         }
         done.push(lang);
-        let found = SUBTITLE_FILES.iter().map(|ext| (scratch.join(format!("sub.{lang}.{ext}")), *ext)).find(|(p, _)| {
-            std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0)
-        });
+        let found = SUBTITLE_FILES
+            .iter()
+            .map(|ext| (scratch.join(format!("sub.{lang}.{ext}")), *ext))
+            .find(|(p, _)| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0));
         let tag = lang.strip_suffix("-orig").unwrap_or(lang);
         match found.map(|(p, ext)| publish(&p, &spec.dest_dir, spec.sandbox_root.as_deref(), &format!("{stem}.{tag}"), ext)) {
             Some(Ok(p)) => files.push(p),
@@ -1628,7 +1630,8 @@ mod tests {
     fn subtitle_ids_are_a_language_code_and_nothing_else() {
         assert_eq!(subtitle_id("mpt-BR"), Some((false, "pt-BR")));
         assert_eq!(subtitle_id("aen-orig"), Some((true, "en-orig")));
-        for bad in ["", "m", "a", "xen", "m-en", "men-", "mall", "maLL", "men,fr", "men.*", "men orig", "m..", "men/x", "mabcdefghijklmnop"] {
+        for bad in ["", "m", "a", "xen", "m-en", "men-", "mall", "maLL", "men,fr", "men.*", "men orig", "m..", "men/x", "mabcdefghijklmnop"]
+        {
             assert!(subtitle_id(bad).is_none(), "{bad}");
         }
     }
@@ -1639,7 +1642,9 @@ mod tests {
         let scratch = std::env::temp_dir().join("velox-subs-args");
         let ff = std::env::temp_dir().join("ffmpeg");
         let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let s = strings(&subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar", "afr", "mar", "aen-orig"]), &scratch, Some(&ff), None).unwrap());
+        let s = strings(
+            &subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar", "afr", "mar", "aen-orig"]), &scratch, Some(&ff), None).unwrap(),
+        );
         let pair = |s: &[String], k: &str, v: &str| s.windows(2).any(|w| w[0] == k && w[1] == v);
         assert_eq!(s[0], "--ignore-config");
         assert!(pair(&s, "--sub-langs", "ar,fr,en-orig"), "each language once: {s:?}");
