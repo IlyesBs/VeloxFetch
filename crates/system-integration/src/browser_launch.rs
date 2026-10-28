@@ -27,7 +27,8 @@ pub fn browser_from_id(id: &str) -> Option<Browser> {
         Some(Browser::Brave)
     } else if l.contains("msedge") || l.contains("microsoft-edge") || l.contains("edgemac") || l.contains("edgehtm") {
         Some(Browser::Edge)
-    } else if l.contains("firefox") {
+    } else if l.contains("firefox") || l.contains("floorp") {
+        // Floorp is Firefox underneath: same extension, same registration.
         Some(Browser::Firefox)
     } else if l.contains("chrome") && !l.contains("chromium") {
         Some(Browser::Chrome)
@@ -83,13 +84,8 @@ pub fn find_browser(browser: Browser, platform: Platform) -> Option<Launcher> {
         Platform::Windows => windows::find_exe(browser).map(Launcher::Exe),
         Platform::Linux => {
             // Normal packages, then snap and Flatpak ones (their launchers are not always on the PATH of an app
-            // started from the desktop). The Brave line also covers Chromium.
-            let names: &[&str] = match browser {
-                Browser::Chrome => &["google-chrome", "google-chrome-stable", "com.google.Chrome"],
-                Browser::Edge => &["microsoft-edge", "microsoft-edge-stable", "com.microsoft.Edge"],
-                Browser::Brave => &["brave-browser", "brave", "com.brave.Browser", "chromium", "chromium-browser", "org.chromium.Chromium"],
-                Browser::Firefox => &["firefox", "org.mozilla.firefox"],
-            };
+            // started from the desktop).
+            let names = linux_names(browser);
             let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
             dirs.extend(["/snap/bin", "/var/lib/flatpak/exports/bin"].map(PathBuf::from));
             dirs.extend(std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share/flatpak/exports/bin")));
@@ -103,9 +99,22 @@ pub fn find_browser(browser: Browser, platform: Platform) -> Option<Launcher> {
                 Browser::Brave => "Brave Browser",
                 Browser::Firefox => "Firefox",
             };
-            Path::new(&format!("/Applications/{app}.app")).is_dir().then_some(Launcher::MacApp(app))
+            // Floorp, when Firefox is not there (it reads Firefox's registration).
+            let apps: &[&'static str] = if browser == Browser::Firefox { &[app, "Floorp"] } else { &[app] };
+            apps.iter().find(|a| Path::new(&format!("/Applications/{a}.app")).is_dir()).map(|a| Launcher::MacApp(a))
         }
         Platform::Other => None,
+    }
+}
+
+/// A browser's program names on Linux, preferred first. The Brave line also covers Chromium. Floorp reads Firefox's
+/// registration (`~/.mozilla/native-messaging-hosts`): when it is the only one of the line, it is the Firefox line's browser.
+fn linux_names(browser: Browser) -> &'static [&'static str] {
+    match browser {
+        Browser::Chrome => &["google-chrome", "google-chrome-stable", "com.google.Chrome"],
+        Browser::Edge => &["microsoft-edge", "microsoft-edge-stable", "com.microsoft.Edge"],
+        Browser::Brave => &["brave-browser", "brave", "com.brave.Browser", "chromium", "chromium-browser", "org.chromium.Chromium"],
+        Browser::Firefox => &["firefox", "org.mozilla.firefox", "floorp", "one.ablaze.floorp"],
     }
 }
 
@@ -210,6 +219,12 @@ mod windows {
             Browser::Brave => ("brave.exe", r"BraveSoftware\Brave-Browser\Application\brave.exe"),
             Browser::Firefox => ("firefox.exe", r"Mozilla Firefox\firefox.exe"),
         };
+        // Floorp reads Firefox's registration (HKCU\Software\Mozilla\NativeMessagingHosts): when Firefox is not
+        // there, it is the Firefox line's browser.
+        find_one(exe, rel).or_else(|| (browser == Browser::Firefox).then(|| find_one("floorp.exe", r"Ablaze Floorp\floorp.exe")).flatten())
+    }
+
+    fn find_one(exe: &str, rel: &str) -> Option<PathBuf> {
         let app_paths = format!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe}");
         for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
             if let Ok(key) = RegKey::predef(hive).open_subkey(&app_paths) {
@@ -263,6 +278,9 @@ mod tests {
             ("com.microsoft.edgemac", Browser::Edge),
             ("com.brave.browser", Browser::Brave),
             ("org.mozilla.firefox", Browser::Firefox),
+            ("floorp.desktop", Browser::Firefox),
+            ("FloorpURL-308046B0AF4A39CB", Browser::Firefox),
+            ("one.ablaze.floorp", Browser::Firefox),
         ] {
             assert_eq!(browser_from_id(id), Some(b), "{id}");
         }
@@ -295,5 +313,23 @@ mod tests {
         assert_eq!(find_in_path(&["firefox", "brave-browser"], &path), Some(dir.join("brave-browser")));
         assert_eq!(find_in_path(&["firefox"], &path), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn floorp_alone_is_the_firefox_lines_browser_and_firefox_comes_first() {
+        let dir = std::env::temp_dir().join(format!("velox-floorp-find-{}", std::process::id()));
+        let (only, both) = (dir.join("only"), dir.join("both"));
+        for d in [&only, &both] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join("floorp"), b"").unwrap();
+        }
+        std::fs::write(both.join("firefox"), b"").unwrap();
+        let names = linux_names(Browser::Firefox);
+        assert_eq!(find_in_path(names, only.as_os_str()), Some(only.join("floorp")));
+        assert_eq!(find_in_path(names, both.as_os_str()), Some(both.join("firefox")));
+        for b in [Browser::Chrome, Browser::Edge, Browser::Brave] {
+            assert!(find_in_path(linux_names(b), only.as_os_str()).is_none(), "Floorp is not {b:?}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
