@@ -778,6 +778,7 @@ fn focus_running_instance() {
 /// A browser download is waiting for a decision: make sure the window that shows the dialog is
 /// visible and in front, even if it was minimised or behind another window.
 fn bring_to_front(app: &tauri::AppHandle) {
+    desktop::shown_by_app();
     if let Some(w) = app.get_webview_window(authz::MAIN) {
         let _ = w.show();
         let _ = w.unminimize();
@@ -1024,7 +1025,7 @@ pub fn run() {
             // The tray first: whether there is one decides what closing the window and `--hidden` do.
             let tray = desktop::create_tray(app.handle(), &manager);
             manager.set_tray_available(tray);
-            desktop::note_start_args(tray);
+            desktop::note_start_args(tray, manager.login_start());
             manager.refresh_start_at_login();
             desktop::watch_for_notifications(app.handle().clone(), manager.clone());
             #[cfg(unix)]

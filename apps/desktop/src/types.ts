@@ -173,13 +173,18 @@ export interface DesktopPrefs {
   /** This desktop shows tray icons (some Linux desktops do not). */
   trayAvailable: boolean;
   startAtLoginAvailable: boolean;
+  /** How the app shows itself when it was started at login. Mirrors `LoginStart`. */
+  loginStart: LoginStart;
 }
+
+export type LoginStart = "tray" | "minimized" | "window";
 
 export interface SetDesktopPrefs {
   closeToTray?: boolean;
   startAtLogin?: boolean;
   notifyFinished?: boolean;
   language?: string;
+  loginStart?: LoginStart;
 }
 
 /** Settings > Speed > Smart throttle. */

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use download_manager::{DownloadManager, DownloadStatus, ManagerEvent, MediaStatus, PauseQueue, SetGameMode};
+use download_manager::{DownloadManager, DownloadStatus, LoginStart, ManagerEvent, MediaStatus, PauseQueue, SetGameMode};
 use system_integration::system::{Notification, HIDDEN_ARG};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -25,6 +25,8 @@ const TRAY_ID: &str = "main";
 
 /// Started at login with `--hidden`: stay in the tray until the user opens the window.
 static START_HIDDEN: AtomicBool = AtomicBool::new(false);
+/// Started at login and the user chose "minimized": the window comes up minimized in the taskbar / Dock.
+static START_MINIMIZED: AtomicBool = AtomicBool::new(false);
 /// The window was hidden to the tray once already this run (the "still running" hint is shown once).
 static HINT_SHOWN: AtomicBool = AtomicBool::new(false);
 /// Quit was chosen: closing the window must not hide it any more.
@@ -66,10 +68,22 @@ pub fn tray_possible() -> bool {
     true
 }
 
-/// Remember whether this run started hidden (only when there is a tray to come back from).
-pub fn note_start_args(tray: bool) {
-    let hidden = std::env::args().skip(1).any(|a| a == HIDDEN_ARG);
-    START_HIDDEN.store(hidden && tray, Ordering::SeqCst);
+/// Remember how this run shows itself: started at login (`--hidden`), it follows the user's choice; hidden only
+/// when there is a tray to come back from.
+pub fn note_start_args(tray: bool, how: LoginStart) {
+    let at_login = std::env::args().skip(1).any(|a| a == HIDDEN_ARG);
+    let (hidden, minimized) = start_mode(at_login, tray, how);
+    START_HIDDEN.store(hidden, Ordering::SeqCst);
+    START_MINIMIZED.store(minimized, Ordering::SeqCst);
+}
+
+/// (stay hidden in the tray, come up minimized) for a start at login or not, with or without a tray.
+fn start_mode(at_login: bool, tray: bool, how: LoginStart) -> (bool, bool) {
+    match (at_login, how) {
+        (false, _) | (true, LoginStart::Window) => (false, false),
+        (true, LoginStart::Tray) => (tray, false),
+        (true, LoginStart::Minimized) => (false, true),
+    }
 }
 
 pub fn starts_hidden() -> bool {
@@ -77,17 +91,32 @@ pub fn starts_hidden() -> bool {
 }
 
 /// The UI has painted: show the window, unless this run started hidden in the tray (then only once it is opened).
+/// Staying hidden is only ended by the user opening the window (`show_main`): if it were ended here, the check
+/// in `create_main_window` that shows a window the UI never revealed would bring it up a few seconds later.
 pub fn window_ready(window: &tauri::WebviewWindow) {
-    if START_HIDDEN.swap(false, Ordering::SeqCst) {
+    if START_HIDDEN.load(Ordering::SeqCst) {
+        return;
+    }
+    if START_MINIMIZED.swap(false, Ordering::SeqCst) {
+        // Minimized before it is shown, and never focused: it appears straight in the taskbar / Dock.
+        let _ = window.minimize();
+        let _ = window.show();
         return;
     }
     let _ = window.show();
     let _ = window.set_focus();
 }
 
+/// The window is being shown for the user (opened, or a download waits for an answer): the way this run started
+/// no longer applies.
+pub fn shown_by_app() {
+    START_HIDDEN.store(false, Ordering::SeqCst);
+    START_MINIMIZED.store(false, Ordering::SeqCst);
+}
+
 /// Show the main window, in front.
 pub fn show_main(app: &AppHandle) {
-    START_HIDDEN.store(false, Ordering::SeqCst);
+    shown_by_app();
     if let Some(w) = app.get_webview_window(authz::MAIN) {
         let _ = w.show();
         let _ = w.unminimize();
@@ -373,6 +402,21 @@ pub fn watch_for_notifications(app: AppHandle, manager: DownloadManager) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_start_at_login_follows_the_users_choice_and_an_ordinary_start_always_opens() {
+        use LoginStart::*;
+        for how in [Tray, Minimized, Window] {
+            for tray in [true, false] {
+                assert_eq!(start_mode(false, tray, how), (false, false), "opened by the user: {how:?}");
+            }
+        }
+        assert_eq!(start_mode(true, true, Tray), (true, false), "hidden in the tray, as before");
+        assert_eq!(start_mode(true, false, Tray), (false, false), "no tray to come back from: the window opens");
+        assert_eq!(start_mode(true, true, Minimized), (false, true));
+        assert_eq!(start_mode(true, false, Minimized), (false, true), "minimizing needs no tray");
+        assert_eq!(start_mode(true, true, Window), (false, false));
+    }
 
     #[test]
     fn every_language_has_the_desktop_texts_and_unknown_ones_fall_back_to_english() {

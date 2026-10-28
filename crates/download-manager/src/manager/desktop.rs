@@ -7,12 +7,13 @@ use std::sync::atomic::Ordering;
 use super::{blocking, DownloadManager};
 use downloader_core::DownloadError;
 
-use crate::api::{DesktopPrefsDto, ManagerError, SetDesktopPrefs};
+use crate::api::{DesktopPrefsDto, LoginStart, ManagerError, SetDesktopPrefs};
 
 const CLOSE_TO_TRAY_KEY: &str = "desktop.close_to_tray";
 const START_AT_LOGIN_KEY: &str = "desktop.start_at_login";
 const NOTIFY_KEY: &str = "desktop.notify_finished";
 const LANGUAGE_KEY: &str = "desktop.language";
+const LOGIN_START_KEY: &str = "desktop.login_start";
 
 /// `en`, `fr`, `pt-br`...: what a language file may be called. Anything else is refused.
 pub fn valid_language(code: &str) -> bool {
@@ -49,7 +50,13 @@ impl DownloadManager {
                 .unwrap_or_else(|| "en".into()),
             tray_available: self.inner.tray_available.load(Ordering::Relaxed),
             start_at_login_available: launcher.is_some(),
+            login_start: self.login_start(),
         }
+    }
+
+    /// How to show the app when it was started at login (tray by default).
+    pub fn login_start(&self) -> LoginStart {
+        self.inner.store.get_setting(LOGIN_START_KEY).ok().flatten().map_or_else(LoginStart::default, |t| LoginStart::from_setting(&t))
     }
 
     pub async fn set_desktop_prefs(&self, req: SetDesktopPrefs) -> Result<DesktopPrefsDto, ManagerError> {
@@ -76,6 +83,7 @@ impl DownloadManager {
             req.start_at_login.map(|b| (START_AT_LOGIN_KEY, bool_text(b))),
             req.notify_finished.map(|b| (NOTIFY_KEY, bool_text(b))),
             req.language.map(|l| (LANGUAGE_KEY, l)),
+            req.login_start.map(|w| (LOGIN_START_KEY, w.as_str().to_string())),
         ]
         .into_iter()
         .flatten()
@@ -111,6 +119,18 @@ impl DownloadManager {
 #[cfg(test)]
 mod tests {
     use super::valid_language;
+    use crate::api::LoginStart;
+
+    #[test]
+    fn login_start_reads_back_what_it_wrote_and_falls_back_to_the_tray() {
+        for w in [LoginStart::Tray, LoginStart::Minimized, LoginStart::Window] {
+            assert_eq!(LoginStart::from_setting(w.as_str()), w);
+        }
+        for bad in ["", "Minimized", "hidden", "window\n"] {
+            assert_eq!(LoginStart::from_setting(bad), LoginStart::Tray, "{bad:?}");
+        }
+        assert_eq!(LoginStart::default(), LoginStart::Tray, "the behaviour before the choice existed");
+    }
 
     #[test]
     fn only_language_codes_are_accepted() {
