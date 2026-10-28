@@ -55,6 +55,8 @@ const FLATPAKS: &[(Browser, &str, &str)] = &[
     (Browser::Brave, "io.github.ungoogled_software.ungoogled_chromium", "config/chromium/NativeMessagingHosts"),
     (Browser::Firefox, "org.mozilla.firefox", ".mozilla/native-messaging-hosts"),
     (Browser::Firefox, "io.gitlab.librewolf-community", ".librewolf/native-messaging-hosts"),
+    // Floorp reads Firefox's folder, inside its own sandbox.
+    (Browser::Firefox, "one.ablaze.floorp", ".mozilla/native-messaging-hosts"),
 ];
 
 /// `(browser line, snap name, registration folder inside ~/snap/<name>)`. Firefox and Chromium keep their
@@ -213,6 +215,12 @@ mod tests {
         );
         assert_eq!(brave.data_dir, home.join(".var/app/com.brave.Browser/data/app.velox.fetch"));
         assert_eq!(by("com.google.Chrome").browser, Browser::Chrome);
+
+        // Floorp from Flathub reads Firefox's folder inside its own sandbox.
+        std::fs::create_dir_all(home.join(".var/app/one.ablaze.floorp")).unwrap();
+        let floorp = find(&home, &root, "app.velox.fetch").into_iter().find(|b| b.package == "one.ablaze.floorp").unwrap();
+        assert_eq!((floorp.browser, floorp.sandbox), (Browser::Firefox, Sandbox::Flatpak));
+        assert_eq!(floorp.manifest, home.join(".var/app/one.ablaze.floorp/.mozilla/native-messaging-hosts/app.velox.fetch.json"));
         let _ = std::fs::remove_dir_all(d);
     }
 
