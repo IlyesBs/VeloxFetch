@@ -440,7 +440,8 @@ async fn tools_come_from_the_installers_copy_with_nothing_downloaded() {
     assert_eq!(versions["ytdlp"]["version"], "2025.10.22");
     assert_eq!(versions["ytdlp"]["from"], "bundle");
     assert_eq!(versions["deno"]["sha256"], hex(&programs[1]));
-    let mut names: Vec<String> = std::fs::read_dir(&tools).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let mut names: Vec<String> =
+        std::fs::read_dir(&tools).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     assert!(names.iter().all(|n| !n.starts_with('.')), "no half-written file left: {names:?}");
 }
@@ -521,7 +522,9 @@ async fn the_installer_step_unpacks_beside_the_program_and_removes_the_copies() 
     let list = std::fs::read_to_string(bundle.join("video-tools.json")).unwrap();
     let newer = b"a newer stand-in deno".to_vec();
     std::fs::write(bundle.join(format!("{}.xz", exe("deno"))), xz_of(&newer)).unwrap();
-    let list = list.replace(&hex(&programs[1]), &hex(&newer)).replace(&format!("\"size\": {}", programs[1].len()), &format!("\"size\": {}", newer.len()));
+    let list = list
+        .replace(&hex(&programs[1]), &hex(&newer))
+        .replace(&format!("\"size\": {}", programs[1].len()), &format!("\"size\": {}", newer.len()));
     std::fs::write(bundle.join("video-tools.json"), list).unwrap();
     assert!(make(bundle).await.unwrap().install_bundled_video_tools().await);
     assert_eq!(std::fs::read(shared.join(exe("deno"))).unwrap(), newer);
@@ -543,12 +546,14 @@ async fn tool_updates_are_offered_never_fetched_by_themselves() {
     let list = std::fs::read_to_string(bundle.join("video-tools.json")).unwrap();
     let ytdlp_line = hex(&std::fs::read(env!("CARGO_BIN_EXE_fake-ytdlp")).unwrap());
     let ytdlp_size = std::fs::metadata(env!("CARGO_BIN_EXE_fake-ytdlp")).unwrap().len();
-    let list = list.replacen(&ytdlp_line, &hex(&older), 1).replacen(&format!("\"size\": {ytdlp_size}"), &format!("\"size\": {}", older.len()), 1);
+    let list =
+        list.replacen(&ytdlp_line, &hex(&older), 1).replacen(&format!("\"size\": {ytdlp_size}"), &format!("\"size\": {}", older.len()), 1);
     std::fs::write(bundle.join("video-tools.json"), list).unwrap();
     std::fs::write(bundle.join(format!("{}.xz", exe("yt-dlp"))), xz_of(&older)).unwrap();
     let mut c = ManagerConfig::new(base.join("state").join("velox.db"), base.join("downloads"));
     c.bundled_tools_dir = Some(bundle);
-    c.tools = ToolSources { ytdlp: Some(srv.url("/yt")), deno: Some(srv.url("/deno")), ffmpeg: None, ffmpeg_fallback: None, ffmpeg_unix: None };
+    c.tools =
+        ToolSources { ytdlp: Some(srv.url("/yt")), deno: Some(srv.url("/deno")), ffmpeg: None, ffmpeg_fallback: None, ffmpeg_unix: None };
     let m = DownloadManager::new(c).await.unwrap();
     let st = m.fetch_video_tools().await;
     assert!(st.ytdlp.installed && st.deno.installed, "{st:?}");

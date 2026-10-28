@@ -374,8 +374,11 @@ impl DownloadManager {
         };
         let page = url.to_string();
         // A video page's subtitles go with the picture: none with only the sound.
-        let site_subtitles =
-            if format.is_some_and(OutputFormat::is_audio) || req.stream.as_deref() == Some("audio") { Vec::new() } else { req.subtitles.clone() };
+        let site_subtitles = if format.is_some_and(OutputFormat::is_audio) || req.stream.as_deref() == Some("audio") {
+            Vec::new()
+        } else {
+            req.subtitles.clone()
+        };
         let (dto, work_dir) = {
             let mut m = self.inner.media.lock().unwrap();
             m.next += 1;

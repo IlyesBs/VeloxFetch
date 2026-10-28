@@ -17,7 +17,9 @@ use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-use super::tools::{deno_asset, join, parse_checksum, read_records, sha256_file, to_hex, version_numbers, version_ok, ytdlp_asset, Record, Tool};
+use super::tools::{
+    deno_asset, join, parse_checksum, read_records, sha256_file, to_hex, version_numbers, version_ok, ytdlp_asset, Record, Tool,
+};
 use super::DownloadManager;
 use crate::api::{ManagerEvent, ToolsUpdateDto, VideoToolsDto};
 
@@ -218,14 +220,19 @@ impl DownloadManager {
         };
         let sums = self.fetch_text(&join(base, "SHA2-256SUMS")?).await?;
         let latest = parse_checksum(&String::from_utf8_lossy(&sums), Some(asset)).ok_or("no checksum published for the file")?;
-        let have = tokio::task::spawn_blocking(move || sha256_file(&installed)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+        let have =
+            tokio::task::spawn_blocking(move || sha256_file(&installed)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
         if have == latest {
             return Ok(None);
         }
         let info = self.media_client().probe(&join(base, asset)?).await.ok();
         // The version: where the newest release's page leads (`<base>` is `.../releases/latest/download`).
         let version = match base.trim_end_matches('/').strip_suffix("/download") {
-            Some(latest) => match self.media_client().probe(&super::tools::secure(url::Url::parse(latest).map_err(|_| "bad address".to_string())?)?).await {
+            Some(latest) => match self
+                .media_client()
+                .probe(&super::tools::secure(url::Url::parse(latest).map_err(|_| "bad address".to_string())?)?)
+                .await
+            {
                 Ok(page) => release_version(&page.final_url, asset),
                 Err(_) => None,
             },
@@ -274,10 +281,16 @@ mod tests {
         assert_eq!(release_version(u, "yt-dlp_linux"), None, "another file");
         assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/download/latest/yt-dlp.exe", "yt-dlp.exe"), None);
         // Where `.../releases/latest` leads: the tag page.
-        assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26", "yt-dlp.exe").as_deref(), Some("2026.10.26"));
+        assert_eq!(
+            release_version("https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.26", "yt-dlp.exe").as_deref(),
+            Some("2026.10.26")
+        );
         assert_eq!(release_version("https://github.com/yt-dlp/yt-dlp/releases/tag/nightly", "yt-dlp.exe"), None);
         // GitHub's file servers do not say it.
-        assert_eq!(release_version("https://release-assets.githubusercontent.com/github-production-release-asset/123/abc?sp=r", "yt-dlp.exe"), None);
+        assert_eq!(
+            release_version("https://release-assets.githubusercontent.com/github-production-release-asset/123/abc?sp=r", "yt-dlp.exe"),
+            None
+        );
         assert_eq!(release_version("http://127.0.0.1:9/yt/yt-dlp.exe", "yt-dlp.exe"), None);
         assert_eq!(release_version("not a link", "yt-dlp.exe"), None);
     }

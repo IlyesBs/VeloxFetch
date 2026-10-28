@@ -838,7 +838,14 @@ impl DownloadManager {
         if let (Some(base), Some(platform)) = (s.ffmpeg_unix.as_deref(), ffmpeg_unix_platform()) {
             for channel in ["release", "snapshot"] {
                 let url = join(base, &format!("{platform}/{channel}/ffmpeg.zip"))?;
-                plans.push(Plan { checksum_url: url.clone(), url, listed_as: None, entry: Some("ffmpeg"), checksum_beside_target: true, version: None });
+                plans.push(Plan {
+                    checksum_url: url.clone(),
+                    url,
+                    listed_as: None,
+                    entry: Some("ffmpeg"),
+                    checksum_beside_target: true,
+                    version: None,
+                });
             }
         }
         Ok(plans)
@@ -930,7 +937,14 @@ impl DownloadManager {
             let info = self.media_client().probe(&plan.url).await.map_err(|e| format!("{}: {e}", plan.url))?;
             let target = secure(url::Url::parse(&info.final_url).map_err(|_| "bad address".to_string())?)?;
             let checksum_url = url::Url::parse(&format!("{}.sha256", info.final_url)).map_err(|_| "bad address".to_string())?;
-            resolved = Plan { url: target, checksum_url, listed_as: None, entry: plan.entry, checksum_beside_target: false, version: plan.version.clone() };
+            resolved = Plan {
+                url: target,
+                checksum_url,
+                listed_as: None,
+                entry: plan.entry,
+                checksum_beside_target: false,
+                version: plan.version.clone(),
+            };
             &resolved
         } else {
             plan
