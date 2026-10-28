@@ -32,7 +32,9 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::download::{confine, publish, Outcome, Phase, Progress, Scratch};
-use crate::{limits, sanitize_stem, Analysis, MediaError, OutputFormat, Playlist, PlaylistEntry, Result, StreamKind, StreamOption};
+use crate::{
+    limits, sanitize_stem, Analysis, MediaError, OutputFormat, Playlist, PlaylistEntry, Result, StreamKind, StreamOption, TrackOption,
+};
 
 /// Sites whose video pages VeloxFetch hands to yt-dlp: `(host suffix, path parts that mark a video page)`.
 /// An empty path list means any page except the home page. Kept in sync with the extension's
@@ -391,6 +393,68 @@ pub(crate) fn download_args(
     Ok(a)
 }
 
+/// Fetching only the chosen subtitles (`ids` from the analysis), into `sub.<lang>.<ext>` in the work folder. A run of
+/// its own after the video: a language the site refuses then loses only the subtitles, never the video.
+pub(crate) fn subtitle_args(
+    url: &Url,
+    headers: &SiteHeaders,
+    ids: &[String],
+    scratch: &Path,
+    ffmpeg: Option<&Path>,
+    deno: Option<&Path>,
+) -> Result<Vec<OsString>> {
+    let scratch_s = scratch.as_os_str().to_string_lossy();
+    if !scratch.is_absolute() || scratch_s.starts_with('-') {
+        return Err(MediaError::site("internal error: the working folder is not absolute"));
+    }
+    let mut langs: Vec<&str> = Vec::new();
+    let (mut people, mut site) = (false, false);
+    for id in ids {
+        let (auto, lang) = subtitle_id(id).ok_or_else(|| MediaError::invalid("unknown subtitle track"))?;
+        if auto {
+            site = true;
+        } else {
+            people = true;
+        }
+        if !langs.contains(&lang) {
+            langs.push(lang);
+        }
+    }
+    if langs.is_empty() {
+        return Err(MediaError::invalid("no subtitles were chosen"));
+    }
+    let mut a = base_args(headers, deno);
+    // One language the site refuses (YouTube limits its automatic translations) must not stop the others: yt-dlp goes
+    // on, and its warnings name what it skipped (`refused_subtitles`).
+    a.retain(|x| x != "--no-warnings");
+    a.extend(["--skip-download", "--ignore-errors", "--sub-format", "srt/vtt/ass/best"].map(OsString::from));
+    if people {
+        a.push(OsString::from("--write-subs"));
+    }
+    if site {
+        a.push(OsString::from("--write-auto-subs"));
+    }
+    a.extend([OsString::from("--sub-langs"), OsString::from(langs.join(","))]);
+    if let Some(f) = ffmpeg {
+        if !f.is_absolute() {
+            return Err(MediaError::site("internal error: a dependency path is not absolute"));
+        }
+        // SRT: what TVs, phones and every player read.
+        a.extend(["--convert-subs", "srt", "--ffmpeg-location"].map(OsString::from));
+        a.push(f.as_os_str().to_os_string());
+    }
+    a.extend([
+        "--paths".into(),
+        scratch.as_os_str().to_os_string(),
+        "--output".into(),
+        OsString::from("subtitle:sub.%(ext)s"),
+        "--output".into(),
+        OsString::from("media.%(ext)s"),
+    ]);
+    push_url(&mut a, url)?;
+    Ok(a)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Reading yt-dlp's answer
 
@@ -424,6 +488,90 @@ fn human(bytes: u64) -> String {
 }
 
 const DRM_TEXT: &str = "This video is protected with DRM (copy protection), so it cannot be downloaded.";
+
+/// Subtitle file types a track must come in to be offered (anything else, such as a live chat replay, is not a subtitle).
+const SUBTITLE_TYPES: &[&str] = &["srt", "vtt", "ass", "ssa", "ttml", "dfxp", "srv1", "srv2", "srv3", "json3"];
+/// Subtitle files saved next to the video (what yt-dlp writes, after converting to SRT when it can).
+const SUBTITLE_FILES: &[&str] = &["srt", "vtt", "ass", "ssa", "ttml"];
+/// At most this many languages are offered (YouTube translates its captions into about 160).
+const MAX_SUBTITLE_TRACKS: usize = 400;
+/// How long fetching the subtitles may take before yt-dlp is stopped.
+const SUBTITLES_TIMEOUT: Duration = Duration::from_secs(150);
+
+/// A language code as the page names it (`en`, `pt-BR`, `zh-Hans`, `en-orig`): letters, digits and inner dashes only, so
+/// it is never an option (`-...`), never a pattern, and never yt-dlp's `all`.
+fn subtitle_lang(lang: &str) -> bool {
+    (1..=15).contains(&lang.len())
+        && lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !lang.starts_with('-')
+        && !lang.ends_with('-')
+        && !lang.eq_ignore_ascii_case("all")
+}
+
+/// Is `id` a video page's subtitle id (see `subtitle_id`)? Checked before a download starts.
+pub fn is_subtitle_id(id: &str) -> bool {
+    subtitle_id(id).is_some()
+}
+
+/// A subtitle id from the analysis: `m<lang>` (written by the site's people) or `a<lang>` (made by the site: captions
+/// from the speech, or their automatic translation). `None` = unknown.
+pub(crate) fn subtitle_id(id: &str) -> Option<(bool, &str)> {
+    let auto = match id.as_bytes().first()? {
+        b'm' => false,
+        b'a' => true,
+        _ => return None,
+    };
+    Some((auto, &id[1..])).filter(|(_, lang)| subtitle_lang(lang))
+}
+
+/// The subtitles a page offers: those written by people first, then the site's own captions (from the speech, then
+/// translated into other languages). A language people wrote is never offered twice.
+fn subtitles_from_json(json: &Value) -> Vec<TrackOption> {
+    let listed = |key: &str| -> Vec<(String, Option<String>)> {
+        let Some(map) = json.get(key).and_then(Value::as_object) else { return Vec::new() };
+        map.iter()
+            .filter(|(lang, _)| subtitle_lang(lang))
+            .filter_map(|(lang, formats)| {
+                let formats = formats.as_array()?;
+                formats.iter().any(|f| text(f, "ext").is_some_and(|e| SUBTITLE_TYPES.contains(&e))).then(|| {
+                    let name = formats.iter().find_map(|f| text(f, "name")).map(|n| n.chars().filter(|c| !c.is_control()).take(60).collect());
+                    (lang.clone(), name)
+                })
+            })
+            .collect()
+    };
+    let video_lang = text(json, "language").unwrap_or("");
+    let mut manual = listed("subtitles");
+    manual.sort_by(|a, b| a.1.as_deref().unwrap_or(&a.0).cmp(b.1.as_deref().unwrap_or(&b.0)));
+    let auto = listed("automatic_captions");
+    let has_orig = |lang: &str| auto.iter().any(|(l, _)| l.strip_suffix("-orig") == Some(lang));
+    let (mut spoken, mut translated): (Vec<_>, Vec<_>) = auto
+        .iter()
+        .filter(|(lang, _)| !manual.iter().any(|(m, _)| m == lang.strip_suffix("-orig").unwrap_or(lang)))
+        .filter(|(lang, _)| !has_orig(lang)) // `en` beside `en-orig` is the same captions
+        .partition(|(lang, _)| lang.ends_with("-orig") || lang == video_lang);
+    spoken.sort();
+    translated.sort_by(|a, b| a.1.as_deref().unwrap_or(&a.0).cmp(b.1.as_deref().unwrap_or(&b.0)));
+
+    let track = |prefix: &str, (lang, name): &(String, Option<String>), kind: Option<&str>| {
+        let base = lang.strip_suffix("-orig").unwrap_or(lang);
+        let name = name.as_deref().map(|n| n.trim_end_matches(" (Original)").trim()).filter(|n| !n.is_empty()).unwrap_or(base);
+        TrackOption {
+            id: format!("{prefix}{lang}"),
+            label: kind.map_or_else(|| name.to_string(), |k| format!("{name} · {k}")),
+            language: Some(base.to_string()),
+            group: None,
+            default: false,
+        }
+    };
+    manual
+        .iter()
+        .map(|m| track("m", m, None))
+        .chain(spoken.into_iter().map(|s| track("a", s, Some("auto-generated"))))
+        .chain(translated.into_iter().map(|t| track("a", t, Some("auto-translated"))))
+        .take(MAX_SUBTITLE_TRACKS)
+        .collect()
+}
 
 /// What can be downloaded from yt-dlp's JSON for one video.
 pub(crate) fn analysis_from_json(json: &Value, with_ffmpeg: bool) -> Result<Analysis> {
@@ -524,7 +672,7 @@ pub(crate) fn analysis_from_json(json: &Value, with_ffmpeg: bool) -> Result<Anal
         duration_secs: num(json, "duration"),
         streams,
         audio: Vec::new(),
-        subtitles: Vec::new(),
+        subtitles: subtitles_from_json(json),
         playlist: None,
         part_of_playlist: false,
     })
@@ -809,6 +957,8 @@ pub struct SiteSpec {
     pub work_dir: Option<PathBuf>,
     /// Bytes per second yt-dlp may use (the app's global limit or the Smart throttle); `None` = no limit.
     pub rate_limit: Option<u64>,
+    /// Subtitle ids from `analyze_site`, saved as files next to the video (not with "only the sound").
+    pub subtitles: Vec<String>,
 }
 
 /// Download the video. Progress is reported as bytes and as per-mille "pieces" (yt-dlp fetches
@@ -832,8 +982,11 @@ async fn download_site_inner(tool: &SiteTool, spec: SiteSpec, progress: Arc<Prog
     let stem =
         if spec.stem.trim().is_empty() { analyze_site(tool, &spec.url, &spec.headers).await?.title } else { sanitize_stem(&spec.stem) };
     confine(spec.sandbox_root.as_deref(), &spec.dest_dir)?;
-    let scratch = Scratch::open(&spec.dest_dir, spec.work_dir.as_deref())?;
     let format = effective_format(spec.quality.as_deref(), spec.format);
+    if spec.subtitles.len() > 50 || spec.subtitles.iter().any(|id| subtitle_id(id).is_none()) {
+        return Err(MediaError::invalid("unknown subtitle track"));
+    }
+    let scratch = Scratch::open(&spec.dest_dir, spec.work_dir.as_deref())?;
     let args = download_args(
         &spec.url,
         &spec.headers,
@@ -952,10 +1105,16 @@ async fn download_site_inner(tool: &SiteTool, spec: SiteSpec, progress: Arc<Prog
         })
         .unwrap_or_else(|| "mp4".into());
     let published = publish(&file, &spec.dest_dir, spec.sandbox_root.as_deref(), &stem, &ext)?;
-    if spec.mark_of_the_web {
-        let _ = path_safety::mark_downloaded(&published, spec.url.as_str());
-    }
     let mut notes = Vec::new();
+    let mut files = vec![published];
+    if !format.is_audio() && !spec.subtitles.is_empty() {
+        save_subtitles(tool, &spec, &scratch.0, &mut files, &mut notes).await;
+    }
+    if spec.mark_of_the_web {
+        for f in &files {
+            let _ = path_safety::mark_downloaded(f, spec.url.as_str());
+        }
+    }
     if tool.ffmpeg.is_none() {
         notes.push(
             "The required dependencies are not ready, so the video was saved as the site sends it (no HD join, no file \
@@ -968,7 +1127,78 @@ async fn download_site_inner(tool: &SiteTool, spec: SiteSpec, progress: Arc<Prog
     scratch.finish();
     progress.segments_done.store(1000, Ordering::Relaxed);
     progress.set(Phase::Done);
-    Ok(Outcome { files: vec![published], notes })
+    Ok(Outcome { files, notes })
+}
+
+/// The languages yt-dlp skipped and why (`WARNING: Unable to download video subtitles for 'fr': HTTP Error 429: ...`).
+pub(crate) fn refused_subtitles(stderr: &str) -> Vec<(String, String)> {
+    stderr
+        .lines()
+        .filter_map(|l| l.split_once("Unable to download video subtitles for '")?.1.split_once("': "))
+        .filter(|(lang, _)| subtitle_lang(lang))
+        .map(|(lang, why)| (lang.to_string(), without_tool_hints(&why.chars().filter(|c| !c.is_control()).take(200).collect::<String>())))
+        .collect()
+}
+
+/// The chosen subtitles, saved next to the video (`files[0]`) as `<video name>.<language>.srt`, in the order chosen.
+/// Subtitles are small and independent: when the site refuses some, only they are missing, and a note says so.
+async fn save_subtitles(tool: &SiteTool, spec: &SiteSpec, scratch: &Path, files: &mut Vec<PathBuf>, notes: &mut Vec<String>) {
+    let args = match subtitle_args(&spec.url, &spec.headers, &spec.subtitles, scratch, tool.ffmpeg.as_deref(), tool.deno.as_deref()) {
+        Ok(a) => tool.js_args(a),
+        Err(e) => return notes.push(format!("The subtitles were skipped: {e}")),
+    };
+    let run = async {
+        let mut child = command(&tool.program, &args).spawn()?;
+        let out = tokio::spawn(read_limited(child.stdout.take().expect("piped"), 64 * 1024));
+        let err = tokio::spawn(read_limited(child.stderr.take().expect("piped"), 16 * 1024));
+        let status = child.wait().await?;
+        let _ = out.await;
+        let (stderr, _) = err.await.unwrap_or_default();
+        std::io::Result::Ok((status, String::from_utf8_lossy(&stderr).into_owned()))
+    };
+    let mut refused = Vec::new();
+    match tokio::time::timeout(SUBTITLES_TIMEOUT, run).await {
+        Ok(Ok((status, stderr))) => {
+            refused = refused_subtitles(&stderr);
+            if !status.success() && refused.is_empty() {
+                tracing::warn!(output = %stderr_tail(&stderr), "yt-dlp could not fetch the subtitles");
+                notes.push(format!("Some subtitles could not be downloaded: {}", error_from_stderr(&stderr)));
+            }
+        }
+        Ok(Err(e)) => return notes.push(format!("The subtitles were skipped: could not start a required dependency: {e}")),
+        Err(_) => notes.push("Some subtitles could not be downloaded: the site did not answer in time.".into()),
+    }
+    let stem = files[0].file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "video".into());
+    let (mut missing, mut busy): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    let mut done: Vec<&str> = Vec::new();
+    for (_, lang) in spec.subtitles.iter().filter_map(|id| subtitle_id(id)) {
+        if done.contains(&lang) {
+            continue;
+        }
+        done.push(lang);
+        let found = SUBTITLE_FILES.iter().map(|ext| (scratch.join(format!("sub.{lang}.{ext}")), *ext)).find(|(p, _)| {
+            std::fs::symlink_metadata(p).is_ok_and(|m| m.is_file() && m.len() > 0)
+        });
+        let tag = lang.strip_suffix("-orig").unwrap_or(lang);
+        match found.map(|(p, ext)| publish(&p, &spec.dest_dir, spec.sandbox_root.as_deref(), &format!("{stem}.{tag}"), ext)) {
+            Some(Ok(p)) => files.push(p),
+            Some(Err(e)) => notes.push(format!("Subtitles “{tag}” were skipped: {e}")),
+            None => match refused.iter().find(|(l, _)| l == lang) {
+                Some((_, why)) if why.contains("429") || why.to_ascii_lowercase().contains("too many requests") => busy.push(tag),
+                Some((_, why)) => notes.push(format!("Subtitles “{tag}” could not be downloaded: {why}")),
+                None => missing.push(tag),
+            },
+        }
+    }
+    if !busy.is_empty() {
+        notes.push(format!(
+            "The site is limiting requests for now, so these subtitles were skipped: {}. They usually work again a little later.",
+            busy.join(", ")
+        ));
+    }
+    if !missing.is_empty() {
+        notes.push(format!("The site gave no subtitles for: {}.", missing.join(", ")));
+    }
 }
 
 #[cfg(test)]
@@ -1355,5 +1585,92 @@ mod tests {
         let e =
             error_from_stderr("ERROR: [generic] x: This video is unavailable. Please report this issue on yt-dlp's tracker\n").to_string();
         assert!(e.ends_with("This video is unavailable") && !e.contains("yt-dlp"), "{e}");
+    }
+
+    #[test]
+    fn a_pages_subtitles_are_listed_people_first_then_the_sites_own() {
+        let mut j = sample();
+        j["language"] = "en".into();
+        j["subtitles"] = serde_json::json!({
+            "fr": [{"ext": "json3", "name": "French"}, {"ext": "vtt", "name": "French"}],
+            "ar": [{"ext": "srt", "name": "Arabic"}],
+            "live_chat": [{"ext": "json"}],
+            "danmaku": [{"ext": "xml"}],
+            "-x": [{"ext": "vtt"}], "all": [{"ext": "vtt"}], "en.*": [{"ext": "vtt"}], "a,b": [{"ext": "vtt"}],
+            "pt-BR": [{"ext": "vtt", "name": "Portuguese (Brazil)\u{7}"}]
+        });
+        j["automatic_captions"] = serde_json::json!({
+            "en-orig": [{"ext": "vtt", "name": "English (Original)"}],
+            "en": [{"ext": "vtt", "name": "English"}],
+            "fr": [{"ext": "vtt", "name": "French"}],
+            "de": [{"ext": "vtt"}, {"ext": "srt", "name": "German"}],
+            "zh-Hans": [{"ext": "vtt", "name": "Chinese (Simplified)"}]
+        });
+        let a = analysis_from_json(&j, true).unwrap();
+        let got: Vec<(&str, &str, Option<&str>)> =
+            a.subtitles.iter().map(|s| (s.id.as_str(), s.label.as_str(), s.language.as_deref())).collect();
+        assert_eq!(
+            got,
+            [
+                ("mar", "Arabic", Some("ar")),
+                ("mfr", "French", Some("fr")),
+                ("mpt-BR", "Portuguese (Brazil)", Some("pt-BR")),
+                ("aen-orig", "English · auto-generated", Some("en")),
+                ("azh-Hans", "Chinese (Simplified) · auto-translated", Some("zh-Hans")),
+                ("ade", "German · auto-translated", Some("de")),
+            ]
+        );
+        assert!(a.subtitles.iter().all(|s| is_subtitle_id(&s.id) && s.id.len() <= 16), "every offered id is accepted back");
+        assert!(analysis_from_json(&sample(), true).unwrap().subtitles.is_empty(), "a page without subtitles offers none");
+    }
+
+    #[test]
+    fn subtitle_ids_are_a_language_code_and_nothing_else() {
+        assert_eq!(subtitle_id("mpt-BR"), Some((false, "pt-BR")));
+        assert_eq!(subtitle_id("aen-orig"), Some((true, "en-orig")));
+        for bad in ["", "m", "a", "xen", "m-en", "men-", "mall", "maLL", "men,fr", "men.*", "men orig", "m..", "men/x", "mabcdefghijklmnop"] {
+            assert!(subtitle_id(bad).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn subtitles_are_fetched_on_their_own_run_with_fixed_arguments() {
+        let url = u("https://www.youtube.com/watch?v=abc");
+        let scratch = std::env::temp_dir().join("velox-subs-args");
+        let ff = std::env::temp_dir().join("ffmpeg");
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let s = strings(&subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar", "afr", "mar", "aen-orig"]), &scratch, Some(&ff), None).unwrap());
+        let pair = |s: &[String], k: &str, v: &str| s.windows(2).any(|w| w[0] == k && w[1] == v);
+        assert_eq!(s[0], "--ignore-config");
+        assert!(pair(&s, "--sub-langs", "ar,fr,en-orig"), "each language once: {s:?}");
+        assert!(s.contains(&"--skip-download".into()) && s.contains(&"--write-subs".into()) && s.contains(&"--write-auto-subs".into()));
+        assert!(pair(&s, "--convert-subs", "srt") && pair(&s, "--ffmpeg-location", &ff.to_string_lossy()));
+        assert!(pair(&s, "--output", "subtitle:sub.%(ext)s") && pair(&s, "--paths", &scratch.to_string_lossy()));
+        assert_eq!(&s[s.len() - 2..], ["--", url.as_str()]);
+        assert!(!s.iter().any(|a| a.starts_with("--cookies") || a == "--exec" || a == "-f"));
+        assert!(s.contains(&"--ignore-errors".into()) && !s.contains(&"--no-warnings".into()), "a refused language never stops the others");
+
+        let s = strings(&subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar"]), &scratch, None, None).unwrap());
+        assert!(s.contains(&"--write-subs".into()) && !s.contains(&"--write-auto-subs".into()), "only what was asked for");
+        assert!(!s.contains(&"--convert-subs".into()), "without ffmpeg they stay as the site sends them");
+
+        for bad in [ids(&[]), ids(&["mall"]), ids(&["m-en"])] {
+            assert!(subtitle_args(&url, &SiteHeaders::default(), &bad, &scratch, None, None).is_err(), "{bad:?}");
+        }
+        assert!(subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar"]), Path::new("rel"), None, None).is_err());
+        assert!(subtitle_args(&url, &SiteHeaders::default(), &ids(&["mar"]), &scratch, Some(Path::new("ffmpeg")), None).is_err());
+    }
+
+    #[test]
+    fn the_languages_the_site_refused_are_read_from_the_warnings() {
+        let stderr = "[info] Writing video subtitles to: x\n\
+                      WARNING: Unable to download video subtitles for 'ab': HTTP Error 429: Too Many Requests\n\
+                      WARNING: Unable to download video subtitles for 'pt-BR': HTTP Error 404: Not Found\u{1b}[0m\n\
+                      WARNING: Unable to download video subtitles for '--exec x': HTTP Error 500\n";
+        assert_eq!(
+            refused_subtitles(stderr),
+            [("ab".to_string(), "HTTP Error 429: Too Many Requests".to_string()), ("pt-BR".into(), "HTTP Error 404: Not Found[0m".into())]
+        );
+        assert!(refused_subtitles("ERROR: something else").is_empty());
     }
 }

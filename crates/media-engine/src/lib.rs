@@ -31,7 +31,7 @@ use url::Url;
 pub use download::{analyze, download, sweep_stale_scratch, work_dir_name, DownloadSpec, Outcome, Pacer, Phase, Progress, Selection};
 pub use ffmpeg::{find_ffmpeg, Remux};
 pub use site::{
-    analyze_site, download_site, find_ytdlp, is_site_page, playlist_link, protected_service, SiteHeaders, SiteSpec, SiteTool,
+    analyze_site, download_site, find_ytdlp, is_site_page, is_subtitle_id, playlist_link, protected_service, SiteHeaders, SiteSpec, SiteTool,
     PLAYLIST_PAGES, PLAYLIST_QUALITIES, PROTECTED_SITES, VIDEO_SITES,
 };
 

@@ -317,10 +317,17 @@ impl DownloadManager {
         drm_refusal(&url)?;
         let site = media_engine::is_site_page(&url);
         let tool = if site { Some(self.site_tool().await?) } else { None };
+        // Ids are letters and digits; a video page's subtitle id also has the dashes of its language (`mpt-BR`).
         for id in req.stream.iter().chain(req.audio.iter()).chain(req.subtitles.iter()) {
-            if id.is_empty() || id.len() > 16 || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            if id.is_empty() || id.len() > 16 || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') || id.starts_with('-') {
                 return Err(ManagerError::invalid("unknown track"));
             }
+        }
+        if req.stream.iter().chain(req.audio.iter()).any(|id| id.contains('-'))
+            || (site && !req.subtitles.iter().all(|id| media_engine::is_subtitle_id(id)))
+            || (!site && req.subtitles.iter().any(|id| id.contains('-')))
+        {
+            return Err(ManagerError::invalid("unknown track"));
         }
         if req.subtitles.len() > 50 {
             return Err(ManagerError::invalid("too many subtitle tracks"));
@@ -366,6 +373,9 @@ impl DownloadManager {
             stem.clone()
         };
         let page = url.to_string();
+        // A video page's subtitles go with the picture: none with only the sound.
+        let site_subtitles =
+            if format.is_some_and(OutputFormat::is_audio) || req.stream.as_deref() == Some("audio") { Vec::new() } else { req.subtitles.clone() };
         let (dto, work_dir) = {
             let mut m = self.inner.media.lock().unwrap();
             m.next += 1;
@@ -395,7 +405,7 @@ impl DownloadManager {
                 quality: req.stream.clone(),
                 format: format.map(|f| f.extension().to_string()),
                 audio_only: format.is_some_and(OutputFormat::is_audio),
-                subtitles: req.subtitles.len(),
+                subtitles: if site { site_subtitles.len() } else { req.subtitles.len() },
                 started_at_ms: now_ms(),
                 ended_at_ms: None,
                 active_ms: 0,
@@ -420,6 +430,7 @@ impl DownloadManager {
                     headers: site_headers(&headers),
                     work_dir: Some(work_dir.clone()),
                     rate_limit: None, // set for each run (run_once): the limits can change meanwhile
+                    subtitles: site_subtitles,
                 },
                 wait_ffmpeg,
             ),
@@ -648,6 +659,7 @@ impl DownloadManager {
                     headers: site_headers(&headers),
                     work_dir: Some(work_dir.clone()),
                     rate_limit: None,
+                    subtitles: Vec::new(),
                 },
                 wait_ffmpeg,
             );
