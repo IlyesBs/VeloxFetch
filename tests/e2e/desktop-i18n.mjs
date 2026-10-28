@@ -57,7 +57,7 @@ const english = (text) =>
         .replace(/https?:\/\/\S+/g, " ")
         .replace(/\S*[\\/]\S*/g, " ") // folder paths (a folder may be named "downloads")
         .replace(/\S+\.(bin|iso|zip|mkv|mp4|txt|json|exe|dmg|deb|rpm|AppImage)\b/gi, " ")
-        .replace(/VeloxFetch/g, " ")
+        .replace(/VeloxFetch|Firefox Add-ons|Chrome Web Store/g, " ") // names, never translated
         .match(ENGLISH) ?? [],
     ),
   ];
@@ -71,7 +71,7 @@ try {
   await sleep(2500);
 
   const SHARED = {
-    de: ["download", "downloads", "start", "update", "browser", "limit"],
+    de: ["download", "downloads", "start", "update", "browser", "limit", "add"], // German writes "Add-on"
     "pt-br": ["download", "downloads", "remove"],
   };
   const langs = await ev("[...document.querySelectorAll('[data-testid=settings-lang] option, [data-testid=lang-switch] [role=radio]')].map((o) => o.value || o.dataset.testid.slice(5))");

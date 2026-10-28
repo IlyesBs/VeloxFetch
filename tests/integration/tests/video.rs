@@ -119,6 +119,115 @@ async fn a_video_page_is_read_and_downloaded_through_ytdlp() {
 }
 
 #[tokio::test]
+async fn a_video_pages_subtitles_are_offered_and_saved_next_to_the_video() {
+    let e = env("subs", true, true).await;
+    let id = uid("vidsubs");
+    let url = format!("https://www.youtube.com/watch?v={id}");
+    let a = e.m.analyze_media(url.clone()).await.unwrap();
+    let subs: Vec<(&str, &str)> = a.analysis.subtitles.iter().map(|s| (s.id.as_str(), s.label.as_str())).collect();
+    assert_eq!(
+        subs,
+        [("mar", "Arabic"), ("aen-orig", "English · auto-generated"), ("afr", "French · auto-translated")],
+        "people's first; the site's own captions after; no live chat, no second Arabic or English"
+    );
+
+    let job = e
+        .m
+        .start_media(MediaRequest {
+            url: url.clone(),
+            stream: Some("h720".into()),
+            subtitles: vec!["mar".into(), "afr".into(), "aen-orig".into(), "ade".into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(job.subtitles, 4);
+    let done = finish(&e.m, job.id).await;
+    assert_eq!(done.status, MediaStatus::Completed, "{done:?}");
+    assert_eq!(
+        done.files,
+        ["Fake clip_ test_1.mp4", "Fake clip_ test_1.ar.srt", "Fake clip_ test_1.fr.srt", "Fake clip_ test_1.en.srt"],
+        "named after the video, in the order chosen"
+    );
+    assert_eq!(std::fs::read_to_string(e.root.join("Fake clip_ test_1.fr.srt")).unwrap(), "1\n00:00:01,000 --> 00:00:02,000\nfr\n");
+    assert!(done.notes.iter().any(|n| n == "The site gave no subtitles for: de."), "{:?}", done.notes);
+    assert_eq!(listing(&e.root).len(), 4, "no working folder is left behind");
+
+    let runs = calls(&id);
+    let sub = runs.iter().find(|a| a.iter().any(|x| x == "--sub-langs")).expect("a subtitles run");
+    let pair = |k: &str, v: &str| sub.windows(2).any(|w| w[0] == k && w[1] == v);
+    assert!(pair("--sub-langs", "ar,fr,en-orig,de") && pair("--convert-subs", "srt") && pair("--output", "subtitle:sub.%(ext)s"));
+    assert!(sub.iter().any(|x| x == "--ignore-errors") && !sub.iter().any(|x| x == "--no-warnings"), "one refused language never stops the others");
+    assert!(sub.iter().any(|x| x == "--write-subs") && sub.iter().any(|x| x == "--write-auto-subs"));
+    assert_eq!(&sub[sub.len() - 2..], ["--", url.as_str()]);
+    assert!(!sub.iter().any(|x| x == "--exec" || x.starts_with("--cookies")));
+
+    // Only the sound: no subtitles are fetched.
+    let id = uid("vidsubsaudio");
+    let url = format!("https://www.youtube.com/watch?v={id}");
+    let job = e
+        .m
+        .start_media(MediaRequest { url, stream: Some("audio".into()), subtitles: vec!["mar".into()], ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(job.subtitles, 0);
+    assert_eq!(finish(&e.m, job.id).await.status, MediaStatus::Completed);
+    assert!(!calls(&id).iter().any(|a| a.iter().any(|x| x == "--sub-langs")));
+}
+
+#[tokio::test]
+async fn subtitles_the_site_refuses_never_cost_the_video() {
+    let e = env("subs429", true, true).await;
+    let id = uid("vidsubs429");
+    let url = format!("https://www.youtube.com/watch?v={id}");
+    let job = e
+        .m
+        .start_media(MediaRequest {
+            url,
+            stream: Some("h360".into()),
+            filename: Some("Talk".into()),
+            subtitles: vec!["mar".into(), "afr".into(), "aen-orig".into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let done = finish(&e.m, job.id).await;
+    assert_eq!(done.status, MediaStatus::Completed, "{done:?}");
+    assert_eq!(done.files, ["Talk.mp4", "Talk.ar.srt"], "the languages the site gave are kept");
+    assert_eq!(
+        done.notes,
+        [
+            "Subtitles “en” could not be downloaded: HTTP Error 404: Not Found",
+            "The site is limiting requests for now, so these subtitles were skipped: fr. They usually work again a little later."
+        ]
+    );
+}
+
+#[tokio::test]
+async fn subtitle_ids_are_checked_before_anything_runs() {
+    let e = env("subsbad", true, true).await;
+    for bad in ["m-x", "mall", "men,fr", "men.*", "xen", "m", "men orig", "maaaaaaaaaaaaaaaa"] {
+        let id = uid("vidsubsbad");
+        let r = e
+            .m
+            .start_media(MediaRequest {
+                url: format!("https://www.youtube.com/watch?v={id}"),
+                stream: Some("h360".into()),
+                subtitles: vec![bad.into()],
+                ..Default::default()
+            })
+            .await;
+        assert_eq!(invalid(r), "unknown track", "{bad}");
+        assert!(calls(&id).is_empty(), "{bad}: nothing ran");
+    }
+    let r = e
+        .m
+        .start_media(MediaRequest { url: "https://www.youtube.com/watch?v=x".into(), stream: Some("h-1".into()), ..Default::default() })
+        .await;
+    assert_eq!(invalid(r), "unknown track", "a dash is for subtitle languages only");
+}
+
+#[tokio::test]
 async fn the_user_chooses_the_file_type_mp4_by_default() {
     let e = env("types", true, true).await;
     let id = uid("vidtypes");

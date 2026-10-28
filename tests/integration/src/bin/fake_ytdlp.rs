@@ -5,6 +5,8 @@
 //! * `...jshang...` -> hangs whenever it is given a JavaScript runtime (`--js-runtimes`), like Deno on some
 //!   computers; works with `--no-js-runtimes`;
 //! * `...flaky...` -> the first download in a work folder fails like a refused request, the next one works;
+//! * subtitles (`--skip-download --sub-langs`): writes `sub.<lang>.srt` for `ar`, `fr` and `en-orig` (the others are
+//!   not on the page); with `subs429` in the link, writes the first one and the site refuses the others;
 //! * `.../playlist?list=<id>` -> lists a playlist (`--flat-playlist`): videos `watch?v=<id>-1`.. (5 when the id has
 //!   `slow`, else 4), a private one and a link to another host; titles are very long when the id has `long`;
 //! * anything else -> describes a video (`--dump-single-json`) or "downloads" it into `--paths`.
@@ -52,16 +54,36 @@ fn main() {
     if args.iter().any(|a| a == "--dump-single-json") {
         println!(
             "{}",
-            r#"{"title":"Fake clip: test/1","duration":61.0,"formats":[
+            r#"{"title":"Fake clip: test/1","duration":61.0,"language":"en","formats":[
                 {"format_id":"140","vcodec":"none","acodec":"mp4a.40.2","filesize":1000000},
                 {"format_id":"18","vcodec":"avc1.42001E","acodec":"mp4a.40.2","height":360,"width":640,"filesize":3000000},
                 {"format_id":"136","vcodec":"avc1.4d401f","acodec":"none","height":720,"width":1280,"filesize":8000000},
-                {"format_id":"137","vcodec":"avc1.640028","acodec":"none","height":1080,"width":1920,"filesize":20000000}]}"#
+                {"format_id":"137","vcodec":"avc1.640028","acodec":"none","height":1080,"width":1920,"filesize":20000000}],
+                "subtitles":{"ar":[{"ext":"vtt","name":"Arabic"},{"ext":"srt","name":"Arabic"}],"live_chat":[{"ext":"json"}]},
+                "automatic_captions":{"en-orig":[{"ext":"vtt","name":"English (Original)"}],"en":[{"ext":"vtt","name":"English"}],
+                "fr":[{"ext":"vtt","name":"French"}],"ar":[{"ext":"vtt","name":"Arabic"}]}}"#
                 .replace('\n', "")
         );
         return;
     }
     let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
+    if args.iter().any(|a| a == "--skip-download") {
+        let dir = std::path::PathBuf::from(value("--paths"));
+        for lang in value("--sub-langs").split(',').filter(|l| ["ar", "fr", "en-orig"].contains(l)) {
+            std::fs::write(dir.join(format!("sub.{lang}.srt")), format!("1\n00:00:01,000 --> 00:00:02,000\n{lang}\n")).expect("write subtitles");
+            if url.contains("subs429") {
+                // yt-dlp goes on past a refused language only when told to ignore errors.
+                if !args.iter().any(|a| a == "--ignore-errors") {
+                    eprintln!("ERROR: Unable to download video subtitles for 'fr': HTTP Error 429: Too Many Requests");
+                    std::process::exit(1);
+                }
+                eprintln!("WARNING: Unable to download video subtitles for 'fr': HTTP Error 429: Too Many Requests");
+                eprintln!("WARNING: Unable to download video subtitles for 'en-orig': HTTP Error 404: Not Found");
+                break;
+            }
+        }
+        return;
+    }
     let dir = std::path::PathBuf::from(value("--paths"));
     let selector = value("-f");
     let mut out = std::io::stdout();

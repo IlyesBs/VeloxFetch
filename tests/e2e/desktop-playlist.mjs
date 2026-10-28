@@ -154,7 +154,8 @@ try {
   check("the chosen quality was asked for", fs.readFileSync(path.join(folder, "01 - Clip 1_ part_1.mp4"), "utf8").startsWith("FAKEVIDEO bv*[height<=720]+ba"));
   check("the browser's request is answered", (await pending()).length === 0);
   await waitFor(() => has(`[data-testid=media-${done[0].id}] [data-testid=media-playlist]`), "the playlist chip");
-  check("the list shows which playlist each video comes from", (await text(`[data-testid=media-${done[0].id}] [data-testid=media-playlist]`)) === "My list_ best_of · no. 1");
+  const chip = (await text(`[data-testid=media-${done[0].id}] [data-testid=media-playlist]`))?.trim(); // WebKitGTK ends it with a line break
+  check("the list shows which playlist each video comes from", chip === "My list_ best_of · no. 1", JSON.stringify(chip));
   const dl = calls(LIST).filter((x) => !x.includes("--dump-single-json"));
   check("each video was downloaded by its own link, never the playlist's, never with cookies", dl.length === 3 && dl.every((x) => x.at(-2) === "--" && x.at(-1).startsWith(`https://www.youtube.com/watch?v=${LIST}-`) && !x.some((a) => a.includes("secret"))));
   for (const j of done) await invoke("clear_media_job", { id: j.id });
