@@ -309,6 +309,7 @@ async fn a_video_from_the_browser_waits_for_the_dialog_and_never_hands_cookies_t
             token: p.token,
             filename: None,
             start: None,
+            remember_for: None,
             folder_token: None,
             username: None,
             password: None,
@@ -866,5 +867,33 @@ async fn a_playlist_goes_inside_the_folder_the_user_picked() {
     let escape = invalid(e.m.start_playlist(req(vec![3], Some("../out"))).await);
     assert!(!escape.is_empty());
     assert!(!e.root.parent().unwrap().join("out").exists(), "never outside the picked folder");
+    assert!(listing(&e.root).is_empty(), "not in the usual folder");
+}
+
+#[tokio::test]
+async fn a_playlist_goes_inside_the_folder_remembered_for_videos() {
+    let e = env("rememberedlist", true, true).await;
+    let videos = e.root.parent().unwrap().join("Remembered videos");
+    std::fs::create_dir_all(&videos).unwrap();
+    let pick = e.m.register_pick(&videos).unwrap();
+    let id = uid("vidremember");
+    let job =
+        e.m.start_media(MediaRequest {
+            url: format!("https://www.youtube.com/watch?v={id}"),
+            folder_token: Some(pick.token),
+            remember_for: Some(download_manager::FileKind::Video),
+            filename: Some("First".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(finish(&e.m, job.id).await.status, MediaStatus::Completed);
+    let list = uid("PLremember");
+    let key = e.m.analyze_media(format!("https://www.youtube.com/playlist?list={list}")).await.unwrap().playlist_key.unwrap();
+    for j in e.m.start_playlist(PlaylistRequest { key, items: vec![1], ..Default::default() }).await.unwrap() {
+        assert_eq!(finish(&e.m, j.id).await.status, MediaStatus::Completed);
+    }
+    assert_eq!(listing(&videos), ["First.mp4", "My list_ best_of"]);
+    assert_eq!(listing(&videos.join("My list_ best_of")), ["01 - Clip 1_ part_1.mp4"]);
     assert!(listing(&e.root).is_empty(), "not in the usual folder");
 }

@@ -555,6 +555,8 @@ export interface PendingDownload {
   contentType: string | null;
   resumable: boolean | null;
   saveDir: string;
+  /** The kind of file (its folder; "Remember this folder for ..." applies to it). */
+  fileKind: FileKind;
   probing: boolean;
   incognito: boolean;
   createdAtMs: number;
@@ -635,6 +637,8 @@ export interface NameConflict {
 export interface Analysis {
   kind: ResourceKind;
   filename: string;
+  /** The kind of file the name and type say it is (its default folder). */
+  fileKind: FileKind;
   size: number | null;
   contentType: string | null;
   https: boolean;
@@ -848,6 +852,8 @@ export interface PlaylistRequest {
   subdir?: string;
   /** A folder picked in the native dialog (`api.pickFolder`): the app gets this token, never a path. */
   folderToken?: number;
+  /** With `folderToken`: new files of this kind go to that folder from now on. */
+  rememberFor?: FileKind;
   pending?: number;
 }
 
@@ -860,6 +866,8 @@ export interface MediaRequest {
   subdir?: string;
   /** A folder picked in the native dialog (`api.pickFolder`): the app gets this token, never a path. */
   folderToken?: number;
+  /** With `folderToken`: new files of this kind go to that folder from now on. */
+  rememberFor?: FileKind;
   filename?: string;
   combine?: boolean;
   /** The file type: "mp4" | "mkv" | "webm", or (video pages) "mp3" | "m4a" | "opus" for only the sound. */
@@ -926,6 +934,10 @@ export interface FolderName {
   /** The folder this kind goes into. */
   folder: string;
   defaultFolder: string;
+  /** The folder remembered for this kind ("Remember this folder for ..."), if any. */
+  remembered: string | null;
+  /** That folder can be used now (else the usual place is used meanwhile). */
+  rememberedAvailable: boolean;
 }
 
 /** Where downloads go and how they are sorted. */
@@ -950,6 +962,8 @@ export interface NewDownload {
   url: string;
   /** A folder picked in the native dialog (see `api.pickFolder`). */
   folderToken?: number;
+  /** With `folderToken`: new files of this kind go to that folder from now on. */
+  rememberFor?: FileKind;
   subdir?: string;
   filename?: string;
   priority?: Priority;

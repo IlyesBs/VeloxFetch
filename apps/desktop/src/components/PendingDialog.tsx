@@ -7,7 +7,8 @@ import { IntelligencePanel } from "./IntelligencePanel";
 import { NewLinkResult } from "./NewLinkDialog";
 import { continuable } from "../newLink";
 import { MediaDialog } from "./MediaDialog";
-import type { NewLinkOutcome, PendingDownload, PickedFolder } from "../types";
+import type { NewLinkOutcome, PendingDownload, PickedFolder, Storage } from "../types";
+import { RememberFolder, RememberedNote } from "./RememberFolder";
 import { Icon } from "../ui/icons";
 
 function Row({ label, children, testid }: { label: string; children: React.ReactNode; testid?: string }) {
@@ -30,6 +31,19 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
   const [busy, setBusy] = useState(false);
   // A folder chosen for this one download (a token from the native folder dialog; the path is only shown).
   const [folder, setFolder] = useState<PickedFolder | null>(null);
+  // "Remember this folder for <kind>" (only with a picked folder).
+  const [remember, setRemember] = useState(false);
+  const [storage, setStorage] = useState<Storage | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.getStorage().then(
+      (s) => live && setStorage(s),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [folder]);
 
   // Where the file goes under the name typed (sorting by type can move it to another folder).
   const [renamedDir, setRenamedDir] = useState<string | null>(null);
@@ -68,7 +82,8 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
     setBusy(true);
     const renamed = name.trim() && name.trim() !== p.filename ? name.trim() : undefined;
     const login = user.trim() ? { username: user.trim(), password: pass } : undefined;
-    await act(() => api.confirmPendingDownload(p.token, renamed, startNow, folder?.token, login), startNow ? undefined : t("pend.added"));
+    const rememberFor = folder && remember ? p.fileKind : undefined;
+    await act(() => api.confirmPendingDownload(p.token, renamed, startNow, folder?.token, login, rememberFor), startNow ? undefined : t("pend.added"));
     setBusy(false);
   };
   const change = async () => {
@@ -169,11 +184,18 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
               {t("store.change")}
             </button>
             {folder && (
-              <button className="btn h-7 shrink-0 px-2 text-xs" data-testid="pending-default-folder" disabled={busy} onClick={() => setFolder(null)} title={t("pend.backUsual")}>
+              <button className="btn h-7 shrink-0 px-2 text-xs" data-testid="pending-default-folder" disabled={busy} onClick={() => (setFolder(null), setRemember(false))} title={t("pend.backUsual")}>
                 {t("addd.usual")}
               </button>
             )}
           </div>
+          {folder ? (
+            <div className="mt-1.5">
+              <RememberFolder testid="pending-remember" kind={p.fileKind} checked={remember} onChange={setRemember} disabled={busy} />
+            </div>
+          ) : (
+            <RememberedNote storage={storage} kind={p.fileKind} testid="pending-remembered" />
+          )}
         </Row>
       </dl>
       {p.analysis && <IntelligencePanel a={p.analysis} />}

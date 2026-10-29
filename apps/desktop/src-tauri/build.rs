@@ -58,6 +58,8 @@ const COMMANDS: &[&str] = &[
     "reset_download_folder",
     "pick_folder",
     "choose_download_folder",
+    "choose_kind_folder",
+    "forget_kind_folder",
     "get_network",
     "set_network",
     "get_multi_network",

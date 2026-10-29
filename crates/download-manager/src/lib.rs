@@ -20,7 +20,7 @@ pub mod validate;
 
 pub use api::*;
 pub use batch::{BatchItem, BatchPreview, BatchRequest, BatchResult, ItemState, MAX_BATCH, MAX_GENERATED};
-pub use downloader_core::{DownloadStatus, Priority};
+pub use downloader_core::{DownloadStatus, FileKind, Priority};
 /// A network to spread downloads over ("several networks at once"; `ManagerConfig::test_networks`).
 pub use http_client::{LaneState, RouteSpec};
 pub use manager::{

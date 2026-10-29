@@ -400,6 +400,7 @@ impl DownloadManager {
     }
 
     async fn create_inner(&self, req: NewDownload, request_headers: Vec<(String, String)>) -> Result<DownloadDto, ManagerError> {
+        validate::remember_needs_folder(req.remember_for, req.folder_token)?;
         let (url, credentials) = validate::split_credentials(validate::url(&req.url)?);
         let url = crate::links::direct(&url).unwrap_or(url);
         let mut request_headers = request_headers;
@@ -462,7 +463,11 @@ impl DownloadManager {
             part_stamp: None,
             checksum_source: None,
         };
+        let picked = req.folder_token.is_some().then(|| rec.destination.clone());
         let id = self.save(&rec).await?;
+        if let (Some(kind), Some(folder)) = (req.remember_for, picked) {
+            self.remember_for_kind(kind, &folder).await;
+        }
         self.place_new(id, req.queue_id, start_at).await;
         let dto = self.dto_for(id).await?;
         self.emit(ManagerEvent::Added { download: dto.clone() });

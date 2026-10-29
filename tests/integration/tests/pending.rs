@@ -73,7 +73,15 @@ async fn nothing_starts_until_the_user_confirms() {
     assert!(saw_pending >= 2, "the UI is told twice: {saw_pending}");
 
     let d = m
-        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            remember_for: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     until("download to finish", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
@@ -84,6 +92,7 @@ async fn nothing_starts_until_the_user_confirms() {
             token: p.token,
             filename: None,
             start: None,
+            remember_for: None,
             folder_token: None,
             username: None,
             password: None
@@ -123,6 +132,7 @@ async fn the_user_can_rename_and_the_name_is_validated() {
                 token: p.token,
                 filename: Some(bad.into()),
                 start: None,
+                remember_for: None,
                 folder_token: None,
                 username: None,
                 password: None
@@ -138,6 +148,7 @@ async fn the_user_can_rename_and_the_name_is_validated() {
             token: p.token,
             filename: Some("mine.bin".into()),
             start: Some(false),
+            remember_for: None,
             folder_token: None,
             username: None,
             password: None,
@@ -174,7 +185,15 @@ async fn the_confirmed_download_carries_the_browser_headers() {
     let m = manager("headers").await;
     let p = m.add_pending(req(&srv, "/h.bin"), ctx()).await.unwrap();
     let d = m
-        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            remember_for: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     until("finish", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
@@ -216,6 +235,7 @@ async fn a_sign_in_typed_in_the_confirmation_is_used_and_never_shown() {
         token: p.token,
         filename: None,
         start: None,
+        remember_for: None,
         folder_token: None,
         username: username.map(Into::into),
         password: password.map(Into::into),
@@ -244,7 +264,15 @@ async fn without_a_sign_in_the_protected_download_fails_asking_for_one() {
     let m = manager("nosignin").await;
     let p = m.add_pending(req(&srv, "/auth/members.bin"), ctx()).await.unwrap();
     let d = m
-        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            remember_for: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     until("download to fail", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Failed }).await;

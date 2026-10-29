@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use download_manager::{
-    ConfirmPending, DownloadDto, DownloadManager, ListFilter, ManagerConfig, ManagerError, MediaRequest, MediaStatus, NewDownload,
-    SetFolderNames,
+    ConfirmPending, DownloadDto, DownloadManager, FileKind, ListFilter, ManagerConfig, ManagerError, MediaRequest, MediaStatus,
+    NewDownload, SetFolderNames,
 };
 use downloader_core::DownloadStatus;
 use persistence::SqliteStore;
@@ -379,9 +379,16 @@ async fn the_confirmation_shows_where_the_file_will_go_and_can_send_it_elsewhere
     *e.srv.state.content_disposition.lock().unwrap() = None;
 
     // Confirm the first one normally (sorted), the second into a folder chosen in the dialog.
-    let d1 = e
-        .m
-        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+    let d1 =
+        e.m.confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            remember_for: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     assert_eq!(rel(&done(&e.m, d1.id).await, &e.root), "Video/movie.mkv");
@@ -392,6 +399,7 @@ async fn the_confirmation_shows_where_the_file_will_go_and_can_send_it_elsewhere
             token: p2.token,
             filename: Some("mine.flac".into()),
             start: None,
+            remember_for: None,
             folder_token: Some(pick.token),
             username: None,
             password: None,
@@ -510,4 +518,182 @@ async fn a_download_without_a_size_finishes_and_then_knows_its_size() {
     assert_eq!(std::fs::read(&d.destination).unwrap(), *e.data);
     assert_eq!(d.downloaded, e.data.len() as u64);
     assert_eq!(d.total_size, Some(e.data.len() as u64), "once finished, the size is what was received");
+}
+
+/// A download into `target` (a picked folder), remembered for `kind` when asked.
+async fn into(e: &Env, m: &DownloadManager, path: &str, target: &Path, remember: Option<FileKind>) -> DownloadDto {
+    let pick = m.register_pick(target).unwrap();
+    let d = m
+        .create_download(NewDownload { url: e.srv.url(path), folder_token: Some(pick.token), remember_for: remember, ..Default::default() })
+        .await
+        .unwrap();
+    let d = done(m, d.id).await;
+    assert_eq!(d.status, DownloadStatus::Completed, "{path}: {:?}", d.error);
+    d
+}
+
+async fn plain(e: &Env, m: &DownloadManager, path: &str) -> DownloadDto {
+    let d = m.create_download(NewDownload { url: e.srv.url(path), ..Default::default() }).await.unwrap();
+    let d = done(m, d.id).await;
+    assert_eq!(d.status, DownloadStatus::Completed, "{path}: {:?}", d.error);
+    d
+}
+
+fn remembered(m: &DownloadManager, kind: FileKind) -> (Option<String>, bool) {
+    let f = m.get_storage().folders.into_iter().find(|f| f.kind == kind).unwrap();
+    (f.remembered, f.remembered_available)
+}
+
+fn parent(d: &DownloadDto) -> PathBuf {
+    Path::new(&d.destination).parent().unwrap().to_path_buf()
+}
+
+#[tokio::test]
+async fn each_kind_of_file_remembers_its_own_folder_and_only_when_asked() {
+    for organize in [true, false] {
+        let e = env(&format!("remember-{organize}"), organize).await;
+        let videos = folder(&e.base);
+        let documents = folder(&e.base);
+        let once = folder(&e.base);
+        let usual = |sub: &str| if organize { e.root.join(sub) } else { e.root.clone() };
+
+        // Nothing remembered: the usual place, as before.
+        assert_eq!(parent(&plain(&e, &e.m, "/a.mp4").await), usual("Video"));
+        assert!(e.m.get_storage().folders.iter().all(|f| f.remembered.is_none()));
+
+        // A picked folder without "remember": that download only.
+        assert_eq!(parent(&into(&e, &e.m, "/b.mp4", &once, None).await), std::fs::canonicalize(&once).unwrap());
+        assert_eq!(parent(&plain(&e, &e.m, "/c.mp4").await), usual("Video"), "nothing was remembered");
+
+        // Remembered for videos: the next video goes there by itself; other kinds are not touched.
+        into(&e, &e.m, "/d.mp4", &videos, Some(FileKind::Video)).await;
+        let v = std::fs::canonicalize(&videos).unwrap();
+        assert_eq!(remembered(&e.m, FileKind::Video), (Some(v.to_string_lossy().into_owned()), true));
+        assert_eq!(parent(&plain(&e, &e.m, "/e.mp4").await), v);
+        assert_eq!(parent(&plain(&e, &e.m, "/e.pdf").await), usual("Documents"));
+        assert_eq!(parent(&plain(&e, &e.m, "/e.zip").await), usual("Archives"));
+        assert_eq!(parent(&plain(&e, &e.m, "/e.exe").await), usual("Programs"));
+
+        // Documents get their own; videos keep theirs.
+        into(&e, &e.m, "/f.pdf", &documents, Some(FileKind::Document)).await;
+        let doc = std::fs::canonicalize(&documents).unwrap();
+        assert_eq!(parent(&plain(&e, &e.m, "/g.pdf").await), doc);
+        assert_eq!(parent(&plain(&e, &e.m, "/g.mp4").await), v);
+        assert_eq!(parent(&plain(&e, &e.m, "/g.zip").await), usual("Archives"));
+
+        // Another folder once, without "remember": the remembered one stays.
+        assert_eq!(parent(&into(&e, &e.m, "/h.mp4", &once, None).await), std::fs::canonicalize(&once).unwrap());
+        assert_eq!(parent(&plain(&e, &e.m, "/i.mp4").await), v);
+
+        // A sub-folder typed for one download is exactly that, as before.
+        let d =
+            e.m.create_download(NewDownload { url: e.srv.url("/j.mp4"), subdir: Some("Mine".into()), ..Default::default() }).await.unwrap();
+        assert_eq!(parent(&done(&e.m, d.id).await), e.root.join("Mine"));
+        e.m.shutdown().await;
+
+        // After a restart: still remembered, still used.
+        let m2 = DownloadManager::new(config(&e.base, organize)).await.unwrap();
+        assert_eq!(remembered(&m2, FileKind::Video).0, Some(v.to_string_lossy().into_owned()));
+        assert_eq!(parent(&plain(&e, &m2, "/k.mp4").await), v);
+        assert_eq!(parent(&plain(&e, &m2, "/k.pdf").await), doc);
+
+        // Forgotten (Settings): back to the usual place, the other kind untouched.
+        m2.forget_kind_folder(FileKind::Video).await.unwrap();
+        assert_eq!(remembered(&m2, FileKind::Video).0, None);
+        assert_eq!(parent(&plain(&e, &m2, "/l.mp4").await), usual("Video"));
+        assert_eq!(parent(&plain(&e, &m2, "/l.pdf").await), doc);
+        m2.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn a_remembered_folder_that_is_gone_is_skipped_for_the_usual_place_and_kept() {
+    let e = env("remember-gone", true).await;
+    let drive = folder(&e.base);
+    into(&e, &e.m, "/a.zip", &drive, Some(FileKind::Archive)).await;
+    let kept = std::fs::canonicalize(&drive).unwrap().to_string_lossy().into_owned();
+    // The drive is unplugged.
+    std::fs::remove_dir_all(&drive).unwrap();
+    assert_eq!(remembered(&e.m, FileKind::Archive), (Some(kept.clone()), false), "shown as not available, not forgotten");
+    let d = plain(&e, &e.m, "/b.zip").await;
+    assert_eq!(parent(&d), e.root.join("Archives"), "the usual place meanwhile");
+    assert!(!drive.exists(), "the missing folder is not made again (it may be a drive that is not plugged in)");
+    // Plugged in again: used again.
+    std::fs::create_dir_all(&drive).unwrap();
+    assert_eq!(remembered(&e.m, FileKind::Archive), (Some(kept.clone()), true));
+    assert_eq!(parent(&plain(&e, &e.m, "/c.zip").await).to_string_lossy(), kept);
+}
+
+#[tokio::test]
+async fn remembering_needs_a_picked_folder_and_works_from_the_browser_confirmation() {
+    let e = env("remember-confirm", true).await;
+    let r = e.m.create_download(NewDownload { url: e.srv.url("/x.mp4"), remember_for: Some(FileKind::Video), ..Default::default() }).await;
+    assert!(matches!(r, Err(ManagerError::InvalidInput(ref m)) if m.contains("choose a folder")), "{r:?}");
+    let r =
+        e.m.create_download(NewDownload {
+            url: e.srv.url("/x.mp4"),
+            folder_token: Some(4242),
+            remember_for: Some(FileKind::Video),
+            ..Default::default()
+        })
+        .await;
+    assert!(matches!(r, Err(ManagerError::InvalidInput(_))), "a made-up token remembers nothing: {r:?}");
+    assert_eq!(remembered(&e.m, FileKind::Video).0, None);
+    assert!(serde_json::from_str::<NewDownload>(r#"{"url":"https://x.test/a","rememberFor":"system"}"#).is_err(), "only the known kinds");
+
+    // The browser's confirmation: a refused "remember" leaves the request waiting.
+    let token = e.m.add_pending(NewDownload { url: e.srv.url("/p.pdf"), ..Default::default() }, Default::default()).await.unwrap().token;
+    let refused = e.m.confirm_pending(ConfirmPending { token, remember_for: Some(FileKind::Document), ..Default::default() }).await;
+    assert!(matches!(refused, Err(ManagerError::InvalidInput(_))));
+    let docs = folder(&e.base);
+    let pick = e.m.register_pick(&docs).unwrap();
+    let d =
+        e.m.confirm_pending(ConfirmPending {
+            token,
+            folder_token: Some(pick.token),
+            remember_for: Some(FileKind::Document),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(parent(&done(&e.m, d.id).await), std::fs::canonicalize(&docs).unwrap());
+    assert_eq!(parent(&plain(&e, &e.m, "/q.pdf").await), std::fs::canonicalize(&docs).unwrap(), "remembered from the confirmation");
+    // The next confirmation shows that folder: what the dialog shows is where the file goes.
+    let next = e.m.add_pending(NewDownload { url: e.srv.url("/r.pdf"), ..Default::default() }, Default::default()).await.unwrap();
+    assert_eq!(PathBuf::from(&next.save_dir), std::fs::canonicalize(&docs).unwrap());
+    assert_eq!(parent(&plain(&e, &e.m, "/q.mp4").await), e.root.join("Video"));
+}
+
+#[tokio::test]
+async fn a_video_stream_uses_the_folder_remembered_for_videos() {
+    let e = env("remember-media", true).await;
+    let videos = folder(&e.base);
+    let pick = e.m.register_pick(&videos).unwrap();
+    // Remembering from the video dialog: the stream has no tool here, so it fails to start, but the choice is checked
+    // before anything runs and only stored once the job exists.
+    let r =
+        e.m.start_media(MediaRequest { url: "https://x.test/v.m3u8".into(), remember_for: Some(FileKind::Video), ..Default::default() })
+            .await;
+    assert!(matches!(r, Err(ManagerError::InvalidInput(ref m)) if m.contains("choose a folder")), "{r:?}");
+    let job =
+        e.m.start_media(MediaRequest {
+            url: e.srv.url("/v.m3u8"),
+            folder_token: Some(pick.token),
+            remember_for: Some(FileKind::Video),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let v = std::fs::canonicalize(&videos).unwrap();
+    assert_eq!(Path::new(&job.folder), v);
+    assert_eq!(remembered(&e.m, FileKind::Video).0, Some(v.to_string_lossy().into_owned()));
+    let next = e.m.start_media(MediaRequest { url: e.srv.url("/w.m3u8"), ..Default::default() }).await.unwrap();
+    assert_eq!(Path::new(&next.folder), v, "the next video goes there by itself");
+    let typed =
+        e.m.start_media(MediaRequest { url: e.srv.url("/x.m3u8"), subdir: Some("Clips".into()), ..Default::default() }).await.unwrap();
+    assert_eq!(Path::new(&typed.folder), e.root.join("Clips"), "a sub-folder typed for one video is that");
+    for j in e.m.list_media() {
+        let _ = e.m.cancel_media(j.id).await;
+    }
+    let _ = MediaStatus::Queued;
 }

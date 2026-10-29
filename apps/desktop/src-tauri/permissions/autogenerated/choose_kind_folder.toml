@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-choose-kind-folder"
+description = "Enables the choose_kind_folder command without any pre-configured scope."
+commands.allow = ["choose_kind_folder"]
+
+[[permission]]
+identifier = "deny-choose-kind-folder"
+description = "Denies the choose_kind_folder command without any pre-configured scope."
+commands.deny = ["choose_kind_folder"]

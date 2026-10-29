@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-kind-folder"
+description = "Enables the forget_kind_folder command without any pre-configured scope."
+commands.allow = ["forget_kind_folder"]
+
+[[permission]]
+identifier = "deny-forget-kind-folder"
+description = "Denies the forget_kind_folder command without any pre-configured scope."
+commands.deny = ["forget_kind_folder"]

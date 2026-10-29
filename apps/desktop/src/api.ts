@@ -38,6 +38,7 @@ import type {
   BrowserName,
   Diagnostics,
   Download,
+  FileKind,
   DownloadDetail,
   Logs,
   HistoryEntry,
@@ -149,8 +150,14 @@ export const api = {
   clearMediaJob: (id: number, deleteFiles = false) => call<void>("clear_media_job", { id, deleteFiles }),
   listPendingDownloads: () => call<PendingDownload[]>("list_pending_downloads"),
   /** `login`: the user name and password the site asks for (sealed with the download, never sent back). */
-  confirmPendingDownload: (token: number, filename?: string, start = true, folderToken?: number, login?: { username: string; password: string }) =>
-    call<Download>("confirm_pending_download", { request: { token, filename, start, folderToken, ...login } }),
+  confirmPendingDownload: (
+    token: number,
+    filename?: string,
+    start = true,
+    folderToken?: number,
+    login?: { username: string; password: string },
+    rememberFor?: FileKind,
+  ) => call<Download>("confirm_pending_download", { request: { token, filename, start, folderToken, ...login, ...(rememberFor && folderToken !== undefined && { rememberFor }) } }),
   getStorage: () => call<Storage>("get_storage"),
   setOrganize: (enabled: boolean) => call<Storage>("set_organize", { enabled }),
   setFolderNames: (names: Record<string, string>) => call<Storage>("set_folder_names", { request: { names } }),
@@ -159,6 +166,10 @@ export const api = {
   pickFolder: () => call<PickedFolder | null>("pick_folder"),
   /** Opens the native folder dialog and makes the answer the default download folder. */
   chooseDownloadFolder: () => call<Storage | null>("choose_download_folder"),
+  /** Opens the native folder dialog and remembers the answer for one kind of file (`null` = closed). */
+  chooseKindFolder: (kind: FileKind) => call<Storage | null>("choose_kind_folder", { kind }),
+  /** Files of this kind go back to the usual place. */
+  forgetKindFolder: (kind: FileKind) => call<Storage>("forget_kind_folder", { kind }),
   getNetwork: () => call<NetworkSettings>("get_network"),
   setNetwork: (request: SetNetwork) => call<NetworkSettings>("set_network", { request }),
   getMultiNetwork: () => call<MultiNetwork>("get_multi_network"),

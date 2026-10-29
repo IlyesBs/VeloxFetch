@@ -96,6 +96,7 @@ impl DownloadManager {
                 content_type: None,
                 resumable: None,
                 save_dir: self.predicted_dir(&guess, None).to_string_lossy().into_owned(),
+                file_kind: downloader_core::classify_file(&guess, None),
                 probing: true,
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
@@ -127,6 +128,7 @@ impl DownloadManager {
                 }
                 e.dto.analysis = Some(analysis);
                 e.dto.save_dir = this.predicted_dir(&e.dto.filename, e.dto.content_type.as_deref()).to_string_lossy().into_owned();
+                e.dto.file_kind = downloader_core::classify_file(&e.dto.filename, e.dto.content_type.as_deref());
                 e.dto.clone()
             };
             this.emit(ManagerEvent::Pending { pending: updated });
@@ -168,6 +170,7 @@ impl DownloadManager {
                 content_type: None,
                 resumable: None,
                 save_dir: self.predicted_dir("video.mp4", Some("video/mp4")).to_string_lossy().into_owned(),
+                file_kind: downloader_core::FileKind::Video,
                 probing: false,
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
@@ -208,6 +211,7 @@ impl DownloadManager {
             (None, Some(_)) => return Err(ManagerError::invalid("a password needs a user name")),
             (None, None) => {}
         }
+        validate::remember_needs_folder(req.remember_for, req.folder_token)?;
         if self.inner.pending.lock().unwrap().entries.iter().any(|e| e.dto.token == req.token && e.dto.media.is_some()) {
             return Err(ManagerError::invalid("this is a video: choose its quality in the video dialog"));
         }
@@ -221,6 +225,7 @@ impl DownloadManager {
         new.start = Some(req.start.unwrap_or(true));
         if req.folder_token.is_some() {
             new.folder_token = req.folder_token;
+            new.remember_for = req.remember_for;
         }
         if username.is_some() {
             new.username = username;

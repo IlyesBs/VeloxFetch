@@ -172,7 +172,15 @@ async fn the_confirmation_dialog_gets_the_analysis_and_the_download_still_works(
     assert!(!serde_json::to_string(&a).unwrap().contains("sid=1"), "the cookie never reaches the result");
     assert!(nothing_written("pending"));
     let d = m
-        .confirm_pending(ConfirmPending { token: p.token, filename: None, start: None, folder_token: None, username: None, password: None })
+        .confirm_pending(ConfirmPending {
+            token: p.token,
+            filename: None,
+            start: None,
+            remember_for: None,
+            folder_token: None,
+            username: None,
+            password: None,
+        })
         .await
         .unwrap();
     until("the download", || async { m.get_download(d.id).await.unwrap().status == DownloadStatus::Completed }).await;
@@ -192,6 +200,7 @@ async fn a_failed_analysis_leaves_the_download_available() {
             token: p.token,
             filename: None,
             start: Some(false),
+            remember_for: None,
             folder_token: None,
             username: None,
             password: None,

@@ -1113,3 +1113,27 @@ test("the portable copy gets the extension from the stores, like the installed a
   assert.match(ids, /FIREFOX_STORE_URL: Option<&str> = Some\("https:\/\/addons\.mozilla\.org\//);
   assert.match(read("crates", "browser-bridge", "src", "generated", "identity.rs"), /CHROME_STORE_ID: Option<&str> = Some\("keobnkoppcchnbpmmfodidkcedglbhnn"\)/);
 });
+
+test("a folder remembered per kind of file: chosen only in the native dialog, main window only, the kind a closed list", () => {
+  const api = read("crates", "download-manager", "src", "api.rs");
+  const lib = read("apps", "desktop", "src-tauri", "src", "lib.rs");
+  const storage = withoutTestModules(read("crates", "download-manager", "src", "manager", "storage.rs"));
+  for (const c of ["choose_kind_folder", "forget_kind_folder"]) {
+    assert.match(read("apps", "desktop", "src-tauri", "build.rs"), new RegExp(`"${c}"`));
+    assert.match(read("apps", "desktop", "src-tauri", "capabilities", "main-window.json"), new RegExp(`"allow-${c.replaceAll("_", "-")}"`));
+    for (const other of ["download-window.json", "settings-window.json"]) {
+      assert.ok(!read("apps", "desktop", "src-tauri", "capabilities", other).includes(`allow-${c.replaceAll("_", "-")}`), `${c} not in ${other}`);
+    }
+  }
+  // The command takes a kind (a closed enum), never a path: the folder comes from the native dialog.
+  assert.match(lib, /async fn choose_kind_folder\(window: WebviewWindow, state: State<'_, AppState>, kind: FileKind\)/);
+  assert.match(lib, /let Some\(path\) = choose_folder\(&window, "Choose the folder for this kind of file"\)\.await/);
+  assert.match(lib, /command!\(forget_kind_folder, ForgetKindFolder, \(kind: FileKind\) -> StorageDto/);
+  // Requests remember a folder only through a picked token, for a kind from the closed list.
+  assert.equal((api.match(/pub remember_for: Option<downloader_core::FileKind>,/g) ?? []).length, 4);
+  assert.match(read("crates", "download-manager", "src", "validate.rs"), /if kind\.is_some\(\) && folder_token\.is_none\(\)/);
+  // A remembered folder is checked like a picked one every time it is used, and stays inside the allowed folders.
+  assert.match(storage, /path_safety::validate_user_folder\(folder, &self\.protect\)\.ok\(\)/);
+  assert.match(storage, /\.chain\(self\.remembered\.values\(\)\.cloned\(\)\)/);
+  assert.match(storage, /self\.allow_folder\(folder\)\.await\?;\s*self\.storage\(\)\.remembered\.insert\(kind, folder\.to_path_buf\(\)\);/);
+});
