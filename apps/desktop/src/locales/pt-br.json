@@ -606,6 +606,7 @@
   "mdl.unavailable": "Indisponível",
   "mdl.playlistFolder": "Pasta",
   "mdl.playlistFolderHint": "Vazio: uma pasta com o nome da playlist, na sua pasta de vídeos. Os arquivos são numerados na ordem da playlist.",
+  "mdl.playlistFolderPickedHint": "Vazio: uma pasta com o nome da playlist, dentro da pasta escolhida. Os arquivos são numerados na ordem da playlist.",
   "mdl.downloadVideos": "Baixar vídeos ({n})",
   "mdl.playlistStarted": "“{title}”: vídeos adicionados ({n}). Alguns são baixados por vez; os outros aguardam a vez.",
   "lbl.best": "Melhor disponível",

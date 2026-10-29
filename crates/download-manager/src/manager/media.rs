@@ -353,15 +353,25 @@ impl DownloadManager {
             }
             None => String::new(), // the engine takes the title from the link
         };
-        let root = self.download_root();
-        // Sorting by type: a stream is video, unless the user named a sub-folder.
-        let sorted = req
-            .subdir
-            .as_deref()
-            .is_none_or(|s| s.trim().is_empty())
-            .then(|| self.sorted_subfolder(downloader_core::FileKind::Video))
-            .flatten();
-        let dest_dir = validate::subdir(&root, req.subdir.as_deref().filter(|s| !s.trim().is_empty()).or(sorted.as_deref()))?;
+        let named = req.subdir.as_deref().filter(|s| !s.trim().is_empty());
+        let (root, dest_dir) = match req.folder_token {
+            // A folder the user picked: the video goes exactly there, and the job is confined to it.
+            Some(token) => {
+                if named.is_some() {
+                    return Err(ManagerError::invalid("choose either a folder or a sub-folder, not both"));
+                }
+                let folder = self.pick_path(token)?;
+                self.allow_folder(&folder).await?;
+                (folder.clone(), folder)
+            }
+            None => {
+                let root = self.download_root();
+                // Sorting by type: a stream is video, unless the user named a sub-folder.
+                let sorted = named.is_none().then(|| self.sorted_subfolder(downloader_core::FileKind::Video)).flatten();
+                let dest_dir = validate::subdir(&root, named.or(sorted.as_deref()))?;
+                (root, dest_dir)
+            }
+        };
         tokio::fs::create_dir_all(&dest_dir).await.map_err(|e| ManagerError::Internal(format!("cannot create the folder: {e}")))?;
         validate::ensure_within(&root, &dest_dir)?;
 
@@ -580,8 +590,17 @@ impl DownloadManager {
         };
         let format = format.or_else(|| (quality.as_deref() == Some("audio")).then_some(OutputFormat::Mp3));
 
-        // The folder: the user's, else the playlist's name inside the videos folder.
-        let root = self.download_root();
+        // The folder: the user's, else the playlist's name inside the videos folder; both inside the folder the
+        // user picked, when there is one (the jobs are then confined to it).
+        let picked = match req.folder_token {
+            Some(token) => {
+                let folder = self.pick_path(token)?;
+                self.allow_folder(&folder).await?;
+                Some(folder)
+            }
+            None => None,
+        };
+        let root = picked.clone().unwrap_or_else(|| self.download_root());
         let named = match req.subdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => s.to_string(),
             None => {
@@ -589,7 +608,7 @@ impl DownloadManager {
                 if validate::filename(&name).is_err() {
                     name = "playlist".into();
                 }
-                match self.sorted_subfolder(downloader_core::FileKind::Video) {
+                match picked.is_none().then(|| self.sorted_subfolder(downloader_core::FileKind::Video)).flatten() {
                     Some(v) => format!("{v}/{name}"),
                     None => name,
                 }

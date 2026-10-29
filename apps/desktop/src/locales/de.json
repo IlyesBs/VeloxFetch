@@ -606,6 +606,7 @@
   "mdl.unavailable": "Nicht verfügbar",
   "mdl.playlistFolder": "Ordner",
   "mdl.playlistFolderHint": "Leer: ein Ordner mit dem Namen der Playlist in Ihrem Videoordner. Die Dateien werden in der Reihenfolge der Playlist nummeriert.",
+  "mdl.playlistFolderPickedHint": "Leer: ein Ordner mit dem Namen der Playlist im gewählten Ordner. Die Dateien werden in der Reihenfolge der Playlist nummeriert.",
   "mdl.downloadVideos": "Videos herunterladen ({n})",
   "mdl.playlistStarted": "„{title}“: Videos hinzugefügt ({n}). Einige laden gleichzeitig; die anderen warten, bis sie dran sind.",
   "lbl.best": "Beste verfügbare",

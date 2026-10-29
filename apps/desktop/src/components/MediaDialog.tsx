@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, normalizeError } from "../api";
 import { act, store } from "../hooks";
 import { getLang, t as tr, useLang, useT, type Key } from "../i18n";
-import type { MediaAnalysis, MediaRequest, Playlist, TrackOption } from "../types";
+import type { MediaAnalysis, MediaRequest, PickedFolder, Playlist, TrackOption } from "../types";
 import { Icon } from "../ui/icons";
 
 function duration(secs: number | null): string {
@@ -93,6 +93,8 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
   const [videoType, setVideoType] = useState(lastType.video);
   const [audioType, setAudioType] = useState(lastType.audio);
   const [subdir, setSubdir] = useState("");
+  // A folder chosen for this video in the native dialog (a token; the path is only shown).
+  const [folder, setFolder] = useState<PickedFolder | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   /** A playlist: the videos chosen (positions in it). */
@@ -163,6 +165,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
         ...(stream && { quality: stream }),
         format: fileType,
         ...(subdir.trim() && { subdir: subdir.trim() }),
+        ...(folder && { folderToken: folder.token }),
         ...(pending !== undefined && { pending }),
       }),
     );
@@ -170,6 +173,11 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
     if (!jobs) return;
     store.toast("info", t("mdl.playlistStarted", { n: jobs.length, title: playlist.title }));
     onClose();
+  };
+
+  const chooseFolder = async () => {
+    const picked = await act(() => api.pickFolder());
+    if (picked) setFolder(picked);
   };
 
   const start = async () => {
@@ -182,7 +190,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
       ...(typeAvailable && { format: fileType }),
       ...(audio && { audio }),
       ...(subs.length > 0 && !(site && soundOnly) && { subtitles: subs }),
-      ...(subdir.trim() && { subdir: subdir.trim() }),
+      ...(folder ? { folderToken: folder.token } : subdir.trim() && { subdir: subdir.trim() }),
       ...(name.trim() && { filename: name.trim() }),
       ...(pending !== undefined && { pending }),
     };
@@ -343,11 +351,28 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
               />
             )}
 
+            <div className="space-y-1" data-testid="media-folder">
+              <span className="label">{t("addd.saveIn")}</span>
+              <div className="flex items-center gap-2">
+                <span className="selectable min-w-0 flex-1 break-all rounded-lg border border-line px-2.5 py-1.5 text-xs" data-testid="media-folder-path">
+                  {folder ? folder.path : t("addd.usualFolder")}
+                </span>
+                <button type="button" className="btn shrink-0" data-testid="media-change-folder" onClick={() => void chooseFolder()}>
+                  {t("store.change")}
+                </button>
+                {folder && (
+                  <button type="button" className="btn shrink-0" data-testid="media-default-folder" onClick={() => setFolder(null)}>
+                    {t("addd.usual")}
+                  </button>
+                )}
+              </div>
+            </div>
+
             {playlist ? (
               <label className="block space-y-1">
                 <span className="label">{t("mdl.playlistFolder")}</span>
                 <input data-testid="media-subdir" className="input h-9" value={subdir} onChange={(e) => setSubdir(e.target.value)} placeholder={playlist.title} />
-                <span className="block text-xs text-dim">{t("mdl.playlistFolderHint")}</span>
+                <span className="block text-xs text-dim">{t(folder ? "mdl.playlistFolderPickedHint" : "mdl.playlistFolderHint")}</span>
               </label>
             ) : (
               <div className="grid grid-cols-2 gap-3">
@@ -357,7 +382,14 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
                 </label>
                 <label className="space-y-1">
                   <span className="label">{t("mdl.subdir")}</span>
-                  <input data-testid="media-subdir" className="input h-9" value={subdir} onChange={(e) => setSubdir(e.target.value)} placeholder={t("mdl.subdirEg")} />
+                  <input
+                    data-testid="media-subdir"
+                    className="input h-9"
+                    value={folder ? "" : subdir}
+                    disabled={!!folder}
+                    onChange={(e) => setSubdir(e.target.value)}
+                    placeholder={folder ? t("addd.subdirChosen") : t("mdl.subdirEg")}
+                  />
                 </label>
               </div>
             )}
