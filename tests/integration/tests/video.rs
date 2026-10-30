@@ -809,3 +809,62 @@ async fn while_a_game_holds_downloads_waiting_videos_wait_too_and_everything_goe
     }
     wait_until("everything to stop", || e.m.list_media().iter().all(|j| !j.status.is_active() && j.status != MediaStatus::Queued)).await;
 }
+
+#[tokio::test]
+async fn a_video_goes_to_the_folder_the_user_picked() {
+    let e = env("picked", true, true).await;
+    let elsewhere = e.root.parent().unwrap().join("Elsewhere").join("Videos");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let pick = e.m.register_pick(&elsewhere).unwrap();
+    let url = format!("https://www.youtube.com/watch?v={}", uid("vidpick"));
+
+    // A folder and a sub-folder at once, or a token the app never gave: refused, nothing written.
+    let both = MediaRequest { url: url.clone(), folder_token: Some(pick.token), subdir: Some("x".into()), ..Default::default() };
+    assert!(invalid(e.m.start_media(both).await).contains("not both"));
+    let unknown = MediaRequest { url: url.clone(), folder_token: Some(pick.token + 99), ..Default::default() };
+    assert!(invalid(e.m.start_media(unknown).await).contains("choose the folder again"));
+    assert!(e.m.list_media().is_empty());
+    assert!(serde_json::from_str::<MediaRequest>(r#"{"url":"https://x.test/v","folder":"/etc"}"#).is_err(), "never a path");
+
+    let job =
+        e.m.start_media(MediaRequest { url, filename: Some("Picked".into()), folder_token: Some(pick.token), ..Default::default() })
+            .await
+            .unwrap();
+    let done = finish(&e.m, job.id).await;
+    assert_eq!(done.status, MediaStatus::Completed, "{done:?}");
+    assert_eq!(Path::new(&done.folder), pick.path.as_str());
+    assert_eq!(listing(Path::new(&pick.path)), ["Picked.mp4"], "exactly there, nothing else left");
+    assert!(listing(&e.root).is_empty(), "not in the usual folder");
+}
+
+#[tokio::test]
+async fn a_playlist_goes_inside_the_folder_the_user_picked() {
+    let e = env("pickedlist", true, true).await;
+    let elsewhere = e.root.parent().unwrap().join("External");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let pick = e.m.register_pick(&elsewhere).unwrap();
+    let list = uid("PLpick");
+    let key = e.m.analyze_media(format!("https://www.youtube.com/playlist?list={list}")).await.unwrap().playlist_key.unwrap();
+
+    let req = |items: Vec<u32>, subdir: Option<&str>| PlaylistRequest {
+        key: key.clone(),
+        items,
+        folder_token: Some(pick.token),
+        subdir: subdir.map(Into::into),
+        ..Default::default()
+    };
+    // Its own name inside the picked folder (no "videos" sorting folder there), or the name the user typed.
+    for j in e.m.start_playlist(req(vec![1], None)).await.unwrap() {
+        assert_eq!(finish(&e.m, j.id).await.status, MediaStatus::Completed);
+    }
+    for j in e.m.start_playlist(req(vec![2], Some("Mine"))).await.unwrap() {
+        assert_eq!(finish(&e.m, j.id).await.status, MediaStatus::Completed);
+    }
+    assert_eq!(listing(&elsewhere), ["Mine", "My list_ best_of"]);
+    assert_eq!(listing(&elsewhere.join("My list_ best_of")), ["01 - Clip 1_ part_1.mp4"]);
+    assert_eq!(listing(&elsewhere.join("Mine")), ["02 - Clip 2_ part_2.mp4"]);
+    let escape = invalid(e.m.start_playlist(req(vec![3], Some("../out"))).await);
+    assert!(!escape.is_empty());
+    assert!(!e.root.parent().unwrap().join("out").exists(), "never outside the picked folder");
+    assert!(listing(&e.root).is_empty(), "not in the usual folder");
+}

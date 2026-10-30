@@ -152,7 +152,7 @@ try {
   check("the chosen folder is shown and the sub-folder box is disabled", (await ev("document.querySelector('dialog input[placeholder*=\"not with\"]')?.disabled")) === true);
   await fill("dialog input[required]", `${srv.base}/special.mp3`);
   await click("dialog button[type=submit]");
-  await waitFor(async () => tree(folderB).length === 1, "download into folder B", 20000);
+  await waitFor(async () => tree(folderB).join() === "special.mp3", "download into folder B", 20000).catch(() => {});
   check("the file is saved exactly in the chosen folder, not sorted", tree(folderB).join() === "special.mp3", tree(folderB).join());
   check("the default folder is unchanged", (await invoke("get_storage")).ok.root === h.root);
 

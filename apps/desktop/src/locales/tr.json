@@ -606,6 +606,7 @@
   "mdl.unavailable": "Kullanılamıyor",
   "mdl.playlistFolder": "Klasör",
   "mdl.playlistFolderHint": "Boş bırakılırsa: video klasörünüzde listenin adını taşıyan bir klasör. Dosyalar listedeki sıraya göre numaralanır.",
+  "mdl.playlistFolderPickedHint": "Boş: seçtiğiniz klasörün içinde oynatma listesinin adını taşıyan bir klasör. Dosyalar listedeki sıraya göre numaralanır.",
   "mdl.downloadVideos": "Videoları indir ({n})",
   "mdl.playlistStarted": "“{title}”: videolar eklendi ({n}). Birkaçı aynı anda iner; diğerleri sırasını bekler.",
   "lbl.best": "En iyisi",

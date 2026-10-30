@@ -606,6 +606,7 @@
   "mdl.unavailable": "Unavailable",
   "mdl.playlistFolder": "Folder",
   "mdl.playlistFolderHint": "Empty: a folder named after the playlist, in your videos folder. Files are numbered in the playlist's order.",
+  "mdl.playlistFolderPickedHint": "Empty: a folder named after the playlist, inside the folder you chose. Files are numbered in the playlist's order.",
   "mdl.downloadVideos": "Download videos ({n})",
   "mdl.playlistStarted": "“{title}”: videos added ({n}). A few download at a time; the others wait their turn.",
   "lbl.best": "Best available",

@@ -709,6 +709,9 @@ pub struct MediaRequest {
     pub subtitles: Vec<String>,
     /// Sub-folder inside the download folder.
     pub subdir: Option<String>,
+    /// A folder the user picked in the native folder dialog (see `pick_folder`): the video goes exactly there.
+    /// The UI never sends a path, only this token. Cannot be combined with `subdir`.
+    pub folder_token: Option<u64>,
     /// A name without extension. `None` = taken from the link.
     pub filename: Option<String>,
     /// Join separate video and audio into one file when ffmpeg is available (default true).
@@ -733,8 +736,12 @@ pub struct PlaylistRequest {
     pub quality: Option<String>,
     /// `mp4`, `mkv`, `webm`, `mp3`, `m4a` or `opus`; `None` = MP4 (MP3 for "audio").
     pub format: Option<String>,
-    /// Sub-folder inside the download folder; `None` = the playlist's name inside the videos folder.
+    /// Sub-folder inside the download folder (or inside `folder_token`'s folder); `None` = the playlist's name
+    /// inside the videos folder (or inside the picked folder).
     pub subdir: Option<String>,
+    /// A folder the user picked in the native folder dialog (see `pick_folder`): the playlist's folder is made
+    /// inside it. The UI never sends a path, only this token.
+    pub folder_token: Option<u64>,
     /// The browser's waiting video the playlist was read from: it leaves the waiting list.
     pub pending: Option<u64>,
 }

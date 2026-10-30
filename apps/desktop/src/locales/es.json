@@ -606,6 +606,7 @@
   "mdl.unavailable": "No disponible",
   "mdl.playlistFolder": "Carpeta",
   "mdl.playlistFolderHint": "Vacío: una carpeta con el nombre de la lista, dentro de tu carpeta de vídeos. Los archivos se numeran en el orden de la lista.",
+  "mdl.playlistFolderPickedHint": "Vacío: una carpeta con el nombre de la lista, dentro de la carpeta elegida. Los archivos se numeran en el orden de la lista.",
   "mdl.downloadVideos": "Descargar vídeos ({n})",
   "mdl.playlistStarted": "«{title}»: vídeos añadidos ({n}). Se descargan unos pocos a la vez; los demás esperan su turno.",
   "lbl.best": "La mejor disponible",

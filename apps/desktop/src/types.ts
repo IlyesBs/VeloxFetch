@@ -846,6 +846,8 @@ export interface PlaylistRequest {
   quality?: string;
   format?: string;
   subdir?: string;
+  /** A folder picked in the native dialog (`api.pickFolder`): the app gets this token, never a path. */
+  folderToken?: number;
   pending?: number;
 }
 
@@ -856,6 +858,8 @@ export interface MediaRequest {
   audio?: string;
   subtitles?: string[];
   subdir?: string;
+  /** A folder picked in the native dialog (`api.pickFolder`): the app gets this token, never a path. */
+  folderToken?: number;
   filename?: string;
   combine?: boolean;
   /** The file type: "mp4" | "mkv" | "webm", or (video pages) "mp3" | "m4a" | "opus" for only the sound. */

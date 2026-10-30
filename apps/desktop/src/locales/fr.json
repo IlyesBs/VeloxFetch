@@ -606,6 +606,7 @@
   "mdl.unavailable": "Indisponible",
   "mdl.playlistFolder": "Dossier",
   "mdl.playlistFolderHint": "Vide : un dossier au nom de la playlist, dans votre dossier des vidéos. Les fichiers sont numérotés dans l'ordre de la playlist.",
+  "mdl.playlistFolderPickedHint": "Vide : un dossier au nom de la playlist, dans le dossier choisi. Les fichiers sont numérotés dans l'ordre de la playlist.",
   "mdl.downloadVideos": "Télécharger les vidéos ({n})",
   "mdl.playlistStarted": "« {title} » : vidéos ajoutées ({n}). Quelques-unes se téléchargent à la fois ; les autres attendent leur tour.",
   "lbl.best": "Meilleure disponible",
