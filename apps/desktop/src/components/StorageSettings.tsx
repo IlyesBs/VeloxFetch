@@ -1,25 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, normalizeError } from "../api";
 import { act, store } from "../hooks";
-import { useT, type Key } from "../i18n";
+import { useT } from "../i18n";
 import { Rich } from "../ui/rich";
 import type { FileKind, Storage } from "../types";
 import { Icon } from "../ui/icons";
 import { Panel } from "../ui/primitives";
-
-const KIND_LABEL: Record<FileKind, Key> = {
-  video: "fold.video",
-  audio: "fold.audio",
-  image: "fold.image",
-  document: "fold.document",
-  archive: "fold.archive",
-  program: "fold.program",
-  other: "fold.other",
-};
+import { KIND_LABEL } from "./RememberFolder";
 
 /**
  * Where downloads go: the folder (chosen in the system's own folder dialog, never typed here) and whether
- * new files are sorted into a folder per type. Existing files are never moved.
+ * new files are sorted into a folder per type, and a folder remembered for a kind of file (videos, programs...).
+ * Existing files are never moved.
  */
 export function StorageSettings() {
   const t = useT();
@@ -53,6 +45,17 @@ export function StorageSettings() {
   };
   const toggle = async (on: boolean) => {
     const next = await act(() => api.setOrganize(on), on ? t("store.sortOn") : t("store.sortOff"));
+    if (next) adopt(next);
+  };
+  const chooseKind = async (kind: FileKind) => {
+    const next = await act(() => api.chooseKindFolder(kind));
+    if (next) {
+      adopt(next);
+      store.toast("info", t("store.kindChosen"));
+    }
+  };
+  const forgetKind = async (kind: FileKind) => {
+    const next = await act(() => api.forgetKindFolder(kind), t("store.kindForgotten"));
     if (next) adopt(next);
   };
   const dirty = !!state && state.folders.some((f) => (names[f.kind] ?? f.folder).trim() !== f.folder);
@@ -92,6 +95,35 @@ export function StorageSettings() {
       <p className="mt-1 text-xs text-dim">
         <Rich text={t("store.sortHow", { audio: names.audio ?? "Audio", doc: names.document ?? "Documents", prog: names.program ?? "Programs" })} />
       </p>
+
+      <div className="mt-4" data-testid="kind-folders">
+        <p className="text-xs font-medium text-dim">{t("store.kindFolders")}</p>
+        <p className="mt-0.5 text-xs text-dim">{t("store.kindFoldersHint")}</p>
+        <div className="mt-1.5 space-y-1.5">
+          {state?.folders.map((f) => (
+            <div key={f.kind} className="flex items-center gap-2 text-xs" data-testid={`kind-folder-${f.kind}`}>
+              <span className="w-44 shrink-0 text-dim">{t(KIND_LABEL[f.kind])}</span>
+              <span className="selectable min-w-0 flex-1 break-all rounded-lg border border-line px-2.5 py-1" data-testid={`kind-folder-${f.kind}-path`}>
+                {f.remembered ?? t("store.kindUsual")}
+                {f.remembered && !f.rememberedAvailable && <span className="block text-dim">{t("store.kindGone")}</span>}
+              </span>
+              <button
+                className="btn h-7 shrink-0 px-2 text-xs"
+                data-testid={`kind-folder-${f.kind}-change`}
+                aria-label={t("store.kindChange", { kind: t(KIND_LABEL[f.kind]) })}
+                onClick={() => void chooseKind(f.kind)}
+              >
+                {t("store.change")}
+              </button>
+              {f.remembered && (
+                <button className="btn h-7 shrink-0 px-2 text-xs" data-testid={`kind-folder-${f.kind}-forget`} onClick={() => void forgetKind(f.kind)}>
+                  {t("store.forget")}
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       {state?.organize && (
         <div className="mt-3" data-testid="organize-names">

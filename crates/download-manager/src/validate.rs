@@ -541,3 +541,11 @@ mod robustness {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+/// "Remember this folder for ..." only makes sense with a folder the user picked.
+pub fn remember_needs_folder(kind: Option<downloader_core::FileKind>, folder_token: Option<u64>) -> Result<(), ManagerError> {
+    if kind.is_some() && folder_token.is_none() {
+        return Err(ManagerError::invalid("choose a folder to remember"));
+    }
+    Ok(())
+}

@@ -6,6 +6,10 @@
 //! * **Sorting by type** (optional): a new file queued for a default folder is put in a sub-folder chosen from
 //!   what it is - `Video`, `Audio`, `Images`, `Documents`, `Archives`, `Programs`, `Other` (the names can be changed).
 //!   A file the user sent to a folder of their own is put exactly there, and so is one with a sub-folder given.
+//! * **A remembered folder per kind** (optional): when the user picks a folder for a download and ticks "Remember
+//!   this folder for <kind>", new files of that kind queued for a default folder go there instead (exactly there,
+//!   not sorted). Each kind has its own; it is checked (exists, writable, allowed) every time it is used, and a
+//!   folder that is not available is skipped for the usual place, without being forgotten.
 //!
 //! The web view never sends a path. A folder is chosen in a **native dialog** owned by the desktop shell, which
 //! hands the answer to [`DownloadManager::register_pick`]; the UI only ever holds the returned token.
@@ -21,6 +25,7 @@ const ALLOWED_KEY: &str = "storage.allowed";
 const SORTABLE_KEY: &str = "storage.sortable";
 const ORGANIZE_KEY: &str = "organize.enabled";
 const NAMES_KEY: &str = "organize.names";
+const KIND_FOLDERS_KEY: &str = "storage.kind_folders";
 /// Folders remembered (each was picked by the user in a native dialog).
 const MAX_FOLDERS: usize = 32;
 /// Picks kept in memory for the UI to refer to.
@@ -36,6 +41,10 @@ pub(super) struct Storage {
     pub organize: bool,
     /// Folder names the user changed (absent = the default name).
     pub names: BTreeMap<FileKind, String>,
+    /// The folder remembered for each kind (absent = the usual place).
+    pub remembered: BTreeMap<FileKind, PathBuf>,
+    /// Folders a remembered folder may never be (the app's own data).
+    protect: Vec<PathBuf>,
     picks: HashMap<u64, PathBuf>,
     next_pick: u64,
 }
@@ -54,6 +63,16 @@ fn same_folder(a: &Path, b: &Path) -> bool {
         }
     };
     norm(a) == norm(b)
+}
+
+/// The app's own data folder (and its real path): never a download folder.
+fn protected_folders(cfg: &ManagerConfig) -> Vec<PathBuf> {
+    let data_dir = cfg.db_path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut protect = vec![data_dir];
+    if let Ok(c) = std::fs::canonicalize(&protect[0]) {
+        protect.push(path_safety::display_path(&c));
+    }
+    protect
 }
 
 fn push_unique(list: &mut Vec<PathBuf>, p: PathBuf) {
@@ -109,13 +128,29 @@ impl Storage {
                 }
             }
         }
-        Storage { root, app_default, sortable, organize, names, picks: HashMap::new(), next_pick: 0 }
+        let mut remembered = BTreeMap::new();
+        if let Some(map) =
+            store.get_setting(KIND_FOLDERS_KEY).ok().flatten().and_then(|s| serde_json::from_str::<BTreeMap<String, String>>(&s).ok())
+        {
+            for (k, v) in map {
+                let path = PathBuf::from(v);
+                if let (Some(kind), true) = (FileKind::parse(&k), path.is_absolute()) {
+                    remembered.insert(kind, path);
+                }
+            }
+        }
+        let protect = protected_folders(cfg);
+        Storage { root, app_default, sortable, organize, names, remembered, protect, picks: HashMap::new(), next_pick: 0 }
     }
 
     /// Every folder that may be written to when the app starts: the remembered ones plus the default ones.
     pub(super) fn allowed_at_start(&self, store: &SqliteStore) -> Vec<PathBuf> {
         let mut all = read_list(store, ALLOWED_KEY);
-        for p in [self.app_default.clone(), self.root.clone()].into_iter().chain(self.sortable.iter().cloned()) {
+        for p in [self.app_default.clone(), self.root.clone()]
+            .into_iter()
+            .chain(self.sortable.iter().cloned())
+            .chain(self.remembered.values().cloned())
+        {
             push_unique(&mut all, p);
         }
         all
@@ -125,10 +160,24 @@ impl Storage {
         self.names.get(&kind).cloned().unwrap_or_else(|| kind.default_folder().to_string())
     }
 
+    /// The folder remembered for `kind`, when it can be used right now (exists, writable, still allowed).
+    pub(super) fn remembered_for(&self, kind: FileKind) -> Option<PathBuf> {
+        let folder = self.remembered.get(&kind)?;
+        path_safety::validate_user_folder(folder, &self.protect).ok()
+    }
+
     /// Where a new file called `name` goes when it was queued for `base`.
     pub(super) fn folder_for(&self, base: &Path, name: &str, content_type: Option<&str>) -> PathBuf {
-        if self.organize && self.sortable.iter().any(|s| same_folder(s, base)) {
-            base.join(self.folder_name(downloader_core::classify_file(name, content_type)))
+        if !self.sortable.iter().any(|s| same_folder(s, base)) {
+            // A folder the user chose for this download, or a sub-folder given: exactly there.
+            return base.to_path_buf();
+        }
+        let kind = downloader_core::classify_file(name, content_type);
+        if let Some(folder) = self.remembered_for(kind) {
+            return folder;
+        }
+        if self.organize {
+            base.join(self.folder_name(kind))
         } else {
             base.to_path_buf()
         }
@@ -175,7 +224,13 @@ impl DownloadManager {
             organize: s.organize,
             folders: FileKind::ALL
                 .into_iter()
-                .map(|kind| FolderNameDto { kind, folder: s.folder_name(kind), default_folder: kind.default_folder().to_string() })
+                .map(|kind| FolderNameDto {
+                    kind,
+                    folder: s.folder_name(kind),
+                    default_folder: kind.default_folder().to_string(),
+                    remembered: s.remembered.get(&kind).map(|p| p.to_string_lossy().into_owned()),
+                    remembered_available: s.remembered_for(kind).is_some(),
+                })
                 .collect(),
         }
     }
@@ -202,12 +257,7 @@ impl DownloadManager {
     /// validated (exists, writable, not a system / program / autostart folder, not the app's own data) and
     /// a token is returned; the UI uses the token, never the path.
     pub fn register_pick(&self, path: &Path) -> Result<PickedFolder, ManagerError> {
-        let data_dir = self.inner.cfg.db_path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut protect = vec![data_dir];
-        if let Ok(c) = std::fs::canonicalize(&protect[0]) {
-            protect.push(path_safety::display_path(&c));
-        }
-        let folder = path_safety::validate_user_folder(path, &protect).map_err(ManagerError::invalid)?;
+        let folder = path_safety::validate_user_folder(path, &protected_folders(&self.inner.cfg)).map_err(ManagerError::invalid)?;
         let mut s = self.storage();
         if s.picks.len() >= MAX_PICKS {
             if let Some(oldest) = s.picks.keys().min().copied() {
@@ -234,10 +284,15 @@ impl DownloadManager {
         let known = self.inner.roots.list().iter().any(|r| same_folder(r, folder));
         if !known {
             if self.inner.roots.list().len() >= MAX_FOLDERS {
-                // Forget the oldest one-off folder (never the default ones).
+                // Forget the oldest one-off folder (never the default or remembered ones).
                 let keep: Vec<PathBuf> = {
                     let s = self.storage();
-                    self.inner.roots.list().into_iter().filter(|r| s.sortable.iter().any(|d| same_folder(d, r))).collect()
+                    self.inner
+                        .roots
+                        .list()
+                        .into_iter()
+                        .filter(|r| s.sortable.iter().chain(s.remembered.values()).any(|d| same_folder(d, r)))
+                        .collect()
                 };
                 let mut all = self.inner.roots.list();
                 if let Some(pos) = all.iter().position(|r| !keep.iter().any(|k| same_folder(k, r))) {
@@ -310,5 +365,49 @@ impl DownloadManager {
         self.put_setting(NAMES_KEY, serde_json::to_string(&json).unwrap_or_else(|_| "{}".into())).await?;
         self.storage().names = names;
         Ok(self.get_storage())
+    }
+
+    /// The folder remembered for `kind`, when it can be used right now.
+    pub(super) fn remembered_folder(&self, kind: FileKind) -> Option<PathBuf> {
+        let candidate = self.storage().remembered.get(&kind).cloned()?;
+        path_safety::validate_user_folder(&candidate, &protected_folders(&self.inner.cfg)).ok()
+    }
+
+    /// New files of `kind` go to `folder` from now on (it was picked by the user in the native dialog).
+    /// Only that kind changes.
+    pub(super) async fn remember_folder(&self, kind: FileKind, folder: &Path) -> Result<(), ManagerError> {
+        self.allow_folder(folder).await?;
+        self.storage().remembered.insert(kind, folder.to_path_buf());
+        self.persist_remembered().await
+    }
+
+    /// After a download was accepted with "Remember this folder for ...": the download goes on even if the
+    /// choice cannot be stored (it is logged).
+    pub(super) async fn remember_for_kind(&self, kind: FileKind, folder: &Path) {
+        if let Err(e) = self.remember_folder(kind, folder).await {
+            tracing::warn!(kind = kind.key(), error = %e, "could not remember the folder");
+        }
+    }
+
+    /// Settings: remember the folder behind a token for `kind`.
+    pub async fn remember_picked_folder(&self, kind: FileKind, token: u64) -> Result<StorageDto, ManagerError> {
+        let folder = self.pick_path(token)?;
+        self.remember_folder(kind, &folder).await?;
+        Ok(self.get_storage())
+    }
+
+    /// Settings: files of `kind` go back to the usual place.
+    pub async fn forget_kind_folder(&self, kind: FileKind) -> Result<StorageDto, ManagerError> {
+        let removed = self.storage().remembered.remove(&kind).is_some();
+        if removed {
+            self.persist_remembered().await?;
+        }
+        Ok(self.get_storage())
+    }
+
+    async fn persist_remembered(&self) -> Result<(), ManagerError> {
+        let json: BTreeMap<&str, String> =
+            self.storage().remembered.iter().map(|(k, v)| (k.key(), v.to_string_lossy().into_owned())).collect();
+        self.put_setting(KIND_FOLDERS_KEY, serde_json::to_string(&json).unwrap_or_else(|_| "{}".into())).await
     }
 }

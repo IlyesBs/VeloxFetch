@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { api, normalizeError } from "../api";
 import { act, store } from "../hooks";
 import { getLang, t as tr, useLang, useT, type Key } from "../i18n";
-import type { MediaAnalysis, MediaRequest, PickedFolder, Playlist, TrackOption } from "../types";
+import type { FileKind, MediaAnalysis, MediaRequest, PickedFolder, Playlist, Storage, TrackOption } from "../types";
+import { RememberFolder, RememberedNote, rememberedFor } from "./RememberFolder";
 import { Icon } from "../ui/icons";
 
 function duration(secs: number | null): string {
@@ -95,6 +96,19 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
   const [subdir, setSubdir] = useState("");
   // A folder chosen for this video in the native dialog (a token; the path is only shown).
   const [folder, setFolder] = useState<PickedFolder | null>(null);
+  // "Remember this folder for videos / audio" (only with a picked folder).
+  const [remember, setRemember] = useState(false);
+  const [storage, setStorage] = useState<Storage | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.getStorage().then(
+      (s) => live && setStorage(s),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [folder]);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   /** A playlist: the videos chosen (positions in it). */
@@ -144,6 +158,9 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
   // Streams are video: a type other than the one they come in needs ffmpeg (joining).
   const typeAvailable = !!analysis && (site || (analysis.combineAvailable && combine));
   const fileType = soundOnly ? audioType : site ? videoType : VIDEO_TYPES.some((v) => v.id === videoType) ? videoType : "mp4";
+  // Only the sound is audio; anything else is a video (each has its own remembered folder).
+  const mediaKind: FileKind = soundOnly || AUDIO_TYPES.some((x) => x.id === fileType) ? "audio" : "video";
+  const remembered = rememberedFor(storage, mediaKind);
   const chooseType = (id: string) => {
     if (soundOnly) {
       setAudioType(id);
@@ -166,6 +183,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
         format: fileType,
         ...(subdir.trim() && { subdir: subdir.trim() }),
         ...(folder && { folderToken: folder.token }),
+        ...(folder && remember && { rememberFor: mediaKind }),
         ...(pending !== undefined && { pending }),
       }),
     );
@@ -191,6 +209,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
       ...(audio && { audio }),
       ...(subs.length > 0 && !(site && soundOnly) && { subtitles: subs }),
       ...(folder ? { folderToken: folder.token } : subdir.trim() && { subdir: subdir.trim() }),
+      ...(folder && remember && { rememberFor: mediaKind }),
       ...(name.trim() && { filename: name.trim() }),
       ...(pending !== undefined && { pending }),
     };
@@ -355,17 +374,22 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
               <span className="label">{t("addd.saveIn")}</span>
               <div className="flex items-center gap-2">
                 <span className="selectable min-w-0 flex-1 break-all rounded-lg border border-line px-2.5 py-1.5 text-xs" data-testid="media-folder-path">
-                  {folder ? folder.path : t("addd.usualFolder")}
+                  {folder ? folder.path : remembered?.available && (playlist || !subdir.trim()) ? remembered.path : t("addd.usualFolder")}
                 </span>
                 <button type="button" className="btn shrink-0" data-testid="media-change-folder" onClick={() => void chooseFolder()}>
                   {t("store.change")}
                 </button>
                 {folder && (
-                  <button type="button" className="btn shrink-0" data-testid="media-default-folder" onClick={() => setFolder(null)}>
+                  <button type="button" className="btn shrink-0" data-testid="media-default-folder" onClick={() => (setFolder(null), setRemember(false))}>
                     {t("addd.usual")}
                   </button>
                 )}
               </div>
+              {folder ? (
+                <RememberFolder testid="media-remember" kind={mediaKind} checked={remember} onChange={setRemember} />
+              ) : (
+                (playlist || !subdir.trim()) && <RememberedNote storage={storage} kind={mediaKind} testid="media-remembered" />
+              )}
             </div>
 
             {playlist ? (

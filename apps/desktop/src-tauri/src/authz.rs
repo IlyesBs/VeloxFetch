@@ -65,6 +65,8 @@ pub enum Command {
     ResetDownloadFolder,
     PickFolder,
     ChooseDownloadFolder,
+    ChooseKindFolder,
+    ForgetKindFolder,
     GetNetwork,
     SetNetwork,
     GetMultiNetwork,
@@ -111,7 +113,7 @@ pub enum Command {
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 95] = [
+    pub const ALL: [Command; 97] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -165,6 +167,8 @@ impl Command {
         Command::ResetDownloadFolder,
         Command::PickFolder,
         Command::ChooseDownloadFolder,
+        Command::ChooseKindFolder,
+        Command::ForgetKindFolder,
         Command::GetNetwork,
         Command::SetNetwork,
         Command::GetMultiNetwork,
@@ -265,6 +269,8 @@ impl Command {
             Command::ResetDownloadFolder => "reset_download_folder",
             Command::PickFolder => "pick_folder",
             Command::ChooseDownloadFolder => "choose_download_folder",
+            Command::ChooseKindFolder => "choose_kind_folder",
+            Command::ForgetKindFolder => "forget_kind_folder",
             Command::GetNetwork => "get_network",
             Command::SetNetwork => "set_network",
             Command::GetMultiNetwork => "get_multi_network",
@@ -425,6 +431,8 @@ mod tests {
             Command::ResetDownloadFolder,
             Command::PickFolder,
             Command::ChooseDownloadFolder,
+            Command::ChooseKindFolder,
+            Command::ForgetKindFolder,
             Command::GetNetwork,
             Command::SetNetwork,
             Command::GetMultiNetwork,

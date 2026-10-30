@@ -26,10 +26,11 @@ use download_manager::profiles::{ProfileAction, ProfilesDto};
 use download_manager::relink::{NewLinkOutcome, UseNewLink};
 use download_manager::{
     ApiError, BatchPreview, BatchRequest, BatchResult, ConfirmPending, DiagnosticsDto, DownloadDetailDto, DownloadDto, DownloadManager,
-    FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto, MultiNetworkDto,
-    NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PlaylistRequest, PreviewDto,
-    QueueAction, QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetGameMode, SetMultiNetwork, SetNetwork,
-    SetPowerAction, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto, VideoToolsDto,
+    FileKind, FileTarget, HistoryDto, ListFilter, LogsDto, ManagerConfig, MediaAnalysisDto, MediaJobDto, MediaRequest, MetricsDto,
+    MultiNetworkDto, NetworkDto, NewDownload, PauseQueue, PendingDto, PendingFolderQuery, PickedFolder, PlaceDownload, PlaylistRequest,
+    PreviewDto, QueueAction, QueueStateDto, QueuesDto, SaveQueue, Schedule, SetCredentials, SetFolderNames, SetGameMode, SetMultiNetwork,
+    SetNetwork, SetPowerAction, SetQueueConfig, SetSmartThrottle, SetSpeedLimit, SmartThrottleDto, SpeedLimitsDto, StorageDto,
+    VideoToolsDto,
 };
 use std::sync::Arc;
 use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
@@ -270,6 +271,7 @@ command!(get_storage, GetStorage, () -> StorageDto, |m| async { Ok::<_, download
 command!(set_organize, SetOrganize, (enabled: bool) -> StorageDto, |m| m.set_organize(enabled));
 command!(set_folder_names, SetFolderNames, (request: SetFolderNames) -> StorageDto, |m| m.set_folder_names(request));
 command!(reset_download_folder, ResetDownloadFolder, () -> StorageDto, |m| m.reset_default_folder());
+command!(forget_kind_folder, ForgetKindFolder, (kind: FileKind) -> StorageDto, |m| m.forget_kind_folder(kind));
 
 // Network settings (proxy, user agent). The proxy password is accepted here but never sent back.
 command!(get_network, GetNetwork, () -> NetworkDto, |m| async { Ok::<_, download_manager::ManagerError>(m.get_network()) });
@@ -497,6 +499,15 @@ async fn choose_download_folder(window: WebviewWindow, state: State<'_, AppState
     let Some(path) = choose_folder(&window, "Choose the download folder").await else { return Ok(None) };
     let pick = state.manager.register_pick(&path).map_err(ApiError::from)?;
     state.manager.use_folder_as_default(pick.token).await.map(Some).map_err(ApiError::from)
+}
+
+/// Settings > a kind of file > "Change...": pick the folder new files of that kind go to (only that kind changes).
+#[tauri::command]
+async fn choose_kind_folder(window: WebviewWindow, state: State<'_, AppState>, kind: FileKind) -> Result<Option<StorageDto>, ApiError> {
+    guard(&window, Command::ChooseKindFolder)?;
+    let Some(path) = choose_folder(&window, "Choose the folder for this kind of file").await else { return Ok(None) };
+    let pick = state.manager.register_pick(&path).map_err(ApiError::from)?;
+    state.manager.remember_picked_folder(kind, pick.token).await.map(Some).map_err(ApiError::from)
 }
 
 /// Where state and downloads live. `VELOX_DATA_DIR` / `VELOX_DOWNLOAD_ROOT` are honoured in debug
@@ -1121,6 +1132,8 @@ pub fn run() {
             reset_download_folder,
             pick_folder,
             choose_download_folder,
+            choose_kind_folder,
+            forget_kind_folder,
             get_network,
             set_network,
             get_multi_network,

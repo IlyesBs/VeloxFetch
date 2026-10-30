@@ -313,6 +313,7 @@ impl DownloadManager {
     }
 
     pub async fn start_media(&self, req: MediaRequest) -> Result<MediaJobDto, ManagerError> {
+        validate::remember_needs_folder(req.remember_for, req.folder_token)?;
         let (url, headers) = self.media_source(&req.url, req.pending)?;
         drm_refusal(&url)?;
         let site = media_engine::is_site_page(&url);
@@ -354,17 +355,26 @@ impl DownloadManager {
             None => String::new(), // the engine takes the title from the link
         };
         let named = req.subdir.as_deref().filter(|s| !s.trim().is_empty());
-        let (root, dest_dir) = match req.folder_token {
+        // Only the sound is saved as audio; anything else is a video (for the folder remembered for each).
+        let kind = if format.is_some_and(OutputFormat::is_audio) || req.stream.as_deref() == Some("audio") {
+            downloader_core::FileKind::Audio
+        } else {
+            downloader_core::FileKind::Video
+        };
+        if req.folder_token.is_some() && named.is_some() {
+            return Err(ManagerError::invalid("choose either a folder or a sub-folder, not both"));
+        }
+        let picked = req.folder_token.map(|token| self.pick_path(token)).transpose()?;
+        let remembered = if picked.is_none() && named.is_none() { self.remembered_folder(kind) } else { None };
+        let (root, dest_dir) = match (&picked, remembered) {
             // A folder the user picked: the video goes exactly there, and the job is confined to it.
-            Some(token) => {
-                if named.is_some() {
-                    return Err(ManagerError::invalid("choose either a folder or a sub-folder, not both"));
-                }
-                let folder = self.pick_path(token)?;
-                self.allow_folder(&folder).await?;
-                (folder.clone(), folder)
+            (Some(folder), _) => {
+                self.allow_folder(folder).await?;
+                (folder.clone(), folder.clone())
             }
-            None => {
+            // The folder remembered for videos (or for sound): exactly there, confined to it.
+            (None, Some(folder)) => (folder.clone(), folder),
+            (None, None) => {
                 let root = self.download_root();
                 // Sorting by type: a stream is video, unless the user named a sub-folder.
                 let sorted = named.is_none().then(|| self.sorted_subfolder(downloader_core::FileKind::Video)).flatten();
@@ -465,6 +475,9 @@ impl DownloadManager {
             ),
         };
         let dto = self.add_job(dto, work, work_dir, page);
+        if let (Some(remember), Some(folder)) = (req.remember_for, picked) {
+            self.remember_for_kind(remember, &folder).await;
+        }
         // The browser's request is answered: it leaves the waiting list.
         if let Some(token) = req.pending {
             let _ = self.take_pending(token);
@@ -549,6 +562,7 @@ impl DownloadManager {
     /// Download the chosen videos of a playlist `analyze_media` read: one video job each, in the playlist's order, in
     /// one folder (the playlist's name), named by position. A few run at once; the others wait their turn.
     pub async fn start_playlist(&self, req: PlaylistRequest) -> Result<Vec<MediaJobDto>, ManagerError> {
+        validate::remember_needs_folder(req.remember_for, req.folder_token)?;
         let (playlist, headers) = {
             let m = self.inner.media.lock().unwrap();
             let kept = m
@@ -600,7 +614,12 @@ impl DownloadManager {
             }
             None => None,
         };
-        let root = picked.clone().unwrap_or_else(|| self.download_root());
+        // Else the folder remembered for videos (or for sound), when there is one: the playlist's folder goes inside.
+        let kind =
+            if format.is_some_and(OutputFormat::is_audio) { downloader_core::FileKind::Audio } else { downloader_core::FileKind::Video };
+        let remembered = if picked.is_none() { self.remembered_folder(kind) } else { None };
+        let chosen_base = picked.clone().or(remembered);
+        let root = chosen_base.clone().unwrap_or_else(|| self.download_root());
         let named = match req.subdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             Some(s) => s.to_string(),
             None => {
@@ -608,7 +627,7 @@ impl DownloadManager {
                 if validate::filename(&name).is_err() {
                     name = "playlist".into();
                 }
-                match picked.is_none().then(|| self.sorted_subfolder(downloader_core::FileKind::Video)).flatten() {
+                match chosen_base.is_none().then(|| self.sorted_subfolder(downloader_core::FileKind::Video)).flatten() {
                     Some(v) => format!("{v}/{name}"),
                     None => name,
                 }
@@ -692,6 +711,9 @@ impl DownloadManager {
         }
         tracing::info!(videos = jobs.len(), "playlist videos added");
         self.start_queued();
+        if let (Some(remember), Some(folder)) = (req.remember_for, picked) {
+            self.remember_for_kind(remember, &folder).await;
+        }
         Ok(jobs.into_iter().map(|d| self.with_job(d.id, |j| j.dto.clone()).unwrap_or(d)).collect())
     }
 

@@ -64,6 +64,8 @@
     "allow-reset-download-folder",
     "allow-pick-folder",
     "allow-choose-download-folder",
+    "allow-choose-kind-folder",
+    "allow-forget-kind-folder",
     "allow-get-network",
     "allow-set-network",
     "allow-get-multi-network",

@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import { opensVideoDialog, parseRate } from "../format";
 import { act, store, useStore } from "../hooks";
-import { PRIORITIES, type Analysis, type DuplicateMatch, type NewDownload, type PickedFolder, type Priority } from "../types";
+import { PRIORITIES, type Analysis, type DuplicateMatch, type FileKind, type NewDownload, type PickedFolder, type Priority, type Storage } from "../types";
+import { RememberFolder, RememberedNote, rememberedFor } from "./RememberFolder";
 import { t as tr, useT, type Key } from "../i18n";
 import { Icon } from "../ui/icons";
 import { StatusChip } from "../ui/primitives";
@@ -107,6 +108,10 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
   const [formError, setFormError] = useState<string | null>(null);
   // A folder chosen for this download in the native dialog (a token; the path is only shown).
   const [folder, setFolder] = useState<PickedFolder | null>(null);
+  // "Remember this folder for <kind>" (only with a picked folder); the kind is the check's, or the one chosen.
+  const [remember, setRemember] = useState(false);
+  const [rememberKind, setRememberKind] = useState<FileKind | null>(null);
+  const [storage, setStorage] = useState<Storage | null>(null);
   // A download the app already has for this link, waiting for the user's answer.
   const [dup, setDup] = useState<{ d: DuplicateMatch; req: NewDownload; fromDialog: boolean } | null>(null);
   // A duplicate check is running (a second press of Add waits for it instead of asking twice).
@@ -139,6 +144,26 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
     if (checking.current) void api.analyzeLink(null).catch(() => {});
     checking.current = false;
     setCheck({ s: "idle" });
+  };
+
+  const checkedKind = check.s === "done" ? check.a.fileKind : null;
+  const kind = rememberKind ?? checkedKind;
+  // The folders remembered per kind: what "the usual folder" means for this file.
+  useEffect(() => {
+    let live = true;
+    api.getStorage().then(
+      (s) => live && setStorage(s),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [checkedKind, folder]);
+  const remembered = rememberedFor(storage, checkedKind);
+  const toggleRemember = (on: boolean) => {
+    setRemember(on);
+    // The kind decides which folder is remembered: look at the link to find it, unless it is known already.
+    if (on && !kind && check.s === "idle") void runCheck();
   };
 
   useEffect(() => {
@@ -198,10 +223,16 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
     const picked = await act(() => api.pickFolder());
     if (picked) setFolder(picked);
   };
+  const usualFolder = () => {
+    setFolder(null);
+    setRemember(false);
+  };
 
   const reset = () => {
     setUrl("");
     setFolder(null);
+    setRemember(false);
+    setRememberKind(null);
     setAdv(EMPTY_ADVANCED);
   };
 
@@ -272,6 +303,7 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
     if (opts.limit.trim() && limit === null) return setFormError(tr("addd.badLimit"));
     if (adv.password && !adv.username.trim()) return setFormError(tr("addd.passNeedsUser"));
     if (when === "at" && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(startAt)) return setFormError(tr("addd.badStartAt"));
+    if (folder && remember && !kind) return setFormError(tr("folder.needKind"));
     const filled = (v: string) => v.trim() || undefined;
     const req: NewDownload = {
       url: url.trim(),
@@ -280,6 +312,7 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
       ...(when === "at" && { startAt }),
       ...(queueId !== MAIN_QUEUE && queues.some((q) => q.id === queueId) && { queueId }),
       ...(folder ? { folderToken: folder.token } : opts.subdir.trim() && { subdir: opts.subdir.trim() }),
+      ...(folder && remember && kind && { rememberFor: kind }),
       ...(opts.filename.trim() && { filename: opts.filename.trim() }),
       ...(limit && { speedLimit: limit }),
       ...(opts.checksum.trim() && { checksum: opts.checksum.trim() }),
@@ -386,17 +419,22 @@ export function AddDownload({ onBatch, onStream, onOpen }: { onBatch?: () => voi
             <span className="label">{t("addd.saveIn")}</span>
             <div className="flex items-center gap-2">
               <span className="selectable min-w-0 flex-1 break-all rounded-lg border border-line px-2.5 py-1.5 text-xs" data-testid="add-folder-path">
-                {folder ? folder.path : t("addd.usualFolder")}
+                {folder ? folder.path : remembered?.available && !opts.subdir.trim() ? remembered.path : t("addd.usualFolder")}
               </span>
               <button type="button" className="btn shrink-0" data-testid="add-change-folder" onClick={() => void chooseFolder()}>
                 {t("store.change")}
               </button>
               {folder && (
-                <button type="button" className="btn shrink-0" data-testid="add-default-folder" onClick={() => setFolder(null)}>
+                <button type="button" className="btn shrink-0" data-testid="add-default-folder" onClick={usualFolder}>
                   {t("addd.usual")}
                 </button>
               )}
             </div>
+            {folder ? (
+              <RememberFolder testid="add-remember" kind={kind} onKind={setRememberKind} checked={remember} onChange={toggleRemember} />
+            ) : (
+              !opts.subdir.trim() && <RememberedNote storage={storage} kind={checkedKind} testid="add-remembered" />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1.5">

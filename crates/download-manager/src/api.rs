@@ -33,6 +33,9 @@ pub struct NewDownload {
     /// A folder the user picked in the native folder dialog (see `pick_folder`): the file goes exactly there.
     /// The UI never sends a path, only this token. Cannot be combined with `subdir`.
     pub folder_token: Option<u64>,
+    /// With `folder_token`: from now on, new files of this kind go to that folder ("Remember this folder for ...").
+    /// Only that kind's folder changes, and only once the download is accepted.
+    pub remember_for: Option<downloader_core::FileKind>,
     /// Sent as `Referer` (some servers only serve a file to visitors of their page).
     pub referrer: Option<String>,
     /// A `Cookie` header value (a signed-in session on the site).
@@ -61,6 +64,7 @@ impl std::fmt::Debug for NewDownload {
             .field("queue_id", &self.queue_id)
             .field("start_at", &self.start_at)
             .field("folder_token", &self.folder_token)
+            .field("remember_for", &self.remember_for)
             .field("referrer", &self.referrer.as_deref().map(secrets::redact_url))
             .field("cookies", &self.cookies.as_ref().map(|_| "***"))
             .field("user_agent", &self.user_agent)
@@ -712,6 +716,9 @@ pub struct MediaRequest {
     /// A folder the user picked in the native folder dialog (see `pick_folder`): the video goes exactly there.
     /// The UI never sends a path, only this token. Cannot be combined with `subdir`.
     pub folder_token: Option<u64>,
+    /// With `folder_token`: from now on, new files of this kind go to that folder ("Remember this folder for ...").
+    /// Only that kind's folder changes, and only once the download is accepted.
+    pub remember_for: Option<downloader_core::FileKind>,
     /// A name without extension. `None` = taken from the link.
     pub filename: Option<String>,
     /// Join separate video and audio into one file when ffmpeg is available (default true).
@@ -742,6 +749,9 @@ pub struct PlaylistRequest {
     /// A folder the user picked in the native folder dialog (see `pick_folder`): the playlist's folder is made
     /// inside it. The UI never sends a path, only this token.
     pub folder_token: Option<u64>,
+    /// With `folder_token`: from now on, new files of this kind go to that folder ("Remember this folder for ...").
+    /// Only that kind's folder changes, and only once the download is accepted.
+    pub remember_for: Option<downloader_core::FileKind>,
     /// The browser's waiting video the playlist was read from: it leaves the waiting list.
     pub pending: Option<u64>,
 }
@@ -1049,6 +1059,8 @@ pub struct PendingDto {
     pub resumable: Option<bool>,
     /// The folder the file will be saved in.
     pub save_dir: String,
+    /// What kind of file it is (decides its folder; "Remember this folder for ..." applies to this kind).
+    pub file_kind: downloader_core::FileKind,
     /// Still asking the server for size and type.
     pub probing: bool,
     pub incognito: bool,
@@ -1060,7 +1072,7 @@ pub struct PendingDto {
     pub analysis: Option<crate::intelligence::AnalysisDto>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfirmPending {
     pub token: u64,
@@ -1070,6 +1082,9 @@ pub struct ConfirmPending {
     pub start: Option<bool>,
     /// Save somewhere else this once: a folder the user picked in the native dialog (see `pick_folder`).
     pub folder_token: Option<u64>,
+    /// With `folder_token`: from now on, new files of this kind go to that folder ("Remember this folder for ...").
+    /// Only that kind's folder changes, and only once the download is accepted.
+    pub remember_for: Option<downloader_core::FileKind>,
     /// HTTP authentication for a site that asks for it, typed in the confirmation. Sealed with the download like
     /// the Add dialog's, never in the link, the events or the logs.
     pub username: Option<String>,
@@ -1084,6 +1099,7 @@ impl std::fmt::Debug for ConfirmPending {
             .field("filename", &self.filename)
             .field("start", &self.start)
             .field("folder_token", &self.folder_token)
+            .field("remember_for", &self.remember_for)
             .field("username", &self.username.as_ref().map(|_| "***"))
             .field("password", &self.password.as_ref().map(|_| "***"))
             .finish()
@@ -1106,6 +1122,10 @@ pub struct FolderNameDto {
     pub kind: downloader_core::FileKind,
     pub folder: String,
     pub default_folder: String,
+    /// The folder remembered for this kind ("Remember this folder for ..."), if any.
+    pub remembered: Option<String>,
+    /// That folder exists and can be written to right now (else the usual place is used meanwhile).
+    pub remembered_available: bool,
 }
 
 /// Where downloads go and how they are sorted.

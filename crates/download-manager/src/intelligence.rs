@@ -254,6 +254,8 @@ pub struct NameConflict {
 pub struct AnalysisDto {
     pub kind: ResourceKind,
     pub filename: String,
+    /// What kind of file the name and type say it is (the folder it goes to by default).
+    pub file_kind: downloader_core::FileKind,
     pub size: Option<u64>,
     pub content_type: Option<String>,
     /// The link (after redirects) uses HTTPS.
@@ -522,6 +524,7 @@ pub fn assess(o: Observed<'_>, plan: impl Fn(u64) -> (usize, usize)) -> Analysis
 
     AnalysisDto {
         kind,
+        file_kind: downloader_core::classify_file(&o.filename, content_type.as_deref()),
         filename: o.filename,
         size: size.filter(|_| !media),
         content_type,

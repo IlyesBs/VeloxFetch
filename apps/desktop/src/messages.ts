@@ -15,6 +15,7 @@ export const MESSAGES: Record<string, Key> = {
   "a stream is saved as a video: choose MP4, MKV or WebM": "msg.a_stream_is_saved_as_a_video_choose_mp4_mkv_or_w",
   "cancel it first": "msg.cancel_it_first",
   "category must be 1-32 characters of a-z, 0-9, `_` or `-`": "msg.category_must_be_1_32_characters_of_a_z_0_9_or",
+  "choose a folder to remember": "msg.choose_a_folder_to_remember",
   "choose either a folder or a sub-folder, not both": "msg.choose_either_a_folder_or_a_sub_folder_not_both",
   "cookies are too long or contain forbidden characters": "msg.cookies_are_too_long_or_contain_forbidden_charac",
   "cookies from a private window are never accepted": "msg.cookies_from_a_private_window_are_never_accepted",

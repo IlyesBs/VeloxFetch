@@ -8,6 +8,7 @@ import type { Analysis, Finding, FindingCode } from "./types";
 const base: Analysis = {
   kind: "file",
   filename: "a.zip",
+  fileKind: "archive",
   size: 4 * 1024 ** 3,
   contentType: "application/zip",
   https: true,
