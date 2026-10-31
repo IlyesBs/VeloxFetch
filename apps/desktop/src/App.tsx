@@ -1,6 +1,6 @@
 import { getLang, subscribe as onLangChange, t } from "./i18n";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, normalizeError } from "./api";
+import { api, normalizeError, onPendingInMain } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
 import { ClipboardBanner } from "./components/ClipboardBanner";
@@ -14,7 +14,7 @@ import { ToolsUpdateBanner } from "./components/ToolsUpdateBanner";
 import { Sidebar, type NavTarget, type RouteName } from "./components/shell/Sidebar";
 import { StatusBar } from "./components/shell/StatusBar";
 import { TitleBar } from "./components/shell/TitleBar";
-import { bootstrap, store } from "./hooks";
+import { bootstrap, store, useStore } from "./hooks";
 import { showWindowWhenReady } from "./nativeFeel";
 import { paintAurora } from "./aurora";
 import { onThemeChange } from "./theme";
@@ -61,6 +61,25 @@ export default function App() {
   /** The video-stream dialog (HLS / DASH): closed (null) or open, optionally with a link to look at. */
   const [stream, setStream] = useState<{ url: string } | null>(null);
   const [dropping, setDropping] = useState(false);
+  /** A browser download is asked about in its own small window; here only when that window could not open. */
+  const [askHere, setAskHere] = useState(false);
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    onPendingInMain(() => setAskHere(true)).then(
+      (u) => (gone ? u() : (off = u)),
+      () => {},
+    );
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
+  // Once nothing waits, the browser's next download is asked about in its own window again.
+  const waiting = useStore((s) => s.pending.length);
+  useEffect(() => {
+    if (waiting === 0) setAskHere(false);
+  }, [waiting]);
   /** What the Downloads list shows (its tabs). */
   const [filter, setFilter] = useState<Filter>("all");
   // The sidebar folds to an icon rail on narrow windows, or when the user folds it.
@@ -240,7 +259,7 @@ export default function App() {
       />
       {batch && <BatchDialog initialLinks={batch.links} onClose={() => setBatch(null)} />}
       {stream && <MediaDialog initialUrl={stream.url} onClose={() => setStream(null)} />}
-      <PendingDialog />
+      <PendingDialog which={(p) => askHere || p.fromApp} />
       <NewLinkHost />
       <Toasts />
     </div>

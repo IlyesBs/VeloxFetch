@@ -64,6 +64,11 @@ impl DownloadManager {
     /// Park a browser download until the user decides. Validates everything a real download would
     /// (URL, file name, headers), then looks at the server in the background for size and type.
     pub async fn add_pending(&self, req: NewDownload, ctx: BrowserContext) -> Result<PendingDto, ManagerError> {
+        self.add_pending_from(req, ctx, false).await
+    }
+
+    /// `add_pending`; `from_app`: put in front of the user from inside the app, not by the browser.
+    pub(crate) async fn add_pending_from(&self, req: NewDownload, ctx: BrowserContext, from_app: bool) -> Result<PendingDto, ManagerError> {
         let url = validate::url(&req.url)?;
         let url = crate::links::direct(&url).unwrap_or(url);
         let headers = validate::browser_headers(&ctx)?;
@@ -100,6 +105,7 @@ impl DownloadManager {
                 probing: true,
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
+                from_app,
                 media: None,
                 analysis: None,
             };
@@ -174,6 +180,7 @@ impl DownloadManager {
                 probing: false,
                 incognito: ctx.incognito,
                 created_at_ms: now_ms,
+                from_app: false,
                 media: Some(kind),
                 analysis: None,
             };

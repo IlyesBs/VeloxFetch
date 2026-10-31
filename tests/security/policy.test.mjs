@@ -1137,3 +1137,23 @@ test("a folder remembered per kind of file: chosen only in the native dialog, ma
   assert.match(storage, /\.chain\(self\.remembered\.values\(\)\.cloned\(\)\)/);
   assert.match(storage, /self\.allow_folder\(folder\)\.await\?;\s*self\.storage\(\)\.remembered\.insert\(kind, folder\.to_path_buf\(\)\);/);
 });
+
+test("download popup: answers the browser only, its video and new-link calls only for the handed-over link", () => {
+  const cap = JSON.parse(read("apps", "desktop", "src-tauri", "capabilities", "prompt-window.json"));
+  assert.deepEqual(cap.windows, ["download-prompt"]);
+  const own = cap.permissions.filter((p) => p.startsWith("allow-")).sort();
+  assert.deepEqual(own, [
+    "allow-analyze-media", "allow-confirm-pending-download", "allow-dismiss-pending-download", "allow-get-storage", "allow-list-pending-downloads",
+    "allow-pick-folder", "allow-preview-pending-folder", "allow-start-media", "allow-start-playlist", "allow-use-new-link", "allow-window-control",
+  ]);
+  const lib = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "lib.rs"));
+  // The video calls and "use a new link" carry the browser's pending token in the popup, never a typed link.
+  assert.match(lib, /prompt_scope\(&window, Command::AnalyzeMedia, pending\.is_some\(\)\)\?/);
+  assert.match(lib, /prompt_scope\(&window, Command::StartMedia, request\.pending\.is_some\(\)\)\?/);
+  assert.match(lib, /prompt_scope\(&window, Command::StartPlaylist, request\.pending\.is_some\(\)\)\?/);
+  assert.match(lib, /prompt_scope\(&window, Command::UseNewLink, request\.pending\.is_some\(\) && request\.url\.is_none\(\)\)\?/);
+  // Its window controls: its own buttons and theme, not the main window's start-up nor maximize.
+  assert.match(lib, /window\.label\(\) == authz::PROMPT && matches!\(action, WindowAction::Ready \| WindowAction::ToggleMaximize\)/);
+  // The page is the app's own (index.html), made by Rust only; the UI cannot open windows.
+  assert.match(lib, /WebviewWindowBuilder::new\(app, authz::PROMPT, tauri::WebviewUrl::App\("index\.html"\.into\(\)\)\)/);
+});
