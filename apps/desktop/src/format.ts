@@ -107,6 +107,7 @@ const VIDEO_SITES: [string, string[]][] = [
   ["streamable.com", []],
   ["rumble.com", []],
   ["bilibili.com", ["/video/"]],
+  ["bilibili.tv", ["/video/", "/play/"]],
   ["soundcloud.com", []],
 ];
 

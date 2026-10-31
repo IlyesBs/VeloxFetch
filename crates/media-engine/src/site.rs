@@ -57,6 +57,7 @@ pub const VIDEO_SITES: &[(&str, &[&str])] = &[
     ("streamable.com", &[]),
     ("rumble.com", &[]),
     ("bilibili.com", &["/video/"]),
+    ("bilibili.tv", &["/video/", "/play/"]),
     ("soundcloud.com", &[]),
 ];
 
@@ -235,8 +236,26 @@ fn push_url(a: &mut Vec<OsString>, url: &Url) -> Result<()> {
         return Err(MediaError::site("only plain http and https links can be used"));
     }
     a.push(OsString::from("--"));
-    a.push(OsString::from(url.as_str()));
+    a.push(OsString::from(site_link(url).as_str()));
     Ok(())
+}
+
+/// The link as yt-dlp knows it. Bilibili's translated pages (`bilibili.com/ar/video/BV...`, `/en/`, `/zh-hant/`...)
+/// are the same video as `bilibili.com/video/BV...`, but yt-dlp only knows the latter (the former fails as an
+/// unknown page): the language part is dropped. Every other link is used as it is.
+fn site_link(url: &Url) -> Url {
+    let host = url.host_str().map(str::to_ascii_lowercase).unwrap_or_default();
+    if !host_matches(&host, "bilibili.com") {
+        return url.clone();
+    }
+    let mut parts = url.path().trim_start_matches('/').splitn(3, '/');
+    let (Some(lang), Some("video"), Some(rest)) = (parts.next(), parts.next(), parts.next()) else { return url.clone() };
+    if !(2..=7).contains(&lang.len()) || !lang.bytes().all(|b| b.is_ascii_alphabetic() || b == b'-') {
+        return url.clone();
+    }
+    let mut out = url.clone();
+    out.set_path(&format!("/video/{rest}"));
+    out
 }
 
 pub(crate) fn analyze_args(url: &Url, headers: &SiteHeaders, deno: Option<&Path>) -> Result<Vec<OsString>> {
@@ -246,9 +265,12 @@ pub(crate) fn analyze_args(url: &Url, headers: &SiteHeaders, deno: Option<&Path>
     // A playlist link: only its list (titles, lengths, links), not every video, and at most one more than is
     // kept, to know there are more. A single video is read in full as before (`--flat-playlist` does not change
     // it, and `--no-playlist` keeps `watch?v=...&list=...` to the one video).
+    // `--write-subs`: some sites (bilibili.tv) only list their subtitles when they are asked for. With
+    // `--dump-single-json` nothing is written (yt-dlp only simulates); the list comes in the JSON.
     let items = format!("1:{}", limits::MAX_PLAYLIST_VIDEOS + 1);
     a.extend(
-        ["--flat-playlist", "--playlist-items", items.as_str(), "--dump-single-json", "--skip-download", "--verbose"].map(OsString::from),
+        ["--flat-playlist", "--playlist-items", items.as_str(), "--write-subs", "--dump-single-json", "--skip-download", "--verbose"]
+            .map(OsString::from),
     );
     push_url(&mut a, url)?;
     Ok(a)
@@ -1226,6 +1248,10 @@ mod tests {
             "https://www.dailymotion.com/video/x8",
             "https://x.com/someone/status/1",
             "https://www.tiktok.com/@a/video/1",
+            "https://www.bilibili.com/video/BV15vxc6bEZz",
+            "https://www.bilibili.tv/en/video/2019955076",
+            "https://www.bilibili.tv/en/play/1006209/10218310",
+            "https://www.bilibili.tv/ar/play/1006209",
         ] {
             assert!(is_site_page(&u(yes)), "{yes}");
         }
@@ -1233,6 +1259,9 @@ mod tests {
             "https://www.youtube.com/",
             "https://www.youtube.com/feed/subscriptions",
             "https://youtu.be/",
+            "https://www.bilibili.tv/en/",
+            "https://www.bilibili.tv/en/anime",
+            "https://notbilibili.tv/en/play/1",
             "https://notyoutube.com/watch?v=x",
             "https://youtube.com.evil.test/watch?v=x",
             "https://example.com/video.mp4",
@@ -1240,6 +1269,31 @@ mod tests {
         ] {
             assert!(!is_site_page(&u(no)), "{no}");
         }
+    }
+
+    #[test]
+    fn a_translated_bilibili_page_is_read_as_the_video_page() {
+        let link = |s: &str| site_link(&u(s)).to_string();
+        assert_eq!(
+            link("https://www.bilibili.com/ar/video/BV1b5nh6dECE/?spm_id_from=333.1387.homepage.video_card.click"),
+            "https://www.bilibili.com/video/BV1b5nh6dECE/?spm_id_from=333.1387.homepage.video_card.click"
+        );
+        assert_eq!(link("https://www.bilibili.com/en/video/BV1b5nh6dECE?p=2"), "https://www.bilibili.com/video/BV1b5nh6dECE?p=2");
+        assert_eq!(link("https://www.bilibili.com/zh-hant/video/BV1b5nh6dECE/"), "https://www.bilibili.com/video/BV1b5nh6dECE/");
+        for same in [
+            "https://www.bilibili.com/video/BV1b5nh6dECE/",
+            "https://www.bilibili.com/bangumi/play/ep1",
+            "https://www.bilibili.com/ar/video",
+            "https://www.bilibili.com/a.b/video/BV1",
+            "https://www.bilibili.tv/en/video/2019955076",
+            "https://www.youtube.com/ar/video/x",
+            "https://notbilibili.com/ar/video/BV1",
+        ] {
+            assert_eq!(link(same), u(same).to_string(), "{same}");
+        }
+        let s = strings(&analyze_args(&u("https://www.bilibili.com/ar/video/BV1b5nh6dECE/"), &SiteHeaders::default(), None).unwrap());
+        assert_eq!(s.last().unwrap(), "https://www.bilibili.com/video/BV1b5nh6dECE/", "yt-dlp gets the page it knows");
+        assert!(is_site_page(&u("https://www.bilibili.com/ar/video/BV1b5nh6dECE/")));
     }
 
     #[test]
@@ -1506,6 +1560,10 @@ mod tests {
         assert!(is_site_page(&u("https://www.youtube.com/playlist?list=PL123")), "a playlist page is read through yt-dlp");
         let s = strings(&analyze_args(&u("https://www.youtube.com/playlist?list=PL123"), &SiteHeaders::default(), None).unwrap());
         assert!(s.contains(&"--flat-playlist".to_string()), "only the list, not every video");
+        assert!(
+            s.contains(&"--write-subs".to_string()) && s.contains(&"--dump-single-json".to_string()),
+            "subtitles listed, nothing written"
+        );
         assert!(s.windows(2).any(|w| w[0] == "--playlist-items" && w[1] == "1:501"), "one more than kept, to know there are more");
         assert!(s.contains(&"--no-playlist".to_string()), "a video of a playlist stays one video");
     }
