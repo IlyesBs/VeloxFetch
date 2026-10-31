@@ -220,6 +220,8 @@ async fn pausing_a_queue_pauses_its_running_downloads_and_start_brings_everythin
     let b = r.m.create_download(NewDownload { queue_id: Some(q), start: Some(false), ..slow(&srv, "/b.bin", 256 * 1024) }).await.unwrap();
     let main = r.m.create_download(slow(&srv, "/m.bin", 256 * 1024)).await.unwrap();
     wait_status(&r.m, a.id, DownloadStatus::Downloading).await;
+    // The main queue's download is started too before the pause (on a busy computer it can still be queued).
+    wait_status(&r.m, main.id, DownloadStatus::Downloading).await;
     r.m.queue_action(q, QueueAction::Pause).await.unwrap();
     wait_status(&r.m, a.id, DownloadStatus::Paused).await;
     assert_eq!(gate(&r.m, q).await, QueueGate::Paused);

@@ -918,18 +918,28 @@ impl DownloadManager {
         if paused.is_empty() {
             return;
         }
-        {
+        // While it was pausing, the user may have moved it to an open queue or started it by hand (that saw it
+        // not held yet, so did not resume it): it goes on instead of staying paused for a queue it left.
+        let (held, go_on): (Vec<i64>, Vec<i64>) = {
             let mut q = self.inner.queues.lock().unwrap();
-            for id in &paused {
+            let (held, go_on): (Vec<i64>, Vec<i64>) = paused.into_iter().partition(|id| {
+                let queue = q.queue_of(*id);
+                !q.forced.contains(id) && q.rt.get(&queue).is_some_and(|rt| rt.gate.is_some_and(Closed::pauses_running))
+            });
+            for id in &held {
                 if !q.held.contains(id) {
                     q.held.push(*id);
                 }
             }
+            (held, go_on)
+        };
+        if !held.is_empty() {
+            self.save_queue_held().await;
         }
-        self.save_queue_held().await;
-        for id in paused {
+        for id in held {
             self.emit_download(id).await; // now shown as paused by its queue
         }
+        self.resume_ids(&go_on, true).await;
     }
 
     /// Start these again if they are still paused (the user may have deleted or started one meanwhile).
