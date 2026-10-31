@@ -67,7 +67,8 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
   useEffect(() => {
     if (!edited.current) setName(p.filename);
   }, [p.filename]);
-  useEffect(() => start.current?.focus(), []);
+  // Focus on Start without scrolling: the dialog opens at its top (in the popup the buttons stay at the bottom).
+  useEffect(() => start.current?.focus({ preventScroll: true }), []);
 
   // The site's user name and password, when it asks for them (HTTP authentication). Opened by itself when the
   // check before the download found that the server asks; available for any download.
@@ -265,7 +266,7 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
       )}
       {p.incognito && <p className="mt-2 text-xs text-dim">{t("pend.private")}</p>}
 
-      <div className="mt-4 flex items-center justify-end gap-2">
+      <div className="dialog-actions mt-4 flex items-center justify-end gap-2">
         <button className="btn" data-testid="pending-cancel" disabled={busy} onClick={() => void cancel()}>
           {t("common.cancel")}
         </button>
@@ -280,9 +281,13 @@ function Card({ p, waiting }: { p: PendingDownload; waiting: number }) {
   );
 }
 
-/** The confirmation popup for downloads handed over by the browser extension. */
-export function PendingDialog() {
-  const pending = useStore((s) => s.pending);
+/**
+ * The confirmation for downloads waiting for the user. `which`: the ones this window asks about (the download popup:
+ * the browser's; the main window: the app's own, or all of them when the popup could not open).
+ */
+export function PendingDialog({ which = () => true }: { which?: (p: PendingDownload) => boolean }) {
+  const all = useStore((s) => s.pending);
+  const pending = all.filter(which);
   const first = pending[0];
   if (!first) return null;
   // A video from the browser's "Download video" bar: pick the quality in the video dialog. Closing it
@@ -291,7 +296,7 @@ export function PendingDialog() {
     return <MediaDialog key={first.token} initialUrl={first.url} pending={first.token} onClose={() => void api.dismissPendingDownload(first.token).catch(() => {})} />;
   }
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/45 p-4" data-testid="pending-overlay">
+    <div className="modal-overlay fixed inset-0 z-40 grid place-items-center bg-black/45 p-4" data-testid="pending-overlay">
       <Card key={first.token} p={first} waiting={pending.length} />
     </div>
   );

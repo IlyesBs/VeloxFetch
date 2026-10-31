@@ -232,3 +232,8 @@ export function onExtensionEvent(handler: (e: ExtensionEvent) => void): Promise<
 export function onManagerEvent(handler: (e: ManagerEvent) => void): Promise<UnlistenFn> {
   return listen<ManagerEvent>(EVENT_CHANNEL, (ev) => handler(ev.payload));
 }
+
+/** The download popup could not open (lib.rs `ask_about_download`): the main window shows the confirmation. */
+export function onPendingInMain(handler: () => void): Promise<UnlistenFn> {
+  return listen("velox://pending-in-main", () => handler());
+}

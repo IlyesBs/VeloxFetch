@@ -548,6 +548,8 @@ export type ExtensionEvent = { kind: "contact"; contact: ExtensionContact; annou
 /** A download a browser handed over, waiting for the user's decision. */
 export interface PendingDownload {
   token: number;
+  /** Put in front of the user from inside the app (asked about in the main window), not by the browser (the popup). */
+  fromApp: boolean;
   url: string;
   host: string;
   filename: string;

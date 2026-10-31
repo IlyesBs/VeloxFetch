@@ -1633,3 +1633,38 @@ select {
     10px 50%,
     15px 50%;
 }
+
+/* The download popup (its own window, PromptApp.tsx): the dialog fills the window under its title bar, without the
+   dimmed backdrop it has over the main window. */
+.prompt-titlebar {
+  height: 44px;
+}
+.prompt-window .modal-overlay {
+  top: 44px;
+  z-index: 40;
+  display: block;
+  background: transparent;
+  padding: 0;
+}
+/* The window is the dialog: no card around it, it scrolls inside, its buttons stay at the bottom. */
+.prompt-window .modal-overlay > [role="dialog"] {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px 22px 0;
+}
+.prompt-window .dialog-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-inline: -22px;
+  padding: 12px 22px 16px;
+  background: var(--canvas);
+  border-top: 1px solid var(--line);
+}
