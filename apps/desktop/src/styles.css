@@ -1634,8 +1634,8 @@ select {
     15px 50%;
 }
 
-/* The download popup (its own window, PromptApp.tsx): the dialog fills the window under its title bar, without the
-   dimmed backdrop it has over the main window. */
+/* The download popup (its own window, PromptApp.tsx): the dialog is the window under its title bar, without the
+   dimmed backdrop it has over the main window. The window takes the dialog's height (PromptApp `useFitWindow`). */
 .prompt-titlebar {
   height: 44px;
 }
@@ -1650,14 +1650,19 @@ select {
 .prompt-window .modal-overlay > [role="dialog"] {
   width: 100%;
   max-width: none;
-  height: 100%;
-  max-height: none;
+  height: auto;
+  max-height: 100%;
   overflow-y: auto;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   background: transparent;
   padding: 4px 22px 0;
+}
+/* One scroll for the whole dialog (the window grows to it): no inner scroll area that would hide its options. */
+.prompt-window .dialog-body {
+  flex: none;
+  overflow: visible;
 }
 .prompt-window .dialog-actions {
   position: sticky;

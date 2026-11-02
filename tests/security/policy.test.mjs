@@ -1153,7 +1153,9 @@ test("download popup: answers the browser only, its video and new-link calls onl
   assert.match(lib, /prompt_scope\(&window, Command::StartPlaylist, request\.pending\.is_some\(\)\)\?/);
   assert.match(lib, /prompt_scope\(&window, Command::UseNewLink, request\.pending\.is_some\(\) && request\.url\.is_none\(\)\)\?/);
   // Its window controls: its own buttons and theme, not the main window's start-up nor maximize.
-  assert.match(lib, /window\.label\(\) == authz::PROMPT && matches!\(action, WindowAction::Ready \| WindowAction::ToggleMaximize\)/);
+  assert.match(lib, /if window\.label\(\) == authz::PROMPT \{\s*matches!\(action, WindowAction::Ready \| WindowAction::ToggleMaximize\)\s*\} else \{\s*matches!\(action, WindowAction::Fit\)\s*\};\s*if refused \{\s*return Err\(forbidden/);
+  // Its height only: within the screen, never the main window's size, never another window.
+  assert.match(lib, /fn fit_prompt\(w: &WebviewWindow, height: f64\)[\s\S]*?if !height\.is_finite\(\)[\s\S]*?\.clamp\(min, max\)/);
   // The page is the app's own (index.html), made by Rust only; the UI cannot open windows.
   assert.match(lib, /WebviewWindowBuilder::new\(app, authz::PROMPT, tauri::WebviewUrl::App\("index\.html"\.into\(\)\)\)/);
 });

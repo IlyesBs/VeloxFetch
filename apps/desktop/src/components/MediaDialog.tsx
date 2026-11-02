@@ -272,7 +272,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
         )}
 
         {analysis && (
-          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1" data-testid="media-options">
+          <div className="dialog-body mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1" data-testid="media-options">
             {playlist ? (
               <PlaylistHeader playlist={playlist} onlyThis={whole ? () => void look(url, false) : undefined} />
             ) : (

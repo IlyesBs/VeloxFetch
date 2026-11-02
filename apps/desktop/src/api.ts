@@ -7,7 +7,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getLang, t } from "./i18n";
 import { MESSAGES } from "./messages";
 
-export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem";
+export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem" | "fit";
 import type {
   ExtensionEvent,
   Analysis,
@@ -212,7 +212,7 @@ export const api = {
   setBrowserConfirm: (enabled: boolean) => call<void>("set_browser_confirm", { enabled }),
   setVideoBar: (enabled: boolean) => call<void>("set_video_bar", { enabled }),
   /** The title bar's buttons and the frame theme, on this window only. Resolves whether it is maximized. */
-  windowControl: (action: WindowAction) => call<boolean>("window_control", { action }),
+  windowControl: (action: WindowAction, height?: number) => call<boolean>("window_control", { action, height }),
   installBrowserExtension: (browser: BrowserName | null) =>
     call<ExtensionInstall>("install_browser_extension", { request: { browser } }),
   setBrowserIntegration: (browser: BrowserName, enabled: boolean) =>

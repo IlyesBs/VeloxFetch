@@ -39,6 +39,45 @@ async function follow(): Promise<() => void> {
   };
 }
 
+/** The window takes the height of the dialog it shows: small while a link is looked up, taller once its details
+ *  are there, never empty space under the buttons (Rust keeps it within the screen; past that the dialog scrolls). */
+function useFitWindow() {
+  useEffect(() => {
+    let frame = 0;
+    let last = 0;
+    let watched: Element[] = [];
+    const sizes = new ResizeObserver(() => schedule());
+    const measure = () => {
+      frame = 0;
+      const dialog = document.querySelector<HTMLElement>(".prompt-window [role='dialog']");
+      const bar = document.querySelector<HTMLElement>(".prompt-titlebar");
+      if (!dialog || !bar) return;
+      // What is inside can change size without the dialog's own box changing (it scrolls past the screen's height).
+      const now = [dialog, ...Array.from(dialog.children)];
+      if (now.length !== watched.length || now.some((el, i) => el !== watched[i])) {
+        sizes.disconnect();
+        for (const el of now) sizes.observe(el);
+        watched = now;
+      }
+      const height = Math.ceil(bar.offsetHeight + dialog.scrollHeight);
+      if (Math.abs(height - last) < 2) return;
+      last = height;
+      void windowControl("fit", height);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    const changes = new MutationObserver(schedule);
+    changes.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "open", "hidden"] });
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      changes.disconnect();
+      sizes.disconnect();
+    };
+  }, []);
+}
+
 function PromptTitleBar() {
   const t = useT();
   const first = useStore((s) => s.pending.find(fromBrowser));
@@ -69,6 +108,7 @@ function PromptTitleBar() {
 }
 
 export default function PromptApp() {
+  useFitWindow();
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let cancelled = false;

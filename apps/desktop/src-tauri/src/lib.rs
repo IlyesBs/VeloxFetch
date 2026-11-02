@@ -169,14 +169,22 @@ enum WindowAction {
     ThemeLight,
     ThemeDark,
     ThemeSystem,
+    /// The download popup only: its height follows what it shows (`height`, in CSS pixels).
+    Fit,
 }
 
 /// Minimize / maximize / close the calling window, or set its frame theme. Returns whether it is maximized.
 #[tauri::command]
-async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<bool, ApiError> {
+async fn window_control(window: WebviewWindow, action: WindowAction, height: Option<f64>) -> Result<bool, ApiError> {
     guard(&window, Command::WindowControl)?;
-    // The download popup: its own buttons and frame theme only (not the main window's start-up, nor maximize).
-    if window.label() == authz::PROMPT && matches!(action, WindowAction::Ready | WindowAction::ToggleMaximize) {
+    // The download popup: its own buttons, frame theme and height only (not the main window's start-up, nor
+    // maximize). The main window's size is the user's: it never fits itself.
+    let refused = if window.label() == authz::PROMPT {
+        matches!(action, WindowAction::Ready | WindowAction::ToggleMaximize)
+    } else {
+        matches!(action, WindowAction::Fit)
+    };
+    if refused {
         return Err(forbidden(window.label(), Command::WindowControl));
     }
     let failed = |e: tauri::Error| ApiError { code: "window", message: format!("the window could not do that: {e}") };
@@ -213,6 +221,7 @@ async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<b
             window.set_theme(None).map_err(failed)?;
             paint_behind(&window, None);
         }
+        WindowAction::Fit => fit_prompt(&window, height.unwrap_or(f64::NAN)).map_err(failed)?,
     }
     Ok(window.is_maximized().unwrap_or(false))
 }
@@ -692,8 +701,12 @@ fn e2e_browser_args<'a>(
     builder
 }
 
-/// The download popup's size: the confirmation, or the video dialog with its qualities and subtitles.
-const PROMPT_SIZE: (f64, f64) = (640.0, 720.0);
+/// The download popup's width, and its height until its page has measured what it shows (`fit_prompt`).
+const PROMPT_SIZE: (f64, f64) = (580.0, 480.0);
+/// The popup is never shorter than this (a link being looked up), nor taller than most of the screen.
+const PROMPT_MIN_HEIGHT: f64 = 200.0;
+/// If the page has not measured itself this long after loading, the popup is shown as it is: never hidden.
+const PROMPT_SHOW_ANYWAY: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// A browser download is waiting for a decision: ask in the small download window, in front, and leave the main
 /// window as it is (in the tray, minimised or open). If that window cannot be made, the main window asks, as before.
@@ -721,18 +734,54 @@ fn show_prompt(app: &tauri::AppHandle) -> tauri::Result<()> {
     let builder = tauri::WebviewWindowBuilder::new(app, authz::PROMPT, tauri::WebviewUrl::App("index.html".into()))
         .title("VeloxFetch")
         .inner_size(PROMPT_SIZE.0, PROMPT_SIZE.1)
-        .min_inner_size(420.0, 380.0)
+        .min_inner_size(420.0, PROMPT_MIN_HEIGHT)
         .center()
         .visible(false)
         .disable_drag_drop_handler()
         .on_page_load(|w, payload| {
+            // Shown by its first `fit_prompt`, at the height of what it shows; this is the safety net.
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                raise(&w);
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(PROMPT_SHOW_ANYWAY).await;
+                    if !w.is_visible().unwrap_or(true) {
+                        raise(&w);
+                    }
+                });
             }
         });
     let window = window_chrome(e2e_browser_args(builder)).build()?;
     paint_behind(&window, None);
     fit_to_screen(&window);
+    Ok(())
+}
+
+/// The download popup takes the height of what it shows (`height`: CSS pixels, from its page), within
+/// `PROMPT_MIN_HEIGHT` and 92% of the screen; its width stays. The first time it is centred and shown; after that its
+/// middle stays where it was (it grows up and down evenly) and it stays on the screen.
+fn fit_prompt(w: &WebviewWindow, height: f64) -> tauri::Result<()> {
+    if !height.is_finite() {
+        return Ok(());
+    }
+    let scale = w.scale_factor()?;
+    let size = w.outer_size()?;
+    let first = !w.is_visible()?;
+    let area = w.current_monitor()?.map(|m| *m.work_area());
+    let max = area.map_or(f64::from(u32::MAX), |a| f64::from(a.size.height) * 0.92);
+    let min = (PROMPT_MIN_HEIGHT * scale).min(max);
+    let new_h = (height * scale).round().clamp(min, max) as u32;
+    if new_h.abs_diff(size.height) > 1 {
+        w.set_size(tauri::PhysicalSize::new(size.width, new_h))?;
+    }
+    if let Some(a) = area {
+        let (top, bottom) = (a.position.y, a.position.y + a.size.height as i32);
+        let x = if first { a.position.x + (a.size.width as i32 - size.width as i32) / 2 } else { w.outer_position()?.x };
+        let middle = if first { top + a.size.height as i32 / 2 } else { w.outer_position()?.y + size.height as i32 / 2 };
+        let y = (middle - new_h as i32 / 2).min(bottom - new_h as i32).max(top);
+        w.set_position(tauri::PhysicalPosition::new(x, y))?;
+    }
+    if first {
+        raise(w);
+    }
     Ok(())
 }
 

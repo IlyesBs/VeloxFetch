@@ -42,6 +42,25 @@ const { page, invoke } = h;
 const ev = (expr) => page(expr).then((r) => r.ok);
 const has = (sel) => ev(`!!document.querySelector(${JSON.stringify(sel)})`);
 const text = (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.innerText ?? null`);
+// The popup's height against what it shows: the window is the title bar plus the dialog, no empty space under its
+// buttons (unless the screen is too short, then the dialog scrolls).
+const fit = () =>
+  ev(`(() => {
+    const d = document.querySelector(".prompt-window [role='dialog']");
+    const bar = document.querySelector("[data-testid=prompt-titlebar]");
+    const a = d?.querySelector(".dialog-actions");
+    if (!d || !bar || !a) return null;
+    // A scroll area inside with no height limit of its own would hide part of the dialog: there must be none.
+    const hiding = [...d.querySelectorAll("*")].filter((e) => { const c = getComputedStyle(e); return /auto|scroll/.test(c.overflowY) && c.maxHeight === "none" && e.scrollHeight > e.clientHeight + 1; }).length;
+    return { inner: innerHeight, need: Math.ceil(bar.offsetHeight + d.scrollHeight), gap: Math.round(innerHeight - a.getBoundingClientRect().bottom), hiding, screen: screen.availHeight };
+  })()`);
+const fitted = async (what) => {
+  let f = null;
+  const ok = (v) => !!v && v.hiding === 0 && (Math.abs(v.inner - v.need) <= 2 || (v.need > v.inner && v.inner >= v.screen * 0.85)) && Math.abs(v.gap) <= 2;
+  await waitFor(async () => ok((f = await fit())), `${what}: the window fits`, 10000).catch(() => {});
+  check(`${what}: the window is as tall as what it shows, no empty space`, ok(f), JSON.stringify(f));
+  return f;
+};
 const click = async (sel) => {
   await waitFor(() => has(sel), sel, 10000);
   return page(`(() => { document.querySelector(${JSON.stringify(sel)}).click(); return true; })()`);
@@ -137,6 +156,7 @@ try {
     console.log("NOTE  no X11 here: window states not checked");
   }
   await waitFor(async () => /MB/.test((await text("[data-testid=pending-size]")) ?? ""), "the size from the server");
+  await fitted("the file's confirmation");
   await h.screenshot(path.join(SHOTS, "download-popup.png"));
   await click("[data-testid=pending-start]");
   await popupGone();
@@ -176,12 +196,19 @@ try {
   check("Later: added to the list, not started", !!later && !["downloading", "completed"].includes(later.status), JSON.stringify(later?.status));
 
   // ============================================================== D. a video from the browser's bar: the video dialog in the popup
-  const vid = `https://www.youtube.com/watch?v=pp${process.pid}`;
+  const vid = `https://www.youtube.com/watch?v=lookwait${process.pid}`; // looked up in 3 s (fake_ytdlp.rs)
   await host.ask({ command: "download", url: vid, source: "videoBar", media: "page" });
   await inPopup();
   await waitFor(() => has("[data-testid=media-dialog]"), "the video dialog in the popup");
   check("a video opens the video dialog in the popup, with the browser's link", (await ev("document.querySelector('[data-testid=media-url]').value")) === vid);
+  let looking = null;
+  await waitFor(async () => (await has("[data-testid=media-options]")) || ((looking = await fit()) && Math.abs(looking.inner - looking.need) <= 2), "the popup while it looks", 10000).catch(() => {});
+  if (await has("[data-testid=media-options]")) looking = null;
+  else await h.screenshot(path.join(SHOTS, "download-popup-looking.png"));
   await waitFor(() => has("[data-testid=media-options]"), "the qualities", 30000);
+  const video = await fitted("the video dialog");
+  if (looking && video) check("while the link is looked up the popup is smaller", looking.inner < video.inner, JSON.stringify({ looking, video }));
+  else console.log("NOTE  the video was looked up before it could be measured");
   await h.screenshot(path.join(SHOTS, "download-popup-video.png"));
 
   // ============================================================== D2. asked from inside the app: the main window asks, no popup
@@ -191,6 +218,8 @@ try {
   check("the app can put a link in front of the user itself (the clipboard's Download…)", own.ok?.fromApp === true, JSON.stringify(own).slice(0, 120));
   await waitFor(() => has("[data-testid=pending-dialog]"), "the confirmation in the main window");
   check("a download from inside the app is asked about in the main window", (await ev("document.querySelector('[data-testid=pending-name]').value")) === "from-the-app.bin");
+  const mainFit = await invoke("window_control", { action: "fit", height: 300 });
+  check("the main window cannot fit itself (its size is the user's)", mainFit.ok === undefined, JSON.stringify(mainFit).slice(0, 200));
   await click("[data-testid=pending-cancel]");
   await waitFor(async () => !(await has("[data-testid=pending-dialog]")), "the main window's dialog to close");
   check("the popup still shows the browser's video", (await labels()).includes(PROMPT));
