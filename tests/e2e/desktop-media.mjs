@@ -121,6 +121,23 @@ try {
   await h.screenshot(path.join(SHOTS, "media-jobs-dark.png"), { width: 1000, height: 700 });
   check("a stream is not a row in the ordinary download list", (await downloads()).length === 0);
 
+  // ====================================================================== the list's tabs: videos follow them, under them
+  check("the video downloads are under the list's tabs, not above them", await ev(`document.querySelector('[data-testid=list-toolbar]')?.getBoundingClientRect().bottom <= document.querySelector('[data-testid=media-jobs]').getBoundingClientRect().top`));
+  check("the Finished tab counts the finished video", /\(1\)/.test((await text("[data-testid=filter-completed]")) ?? ""), await text("[data-testid=filter-completed]"));
+  await click("[data-testid=filter-active]");
+  await waitFor(async () => !(await has("[data-testid=media-jobs]")), "Active without the finished video");
+  check("Active: the finished video is not there, and no empty-list note hides a video", !(await has("[data-testid=media-jobs]")) && (await has("[data-testid=filtered-empty]")));
+  await click("[data-testid=filter-completed]");
+  await waitFor(async () => await has("[data-testid=media-jobs]"), "Finished shows the video");
+  check("Finished: the video is there, without an 'empty' note", !(await has("[data-testid=filtered-empty]")));
+  await fill("[data-testid=list-search]", "no-such-video");
+  await waitFor(async () => !(await has("[data-testid=media-jobs]")), "the search hides it");
+  check("the search filters the videos too", await has("[data-testid=filtered-empty]"));
+  await fill("[data-testid=list-search]", "");
+  await click("[data-testid=filter-all]");
+  await waitFor(async () => await has("[data-testid=media-jobs]"), "All shows it again");
+  check("All shows it again", true);
+
   // ====================================================================== details page, like a file's
   await page(`(() => { document.querySelector('[data-testid=media-${done.id}]').click(); return true; })()`);
   await waitFor(async () => await has("[data-testid=media-detail-view]"), "the video's details page");

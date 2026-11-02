@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 import ar from "./locales/ar.json";
-import { averageBps, elapsedMs, qualityText, savedPaths, sizeOf, typeKey } from "./mediaDetail";
+import { averageBps, elapsedMs, mediaGroup, qualityText, savedPaths, sizeOf, typeKey } from "./mediaDetail";
 import type { MediaJob } from "./types";
 
 const job = (over: Partial<MediaJob> = {}): MediaJob => ({
@@ -43,5 +43,18 @@ describe("video download details", () => {
     const keys = Object.keys(en).filter((k) => k.startsWith("md."));
     expect(keys.length).toBeGreaterThan(20);
     for (const l of [fr, ar] as unknown as Record<string, string>[]) for (const k of keys) expect(l[k]?.length, k).toBeGreaterThan(0);
+  });
+});
+
+describe("video downloads in the download list's tabs", () => {
+  it("each status is in the tab of a download in the same state", () => {
+    expect(mediaGroup("downloading")).toBe("active");
+    expect(mediaGroup("preparing")).toBe("active");
+    expect(mediaGroup("combining")).toBe("active");
+    expect(mediaGroup("queued")).toBe("queued");
+    expect(mediaGroup("paused")).toBe("paused");
+    expect(mediaGroup("completed")).toBe("completed");
+    expect(mediaGroup("failed")).toBe("failed");
+    expect(mediaGroup("cancelled")).toBe("failed");
   });
 });
