@@ -25,10 +25,21 @@ describe("browser storage and secrets", () => {
       expect(text, `${f} uses indexedDB`).not.toMatch(/indexedDB/i);
       expect(text, `${f} touches document.cookie`).not.toMatch(/document\.cookie/);
       if (/localStorage/.test(text)) {
-        // cosmetic, per-user choices only: the theme, the interface language and the layout (prefs.ts)
-        expect(f.endsWith("theme.ts") || f.endsWith("i18n.ts") || f.endsWith("prefs.ts"), `${f} uses localStorage`).toBe(true);
+        // cosmetic, per-user choices only: the theme, the interface language, the layout (prefs.ts) and the Linux
+        // interface font found at an earlier start (uiFont.ts)
+        expect(f.endsWith("theme.ts") || f.endsWith("i18n.ts") || f.endsWith("prefs.ts") || f.endsWith("uiFont.ts"), `${f} uses localStorage`).toBe(true);
       }
     }
+  });
+
+  it("the interface font keeps one key, only one of its four names, and reads back nothing else", () => {
+    const text = readFileSync(join(here, "uiFont.ts"), "utf8");
+    expect(text.match(/setItem\(/g)?.length).toBe(1);
+    expect(text).toMatch(/const KEY = "velox\.ui\.font"/);
+    expect(text).toMatch(/localStorage\.setItem\(KEY, font\)/);
+    expect(text).toMatch(/const font = pickUiFont\(installed\)/);
+    // What is read back is checked against the four names before it reaches the page.
+    expect(text).toMatch(/document\.documentElement\.dataset\.uiFont = isUiFont\(v\) \? v : pickUiFont\(installed\);/);
   });
 
   it("the layout preferences keep only the four cosmetic choices", () => {

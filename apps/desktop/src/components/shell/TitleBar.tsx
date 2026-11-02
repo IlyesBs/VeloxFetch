@@ -93,7 +93,7 @@ function LanguageSwitch() {
             data-testid={`lang-${l.lang}`}
             className="popover-item"
             onClick={() => {
-              setLang(l.lang);
+              void setLang(l.lang);
               setOpen(false);
             }}
           >

@@ -29,13 +29,13 @@ describe("messages from Rust in the user's language", () => {
     expect(found.filter((m) => !(m in MESSAGES))).toEqual([]);
   });
 
-  it("says a refusal in French and Arabic, and leaves English and unknown messages as they are", () => {
+  it("says a refusal in French and Arabic, and leaves English and unknown messages as they are", async () => {
     const err = { code: "invalid_input", message: "invalid input: the file is gone (moved or deleted)" };
     expect(normalizeError(err).message).toBe(err.message);
-    setLang("fr");
+    await setLang("fr");
     expect(normalizeError(err).message).toBe(t("msg.the_file_is_gone_moved_or_deleted"));
     expect(normalizeError({ code: "x", message: "something new" }).message).toBe("something new");
-    setLang("ar");
+    await setLang("ar");
     expect(normalizeError(err).message).not.toMatch(/[a-z]{4}/);
     expect(normalizeError(err).code).toBe("invalid_input");
   });

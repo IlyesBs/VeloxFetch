@@ -218,6 +218,39 @@
 :root[lang="zh-cn"] .label {
   text-transform: none;
 }
+/* Linux: the same lists without the Windows / macOS fonts, which never exist there. WebKitGTK asks the system's
+   font matcher about every name of a list, for every text style on the page, before it draws anything: those misses
+   held the window's first picture back by seconds (4.6-5 s on a 4-core laptop, 0.7 s without them). On Linux these
+   names always fell through to the ones kept here, in the same order: what is drawn does not change. Once the
+   installed one is known (uiFont.ts, <html data-ui-font>), only that one is named. */
+:root[data-platform="linux"] {
+  --font-ui: Inter, Cantarell, "Noto Sans", system-ui, sans-serif;
+  --font-display: Inter, system-ui, sans-serif;
+}
+:root[data-platform="linux"][data-ui-font="inter"] {
+  --font-ui: Inter, sans-serif;
+  --font-display: Inter, sans-serif;
+}
+:root[data-platform="linux"][data-ui-font="cantarell"] {
+  --font-ui: Cantarell, sans-serif;
+  --font-display: system-ui, sans-serif;
+}
+:root[data-platform="linux"][data-ui-font="noto"] {
+  --font-ui: "Noto Sans", sans-serif;
+  --font-display: system-ui, sans-serif;
+}
+:root[data-platform="linux"][data-ui-font="system"] {
+  --font-ui: system-ui, sans-serif;
+  --font-display: system-ui, sans-serif;
+}
+:root[data-platform="linux"][lang="ar"] {
+  --font-ui: "Cairo Variable", "Noto Sans Arabic", system-ui, sans-serif;
+  --font-display: "Cairo Variable", "Noto Sans Arabic", system-ui, sans-serif;
+}
+:root[data-platform="linux"][lang="zh-cn"] {
+  --font-ui: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
+  --font-display: "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "WenQuanYi Micro Hei", system-ui, sans-serif;
+}
 /* Pointing glyphs (back, chevrons) mirror with the text direction. */
 [dir="rtl"] .flip-rtl {
   transform: scaleX(-1);
