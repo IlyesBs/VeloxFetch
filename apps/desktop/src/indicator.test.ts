@@ -79,7 +79,7 @@ describe("download indicator", () => {
   });
 
   it("is in the main window, with its words in every language", () => {
-    expect(app).toContain("<DownloadIndicator onOpen={open} />");
+    expect(app).toMatch(/<div className="relative h-0 shrink-0">\s*<DownloadIndicator onOpen=\{open\} \/>/);
     expect(Object.keys(locales)).toHaveLength(8);
     for (const [f, d] of Object.entries(locales)) {
       for (const k of ["ind.label", "ind.show", "ind.hide"]) expect(d[k], `${f} ${k}`).toBeTruthy();

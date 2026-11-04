@@ -233,6 +233,10 @@ export default function App() {
               {route.name === "media" && <MediaDetailView key={route.id} id={route.id} onBack={home} />}
             </div>
           </main>
+          {/* The download indicator floats over the bottom of the page, centred on it (not on the window). */}
+          <div className="relative h-0 shrink-0">
+            <DownloadIndicator onOpen={open} />
+          </div>
         </div>
       </div>
       <StatusBar
@@ -242,7 +246,6 @@ export default function App() {
           setTimeout(() => document.getElementById("set-updates")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
         }}
       />
-      <DownloadIndicator onOpen={open} />
       {batch && <BatchDialog initialLinks={batch.links} onClose={() => setBatch(null)} />}
       {stream && <MediaDialog initialUrl={stream.url} onClose={() => setStream(null)} />}
       <PendingDialog />

@@ -32,7 +32,7 @@ const click = async (sel) => {
   return ev(`(document.querySelector(${JSON.stringify(sel)}).click(), true)`);
 };
 const status = async (id) => (await invoke("get_download", { id })).ok?.status;
-const IND = "[data-testid=download-indicator]";
+const IND = "[data-testid=dl-indicator]";
 const box = (sel) => ev(`JSON.stringify(document.querySelector(${JSON.stringify(sel)})?.getBoundingClientRect() ?? null)`).then(JSON.parse);
 const add = async (name) => {
   const d = (await invoke("create_download", { request: { url: `${srv.base}/${name}` } })).ok;
@@ -70,9 +70,10 @@ try {
   check("one download: no arrow", !(await has(`${IND} [data-testid=ind-toggle]`)));
   const bar = await box(IND);
   const foot = await box("[data-testid=statusbar]");
-  const vw = await ev("window.innerWidth");
+  const page_ = await box("[data-testid=main]");
   check("it floats just above the status bar", bar && foot && bar.bottom <= foot.top && foot.top - bar.bottom < 24, JSON.stringify({ bar, foot }));
-  check("it is centred and small", Math.abs(bar.left + bar.width / 2 - vw / 2) < 2 && bar.width <= 482 && bar.height < 90, JSON.stringify(bar));
+  check("it is centred on the page (not over the sidebar) and small", Math.abs(bar.left + bar.width / 2 - (page_.left + page_.width / 2)) < 2 && bar.left > page_.left && bar.width <= 482 && bar.height < 90, JSON.stringify({ bar, page_ }));
+  check("download cards are not confused with it", !(await ev(`document.querySelector('${IND}').matches('[data-testid^="download-"]')`)));
   check("the page leaves room for it at the bottom", await ev(`!!document.querySelector('[data-testid=main] > .pb-28')`));
 
   // ---- toasts go above it

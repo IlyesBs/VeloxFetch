@@ -1315,14 +1315,14 @@ dialog::backdrop {
 }
 
 /* The download indicator (components/DownloadIndicator.tsx): a floating glass bar above the status bar while
-   something downloads. Opaque (it floats over the list: nothing behind may show through), tinted and lit along
+   something downloads, centred on the page (App puts it in a zero-height box under <main>). Opaque (it floats over the list: nothing behind may show through), tinted and lit along
    its top edge like the glass panels. It rises in, slides away when the last download ends; its list of the other downloads unfolds upwards. */
 .dl-ind {
-  position: fixed;
+  position: absolute;
   z-index: 40;
-  bottom: 3.25rem;
+  bottom: 0.75rem;
   left: 50%;
-  width: min(30rem, calc(100vw - 2rem));
+  width: min(30rem, calc(100% - 2rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;

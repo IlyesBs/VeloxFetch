@@ -32,7 +32,7 @@ const Line = memo(function Line({ item, onOpen, first }: { item: IndicatorItem; 
   return (
     <button
       type="button"
-      className={`dl-ind-line ${first ? "" : "rise"}`}
+      className="dl-ind-line"
       data-testid={first ? "ind-first" : `ind-${item.key}`}
       title={item.name}
       aria-label={t("md.openDetails", { title: item.name })}
@@ -90,7 +90,7 @@ export function DownloadIndicator({ onOpen }: { onOpen: (id: number) => void }) 
     <section
       className={`dl-ind ${leaving && items.length === 0 ? "is-leaving" : ""} ${open ? "is-open" : ""}`}
       aria-label={t("ind.label")}
-      data-testid="download-indicator"
+      data-testid="dl-indicator"
       data-count={items.length}
     >
       {others.length > 0 && (
