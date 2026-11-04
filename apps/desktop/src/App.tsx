@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { api, normalizeError } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
+import { DownloadIndicator } from "./components/DownloadIndicator";
 import { ClipboardBanner } from "./components/ClipboardBanner";
 import { ExtensionBanner } from "./components/ExtensionBanner";
 import { MediaDialog } from "./components/MediaDialog";
@@ -14,10 +15,11 @@ import { ToolsUpdateBanner } from "./components/ToolsUpdateBanner";
 import { Sidebar, type NavTarget, type RouteName } from "./components/shell/Sidebar";
 import { StatusBar } from "./components/shell/StatusBar";
 import { TitleBar } from "./components/shell/TitleBar";
-import { bootstrap, store } from "./hooks";
+import { bootstrap, store, useStore } from "./hooks";
 import { showWindowWhenReady } from "./nativeFeel";
 import { paintAurora } from "./aurora";
 import { onThemeChange } from "./theme";
+import { anyRunning } from "./indicator";
 import { useMedia, usePrefs } from "./prefs";
 import { watchThrottle } from "./throttle";
 import { Toasts } from "./ui/primitives";
@@ -68,6 +70,8 @@ export default function App() {
   const wide = useMedia("(min-width: 900px)", true);
   const { sideFolded } = usePrefs();
   const folded = !wide || sideFolded;
+  // The download indicator floats over the bottom of the page: the page leaves room for it to scroll past.
+  const indicating = useStore((s) => anyRunning(s.groups.active, s.media));
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -206,7 +210,7 @@ export default function App() {
               if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers
               the overlap, so nothing is hidden). */}
           <main className="flex-1 overflow-y-auto overflow-x-hidden" data-testid="main">
-            <div className={`mx-auto px-4 pb-6 pt-1 sm:px-6 ${route.name === "downloads" ? "max-w-[1720px]" : route.name === "active" ? "max-w-[1400px]" : "max-w-6xl"}`}>
+            <div className={`mx-auto px-4 pt-1 sm:px-6 ${indicating ? "pb-28" : "pb-6"} ${route.name === "downloads" ? "max-w-[1720px]" : route.name === "active" ? "max-w-[1400px]" : "max-w-6xl"}`}>
               {route.name === "downloads" && (
                 <DownloadsView
                   onOpen={open}
@@ -238,6 +242,7 @@ export default function App() {
           setTimeout(() => document.getElementById("set-updates")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
         }}
       />
+      <DownloadIndicator onOpen={open} />
       {batch && <BatchDialog initialLinks={batch.links} onClose={() => setBatch(null)} />}
       {stream && <MediaDialog initialUrl={stream.url} onClose={() => setStream(null)} />}
       <PendingDialog />
