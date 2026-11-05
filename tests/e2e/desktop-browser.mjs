@@ -197,6 +197,20 @@ try {
   const plainHeaders = srv.headers.filter((hd) => !hd.cookie).slice(-1)[0];
   check("and then sends no browser headers", plainHeaders && !plainHeaders.referer);
 
+  // ---- 2b. a file only the signed-in browser gets is left to the browser --------------------------------------
+  // (SharePoint / OneDrive / Office Online "Download as CSV": anyone without the browser's session gets a sign-in
+  // page.) Declined, so the extension gives the download back to the browser instead of a download that can only
+  // fail; what VeloxFetch can fetch itself is still taken over.
+  const beforeBrowserOnly = (await list()).length;
+  const signin = await host.ask(dl("signin/XlFileHandler.aspx?sheetName=DATA&downloadAsCsvEnabled=1", { source: "intercept", filename: "Template test case(DATA).csv" }));
+  check("a browser download that gets a sign-in page is declined (the browser keeps it)", signin.ok === false && signin.error?.code === "invalid_input", JSON.stringify(signin));
+  const members = await host.ask(dl("auth/members.zip", { source: "intercept", filename: "members.zip" }));
+  check("a browser download refused with 401 is declined too", members.ok === false && members.error?.code === "invalid_input", JSON.stringify(members));
+  check("nothing was added for them", (await list()).length === beforeBrowserOnly);
+  const fetchable = await host.ask(dl("taken.bin", { source: "intercept", filename: "taken.bin" }));
+  check("a browser download VeloxFetch can fetch is still taken over", fetchable.ok === true && typeof fetchable.result?.id === "number", JSON.stringify(fetchable));
+  await waitFor(async () => (await invoke("get_download", { id: fetchable.result.id })).ok?.status === "completed", "taken-over download", 30000);
+
   // ---- 3. hostile input through the real host -----------------------------------------------------------
   const count = (await list()).length;
   const bad = [
