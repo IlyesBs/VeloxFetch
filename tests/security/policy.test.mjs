@@ -893,7 +893,12 @@ test("yt-dlp: no configuration files, no --exec, never cookies, the link last af
   const site = withoutTestModules(read("crates", "media-engine", "src", "site.rs"));
   const base = site.slice(site.indexOf("fn base_args"), site.indexOf("fn push_url"));
   for (const opt of ["--ignore-config", "--no-exec", "--no-playlist", "--no-batch-file"]) assert.ok(base.includes(`"${opt}"`), opt);
-  assert.match(site.slice(site.indexOf("fn push_url")), /a\.push\(OsString::from\("--"\)\);\s*a\.push\(OsString::from\(url\.as_str\(\)\)\);/);
+  assert.match(site.slice(site.indexOf("fn push_url")), /a\.push\(OsString::from\("--"\)\);\s*a\.push\(OsString::from\(site_link\(url\)\.as_str\(\)\)\);/);
+  // The one change made to a link before yt-dlp gets it: a Bilibili translated page's language is dropped from the
+  // path. Never another host, scheme, user name or password.
+  const link = site.slice(site.indexOf("fn site_link"), site.indexOf("}\n", site.indexOf("out.set_path")) + 2);
+  assert.ok(link.includes('host_matches(&host, "bilibili.com")') && link.includes("out.set_path("), "only Bilibili's path");
+  assert.ok(!/set_host|set_scheme|set_username|set_password|set_port|Url::parse/.test(link), "the host, scheme and credentials are never changed");
   assert.ok(!/"--cookies|"--exec"|"--load-info-json"|cookies-from-browser/.test(site), "no cookie, exec or info-json option is ever built");
   assert.match(site, /fn protected_service/);
   const media = read("crates", "download-manager", "src", "manager", "media.rs");
