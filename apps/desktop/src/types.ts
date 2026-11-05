@@ -175,6 +175,8 @@ export interface DesktopPrefs {
   startAtLoginAvailable: boolean;
   /** How the app shows itself when it was started at login. Mirrors `LoginStart`. */
   loginStart: LoginStart;
+  /** A small bar on the desktop shows the downloads in progress (the download indicator). */
+  indicator: boolean;
 }
 
 export type LoginStart = "tray" | "minimized" | "window";
@@ -185,6 +187,7 @@ export interface SetDesktopPrefs {
   notifyFinished?: boolean;
   language?: string;
   loginStart?: LoginStart;
+  indicator?: boolean;
 }
 
 /** Settings > Speed > Smart throttle. */

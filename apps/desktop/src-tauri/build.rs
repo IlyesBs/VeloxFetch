@@ -91,6 +91,7 @@ const COMMANDS: &[&str] = &[
     "answer_video_tools_update",
     "set_video_bar",
     "window_control",
+    "show_download_details",
     "get_desktop_options",
     "set_desktop_options",
     "get_update_status",

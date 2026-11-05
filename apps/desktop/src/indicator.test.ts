@@ -3,6 +3,8 @@ import { anyRunning, indicatorItems } from "./indicator";
 import { buildGroups } from "./store";
 import type { Download, MediaJob } from "./types";
 import app from "./App.tsx?raw";
+import entry from "./main.tsx?raw";
+import indicatorApp from "./IndicatorApp.tsx?raw";
 
 const locales = import.meta.glob<Record<string, string>>("./locales/*.json", { eager: true, import: "default" });
 
@@ -78,11 +80,15 @@ describe("download indicator", () => {
     }
   });
 
-  it("is in the main window, with its words in every language", () => {
-    expect(app).toMatch(/<div className="relative h-0 shrink-0">\s*<DownloadIndicator onOpen=\{open\} \/>/);
+  it("is a window of its own on the desktop, not inside the app, with its words in every language", () => {
+    expect(app).not.toContain("DownloadIndicator");
+    expect(entry).toContain('windowLabel === "download-indicator" ? <IndicatorApp />');
+    expect(indicatorApp).toContain("<DownloadIndicator />");
+    // A click on a download opens it in the main window.
+    expect(app).toMatch(/onOpenDetails\(\(kind, id\) => setRoute\(kind === "media" \? \{ name: "media", id \} : \{ name: "detail", id \}\)\)/);
     expect(Object.keys(locales)).toHaveLength(8);
     for (const [f, d] of Object.entries(locales)) {
-      for (const k of ["ind.label", "ind.show", "ind.hide"]) expect(d[k], `${f} ${k}`).toBeTruthy();
+      for (const k of ["ind.label", "ind.show", "ind.hide", "ind.dismiss", "desk.indicator", "desk.indicatorHint", "act.indicatorOn", "act.indicatorOff"]) expect(d[k], `${f} ${k}`).toBeTruthy();
     }
   });
 });

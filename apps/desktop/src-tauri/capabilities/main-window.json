@@ -97,6 +97,7 @@
     "allow-answer-video-tools-update",
     "allow-set-video-bar",
     "allow-window-control",
+    "allow-show-download-details",
     "allow-get-update-status",
     "allow-check-for-updates",
     "allow-download-update",

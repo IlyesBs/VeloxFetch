@@ -11,6 +11,8 @@ pub const SETTINGS: &str = "settings";
 pub const DOWNLOAD_DETAIL: &str = "download-detail";
 /// The small window that asks about a download the browser handed over (the main window stays as it is).
 pub const PROMPT: &str = "download-prompt";
+/// The small bar on the desktop that shows the downloads in progress (see indicator.rs).
+pub const INDICATOR: &str = "download-indicator";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -111,11 +113,12 @@ pub enum Command {
     InstallUpdate,
     SetUpdateAuto,
     OpenReleasePage,
+    ShowDownloadDetails,
 }
 
 impl Command {
     #[cfg(test)]
-    pub const ALL: [Command; 97] = [
+    pub const ALL: [Command; 98] = [
         Command::CreateDownload,
         Command::StartDownload,
         Command::PauseDownload,
@@ -213,6 +216,7 @@ impl Command {
         Command::InstallUpdate,
         Command::SetUpdateAuto,
         Command::OpenReleasePage,
+        Command::ShowDownloadDetails,
     ];
 
     /// The Rust/JS command name, e.g. `create_download`.
@@ -315,6 +319,7 @@ impl Command {
             Command::InstallUpdate => "install_update",
             Command::SetUpdateAuto => "set_update_auto",
             Command::OpenReleasePage => "open_release_page",
+            Command::ShowDownloadDetails => "show_download_details",
         }
     }
 
@@ -361,13 +366,17 @@ pub fn allowed(window: &str, cmd: Command) -> bool {
                 | StartPlaylist
                 | WindowControl
         ),
+        // The download indicator reads the list of downloads and videos (what it shows), opens one's details in the
+        // main window, and moves / sizes / hides itself (`window_control`: those actions only). Nothing that starts,
+        // stops or changes a download.
+        INDICATOR => matches!(cmd, ListDownloads | ListMediaJobs | ShowDownloadDetails | WindowControl),
         _ => false,
     }
 }
 
 /// Which windows are sent download events.
 pub fn may_receive_events(window: &str) -> bool {
-    matches!(window, MAIN | DOWNLOAD_DETAIL | PROMPT)
+    matches!(window, MAIN | DOWNLOAD_DETAIL | PROMPT | INDICATOR)
 }
 
 #[cfg(test)]
@@ -526,11 +535,34 @@ mod tests {
         assert!(may_receive_events(PROMPT));
     }
 
+    /// The download indicator: reads the list, opens a download's details, moves and hides itself. Nothing else.
+    #[test]
+    fn the_download_indicator_only_reads_and_shows() {
+        use Command::*;
+        let granted: BTreeSet<&str> = Command::ALL.iter().filter(|c| allowed(INDICATOR, **c)).map(|c| c.name()).collect();
+        let expected: BTreeSet<&str> =
+            [ListDownloads, ListMediaJobs, ShowDownloadDetails, WindowControl].iter().map(|c| c.name()).collect();
+        assert_eq!(granted, expected);
+        for cmd in [
+            CreateDownload,
+            PauseDownload,
+            CancelDownload,
+            DeleteDownload,
+            GetDownloadDetail,
+            PauseMediaJob,
+            CancelMediaJob,
+            SetDesktopOptions,
+        ] {
+            assert!(!allowed(INDICATOR, cmd), "{cmd:?}");
+        }
+        assert!(may_receive_events(INDICATOR));
+    }
+
     /// The capability files and the Rust matrix must describe exactly the same access.
     #[test]
     fn capability_files_match_the_authorization_matrix() {
         let caps = capability_files();
-        assert_eq!(caps.len(), 4, "expected main / settings / download / download popup capability files");
+        assert_eq!(caps.len(), 5, "expected main / settings / download / download popup / indicator capability files");
         for cap in &caps {
             let windows: Vec<&str> = cap["windows"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
             assert_eq!(windows.len(), 1, "one capability per window: {}", cap["identifier"]);
