@@ -1,5 +1,6 @@
-// End-to-end test of the download indicator, in the real desktop app: while something downloads, a small window of
-// its own sits on the desktop, over the other programs (also with the main window minimised), with the first
+// End-to-end test of the download indicator, in the real desktop app: while something downloads and the main window
+// is not on the screen (in the tray, or minimised), a small window of its own sits on the desktop, over the other
+// programs, with the first
 // download (its name, progress and time left). With several, an arrow shows all the others above it (the window
 // grows upwards) and hides them again. It can be dragged anywhere and comes back there; a click on a download opens
 // its details in the main window; its × hides it until the next downloads; Settings turns it off. It goes once
@@ -47,6 +48,11 @@ const inBar = async () => {
   await h.useWindow(IND);
   await waitFor(() => has(BAR), "the bar on its page", 10000);
 };
+/** Close the main window: it goes to the tray (off the screen). */
+const toTray = async () => {
+  await h.useWindow("main");
+  await h.invoke("window_control", { action: "close" });
+};
 const add = async (name) => {
   const d = (await h.invoke("create_download", { request: { url: `${srv.base}/${name}` } })).ok;
   await waitFor(async () => (await status(d.id)) === "downloading", `${name} to start`);
@@ -75,10 +81,18 @@ try {
   await sleep(600);
   check("nothing downloading: only the main window, no indicator", JSON.stringify(await labels()) === JSON.stringify(["main"]), JSON.stringify(await labels()));
   check("the app itself shows no download bar inside its window", !(await has(BAR)));
+  // Closing the window keeps VeloxFetch in the tray (this computer has the tray library; minimising needs a window
+  // manager, which the test display has not: the tray is how the main window leaves the screen here).
+  const prefs = (await h.invoke("get_desktop_options")).ok;
+  check("the test computer has a tray to close the window to", prefs?.trayAvailable === true, JSON.stringify(prefs));
+  await h.invoke("set_desktop_options", { request: { closeToTray: true } });
 
   // ---- one download: its own window on the desktop, over the others, not in the taskbar
   srv.rateBps = 384 * 1024; // the whole server: long enough to look at everything
   const one = await add("first-file.zip");
+  await sleep(1500);
+  check("the main window is open on the screen: no bar (it is not needed)", !(await labels()).includes(IND) || !barWindow()?.mapped, JSON.stringify(await labels()));
+  await toTray();
   await inBar();
   await ev(`(() => { window.__errs = []; window.addEventListener('error', (e) => window.__errs.push(e.message)); return true; })()`);
   await sleep(500); // its entrance is over
@@ -98,11 +112,8 @@ try {
     check("X11: the first time, in the bottom corner of the screen", w0.x + w0.width === screen.w - 16 && w0.y + w0.height === screen.h - 16, JSON.stringify({ w0, screen }));
   }
 
-  // ---- it stays when the main window is minimised
+  if (x11()) check("X11: the main window is in the tray (off the screen)", !x11().some((w) => w.width > 900 && w.mapped), JSON.stringify(x11()));
   await inMain();
-  await h.invoke("window_control", { action: "minimize" });
-  await sleep(600);
-  if (x11()) check("the main window minimised: the bar is still on the desktop", barWindow()?.mapped === true, JSON.stringify(x11()));
   const refused = await h.invoke("window_control", { action: "fit", height: 300 });
   check("the main window may not use the bar's controls", !!refused.err, JSON.stringify(refused));
 
@@ -154,7 +165,12 @@ try {
   await inMain();
   await waitFor(() => has("[data-testid=detail-view]"), "the first download's details page", 8000);
   check("a click on the bar's download opens its details in the main window", (await text("[data-testid=detail-title]")) === "first-file.zip", await text("[data-testid=detail-title]"));
-  if (x11()) check("X11: the main window came back from minimised", x11().some((w) => w.width > 900 && w.mapped && !w.minimized), JSON.stringify(x11()));
+  if (x11()) check("X11: the main window came back from the tray", x11().some((w) => w.width > 900 && w.mapped && !w.minimized), JSON.stringify(x11()));
+  await sleep(800);
+  if (x11()) check("the main window is back on the screen: the bar hides", !barWindow()?.mapped, JSON.stringify(x11()));
+  await toTray();
+  await sleep(800);
+  if (x11()) check("back in the tray: the bar shows again", barWindow()?.mapped === true, JSON.stringify(x11()));
   await inBar();
   await click("[data-testid=ind-toggle]");
   await sleep(400);
@@ -162,6 +178,8 @@ try {
   await inMain();
   await waitFor(() => has("[data-testid=media-detail-view]"), "the video's details page", 8000);
   check("a video's line opens the video's details page", (await text("[data-testid=media-detail-title]")) === "A long clip");
+  await toTray();
+  await sleep(800);
 
   // ---- the place: moved somewhere (as at the end of a drag), it is remembered
   const before = barWindow();

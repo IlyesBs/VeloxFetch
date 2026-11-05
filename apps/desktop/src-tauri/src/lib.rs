@@ -689,6 +689,8 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
 /// **debug builds only** can open a WebView2 debugging port for the end-to-end test when
 /// `VELOX_E2E_DEBUG_PORT` is set. Release builds never do this.
 fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    // Its UI has not painted yet (see the safety net below).
+    desktop::ui_not_ready();
     let cfg = app.config().app.windows.first().cloned().ok_or("no window configured")?;
     let builder = e2e_browser_args(tauri::WebviewWindowBuilder::from_config(app, &cfg)?);
     let window = window_chrome(builder).build()?;
@@ -701,10 +703,11 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::
         let _ = owner.run_on_main_thread(move || rebuild_main_window(&app));
     });
     // The window is created hidden and shown by the UI once it has painted (no blank web-page
-    // frame). If the UI never gets there, show it anyway so the app can't stay invisible.
+    // frame). If the UI never gets there, show it anyway so the app can't stay invisible. Not when the UI did show it
+    // and the user then closed it to the tray in the first seconds: it would pop back up on its own.
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(6));
-        if !desktop::starts_hidden() && !window.is_visible().unwrap_or(true) {
+        if !desktop::starts_hidden() && !desktop::ui_ready() && !window.is_visible().unwrap_or(true) {
             let _ = window.show();
         }
     });

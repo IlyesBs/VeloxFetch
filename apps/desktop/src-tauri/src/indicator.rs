@@ -1,6 +1,7 @@
 //! The download indicator: a small window on the desktop, over the other programs, that shows the downloads in
-//! progress (the first one, and the others behind an arrow). It is there whenever something downloads, also while
-//! the main window is in the tray, minimised or behind other programs, and goes when nothing downloads any more
+//! progress (the first one, and the others behind an arrow). It is there while something downloads and the main
+//! window is not on the screen (minimised, or in the tray): with the main window open it is not needed, so it hides,
+//! and comes back when the window is minimised or closed to the tray. It goes when nothing downloads any more
 //! (the window is closed then: no web page is kept in memory while the app waits; the next downloads open it again).
 //!
 //! - Rust decides when it shows: it follows the download events (`running_change`). Its page draws it, sizes it
@@ -14,6 +15,7 @@
 //! - Settings > On the desktop turns it off (`desktop.indicator`).
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -34,6 +36,9 @@ const MARGIN: i32 = 16;
 const HIDE_AFTER: Duration = Duration::from_millis(400);
 /// A drag sends many moves: the place is written once it has stopped for this long.
 const SAVE_AFTER: Duration = Duration::from_millis(600);
+/// While something downloads, how often the main window is looked at (opened, minimised, closed to the tray, brought
+/// back from it: by the user, the tray, the window manager or the app itself).
+const WATCH_EVERY: Duration = Duration::from_millis(300);
 
 /// A download or a video download.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -73,6 +78,10 @@ struct State {
     generation: u64,
     /// Bumped at every move: the place is written once the moves stop.
     moves: u64,
+    /// Where the bar is: its left edge and its bottom edge (screen pixels), as set here or found after a drag. The
+    /// window's own size and place are read back late on X11 (a resize lands a moment after it is asked for), so
+    /// growing and shrinking keep to this, never to what the window says.
+    anchor: Option<(i32, i32)>,
 }
 
 static STATE: std::sync::LazyLock<Mutex<State>> = std::sync::LazyLock::new(Mutex::default);
@@ -97,17 +106,68 @@ pub fn on_event(app: &AppHandle, manager: &DownloadManager, ev: &ManagerEvent) {
     }
 }
 
+/// Is the main window on the screen (open and not minimised)? Then the bar is not needed. Hidden in the tray,
+/// minimised, or not made yet (started in the tray): it is not.
+fn main_on_screen(app: &AppHandle) -> bool {
+    app.get_webview_window(authz::MAIN).is_some_and(|w| w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false))
+}
+
+/// Should the bar be on the screen now?
+fn wanted(app: &AppHandle, manager: &DownloadManager) -> bool {
+    let (any, dismissed) = {
+        let s = state();
+        (!s.running.is_empty(), s.dismissed)
+    };
+    any && !dismissed && manager.indicator_on() && !main_on_screen(app)
+}
+
+/// Show the bar or hide it, as the state wants now.
+fn apply(app: &AppHandle, manager: &DownloadManager) {
+    if wanted(app, manager) {
+        if let Err(e) = show(app, manager) {
+            tracing::warn!(error = %e, "could not show the download indicator");
+        }
+    } else {
+        hide(app);
+    }
+}
+
+/// While something downloads, follow the main window: the bar shows when it leaves the screen and hides when it
+/// comes back. One watcher at a time; it stops once nothing downloads.
+fn watch_main(app: &AppHandle) {
+    if WATCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut was = None;
+        loop {
+            tokio::time::sleep(WATCH_EVERY).await;
+            if !any_running() {
+                break;
+            }
+            let Some(state) = app.try_state::<crate::AppState>() else { break };
+            let now = wanted(&app, &state.manager);
+            if was != Some(now) {
+                was = Some(now);
+                apply(&app, &state.manager);
+            }
+        }
+        WATCHING.store(false, Ordering::SeqCst);
+        // Something may have started just as the watcher stopped.
+        if any_running() {
+            watch_main(&app);
+        }
+    });
+}
+
+static WATCHING: AtomicBool = AtomicBool::new(false);
+
 /// Show or hide the bar for the current state (after an event, or a change of the setting).
 pub fn refresh(app: &AppHandle, manager: &DownloadManager, any: bool) {
     if any {
-        let dismissed = state().dismissed;
-        if manager.desktop_prefs().indicator && !dismissed {
-            if let Err(e) = show(app, manager) {
-                tracing::warn!(error = %e, "could not show the download indicator");
-            }
-        } else {
-            hide(app);
-        }
+        apply(app, manager);
+        watch_main(app);
         return;
     }
     // Nothing runs: the next downloads show the bar again, even if it was hidden by hand. Its page slides it away
@@ -207,6 +267,7 @@ fn place(w: &WebviewWindow, manager: &DownloadManager, height: Option<u32>) -> t
             None => (MARGIN, h + MARGIN),
         },
     };
+    state().anchor = Some((x, bottom));
     w.set_position(tauri::PhysicalPosition::new(x, (bottom - h).max(0)))
 }
 
@@ -230,11 +291,10 @@ pub fn fit(w: &WebviewWindow, height: f64) -> tauri::Result<()> {
             place(w, &state.manager, Some(new_h))?;
         }
         // Only while something downloads (the page may answer after the last one ended), and not if hidden by hand.
-        let show = {
-            let s = state();
-            !s.running.is_empty() && !s.dismissed
-        };
-        if show && w.try_state::<crate::AppState>().is_some_and(|s| s.manager.desktop_prefs().indicator) {
+        // Only while something downloads (the page may answer after the last one ended), not if hidden by hand, and
+        // not while the main window is on the screen.
+        let show = w.try_state::<crate::AppState>().is_some_and(|s| wanted(w.app_handle(), &s.manager));
+        if show {
             w.show()?;
             // A window not yet on screen may not take a new size (GTK): once more, now that it is.
             if w.outer_size().is_ok_and(|s| s.height.abs_diff(new_h) > 1) {
@@ -247,13 +307,15 @@ pub fn fit(w: &WebviewWindow, height: f64) -> tauri::Result<()> {
         return Ok(());
     }
     let pos = w.outer_position()?;
-    let bottom = pos.y + size.height as i32;
+    let anchor = state().anchor;
+    let (x, bottom) = anchor.unwrap_or((pos.x, pos.y + size.height as i32));
     let mut y = bottom - new_h as i32;
     if let Some(a) = area {
         y = y.max(a.position.y).min(a.position.y + a.size.height as i32 - new_h as i32);
     }
-    if y != pos.y {
-        w.set_position(tauri::PhysicalPosition::new(pos.x, y))?;
+    state().anchor = Some((x, bottom));
+    if (x, y) != (pos.x, pos.y) {
+        w.set_position(tauri::PhysicalPosition::new(x, y))?;
     }
     Ok(())
 }
@@ -275,6 +337,8 @@ pub fn moved(w: &tauri::Window) {
             return;
         }
         let (Ok(pos), Ok(size)) = (w.outer_position(), w.outer_size()) else { return };
+        // Settled: this is where the bar is now (dragged there, or grown / shrunk by `fit`).
+        state().anchor = Some((pos.x, pos.y + size.height as i32));
         if let Some(state) = w.try_state::<crate::AppState>() {
             let manager = state.manager.clone();
             let _ = tokio::task::spawn_blocking(move || manager.set_indicator_place(pos.x, pos.y + size.height as i32)).await;
@@ -285,6 +349,7 @@ pub fn moved(w: &tauri::Window) {
 /// Close the bar's window: nothing downloads any more, or the main window is gone for good (the app is ending, and
 /// the bar must not keep it running).
 pub fn close(app: &AppHandle) {
+    state().anchor = None;
     if let Some(w) = app.get_webview_window(authz::INDICATOR) {
         let _ = w.destroy();
     }

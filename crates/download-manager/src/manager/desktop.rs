@@ -54,8 +54,13 @@ impl DownloadManager {
             tray_available: self.inner.tray_available.load(Ordering::Relaxed),
             start_at_login_available: launcher.is_some(),
             login_start: self.login_start(),
-            indicator: self.flag(INDICATOR_KEY, true),
+            indicator: self.indicator_on(),
         }
+    }
+
+    /// Is the download indicator turned on (Settings)? Just this switch: read often while downloads run.
+    pub fn indicator_on(&self) -> bool {
+        self.flag(INDICATOR_KEY, true)
     }
 
     /// Where the user left the download indicator (`x`, `bottom`), if they moved it. Not shown to any window.
