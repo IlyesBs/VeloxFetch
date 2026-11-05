@@ -4,12 +4,13 @@ import { AddDownload } from "../components/AddDownload";
 import { BentoCards } from "../components/BentoCards";
 import { DownloadCard } from "../components/DownloadCard";
 import { MediaJobs } from "../components/MediaJobs";
+import { mediaGroup } from "../mediaDetail";
 import { SidePanels } from "../components/SidePanels";
 import { ThrottleHud } from "../components/ThrottleHud";
 import { hostOf } from "../format";
 import { store, useStore } from "../hooks";
 import type { GroupName } from "../store";
-import type { Download } from "../types";
+import type { Download, MediaJob } from "../types";
 import { useT, type Key } from "../i18n";
 import { setPrefs, usePrefs, type SortOrder } from "../prefs";
 import { Icon } from "../ui/icons";
@@ -93,6 +94,8 @@ export function DownloadsView({
   const groups = useStore((s) => s.groups);
   const ready = useStore((s) => s.ready);
   const streams = useStore((s) => s.media.length);
+  // The tab each video download is in (changes with their status only, not with each progress tick).
+  const videoTabs = useStore((s) => s.media.map((j) => mediaGroup(j.status)).join(","));
   const { density, sort } = usePrefs();
   const [query, setQuery] = useState("");
   const [sortOpen, setSortOpen] = useState(false);
@@ -122,6 +125,18 @@ export function DownloadsView({
   const nothing = ready && total === 0 && streams === 0;
   const q = query.trim();
   const filtering = filter !== "all" || q !== "";
+  const videos = useMemo(() => {
+    const n: Record<GroupName, number> = { active: 0, queued: 0, paused: 0, failed: 0, completed: 0, cancelled: 0 };
+    for (const g of videoTabs ? videoTabs.split(",") : []) n[g as GroupName] += 1;
+    return n;
+  }, [videoTabs]);
+  // Video downloads follow the same tab and search as the other downloads, under the tabs.
+  const showVideo = (j: MediaJob) => {
+    if (!FILTERS.find((f) => f.name === filter)!.groups.includes(mediaGroup(j.status))) return false;
+    const needle = q.toLowerCase();
+    return !needle || j.title.toLowerCase().includes(needle) || j.host.toLowerCase().includes(needle);
+  };
+  const videosShown = useStore((s) => s.media.filter(showVideo).length);
 
   // The list. Recomputed on status changes, typing and order changes only (not on progress ticks, except
   // for the progress order, which reads the current numbers when the list is rebuilt).
@@ -139,7 +154,7 @@ export function DownloadsView({
   }, [filter, q, groups, sort]);
 
   const list = (ids: number[]) => ids.map((id) => store.getState().byId[id]).filter((d): d is Download => !!d);
-  const count = (f: (typeof FILTERS)[number]) => f.groups.reduce((n, g) => n + groups[g].length, 0);
+  const count = (f: (typeof FILTERS)[number]) => f.groups.reduce((n, g) => n + groups[g].length + videos[g], 0);
 
   return (
     <div className="@container">
@@ -159,9 +174,7 @@ export function DownloadsView({
         <div className="min-w-0 space-y-4">
           {nothing && <EmptyState icon="download" title={t("empty.title")} body={t("empty.body")} />}
 
-          <MediaJobs />
-
-          {total > 0 && (
+          {(total > 0 || streams > 0) && (
             <div className="panel flex flex-wrap items-center gap-2 p-1.5" data-testid="list-toolbar">
               <div role="group" aria-label={t("list.tabs")} className="tabbar grow basis-auto">
                 {FILTERS.map((f) =>
@@ -247,14 +260,16 @@ export function DownloadsView({
             </div>
           )}
 
-          {total > 0 &&
+          <MediaJobs show={showVideo} />
+
+          {total + streams > 0 &&
             (shown.length > 0 ? (
               <div className="space-y-3" data-testid={filtering ? "filtered-list" : "all-list"}>
                 {shown.map((id) => (
                   <DownloadCard key={id} id={id} onOpen={onOpen} density={density} />
                 ))}
               </div>
-            ) : (
+            ) : videosShown > 0 ? null : (
               <p className="py-6 text-center text-dim" data-testid="filtered-empty">
                 {t("list.nothing")}
                 {q ? ` “${q}”` : ""}.{" "}

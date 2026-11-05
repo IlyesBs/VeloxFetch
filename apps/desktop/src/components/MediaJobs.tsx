@@ -242,11 +242,12 @@ const RUNNING: MediaStatus[] = ["queued", "preparing", "downloading", "combining
 /**
  * Video downloads (YouTube and similar sites, HLS / DASH streams). A separate list: they are not rows of the
  * normal download list. `only`: just the running ones (Active page) or just the finished ones (Completed page).
+ * `show`: the ones the download list's tab and search keep (Downloads page).
  */
-export function MediaJobs({ only }: { only?: "active" | "done" }) {
+export function MediaJobs({ only, show }: { only?: "active" | "done"; show?: (job: MediaJob) => boolean }) {
   const t = useT();
   const all = useStore((s) => s.media);
-  const media = only === "active" ? all.filter((j) => RUNNING.includes(j.status)) : only === "done" ? all.filter((j) => j.status === "completed") : all;
+  const media = only === "active" ? all.filter((j) => RUNNING.includes(j.status)) : only === "done" ? all.filter((j) => j.status === "completed") : show ? all.filter(show) : all;
   if (media.length === 0) return null;
   return (
     <Section title={t("sec.videos")} hint={`${media.length}`}>
