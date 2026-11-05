@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "indicator-window",
+  "description": "The download indicator on the desktop: shows the downloads in progress, opens one's details in the main window, moves and hides itself.",
+  "windows": [
+    "download-indicator"
+  ],
+  "permissions": [
+    "allow-list-downloads",
+    "allow-list-media-jobs",
+    "allow-show-download-details",
+    "allow-window-control",
+    "core:window:allow-start-dragging",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

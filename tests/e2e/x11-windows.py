@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """The state of a program's top-level windows on Linux (X11), for the end-to-end tests.
 
-    python3 x11-windows.py <pid>
+    python3 x11-windows.py <pid> [smallest]
 
-Prints a JSON list, one object per window whose _NET_WM_PID is <pid>: its id, size, whether it is mapped (on
-screen), minimized (_NET_WM_STATE_HIDDEN) and the active window. Uses only libX11 through ctypes: no extra packages.
+Prints a JSON list, one object per window whose _NET_WM_PID is <pid>: its id, size, place on the screen, whether it
+is mapped (on screen), minimized (_NET_WM_STATE_HIDDEN), kept above the others (_NET_WM_STATE_ABOVE), left out of
+the taskbar (_NET_WM_STATE_SKIP_TASKBAR) and the active window. Without a window manager, only windows wider and
+taller than `smallest` pixels count (100 by default). Uses only libX11 through ctypes: no extra packages.
 Exit code 2 = no X display.
 """
 import ctypes, ctypes.util, json, sys
@@ -28,6 +30,7 @@ class Attr(ctypes.Structure):
                 ("cmap", W), ("mi", ctypes.c_int), ("map_state", ctypes.c_int), ("aem", ctypes.c_long), ("yem", ctypes.c_long),
                 ("dnp", ctypes.c_long), ("ovr", ctypes.c_int), ("screen", ctypes.c_void_p)]
 x.XGetWindowAttributes.argtypes = [ctypes.c_void_p, W, ctypes.POINTER(Attr)]
+x.XTranslateCoordinates.argtypes = [ctypes.c_void_p, W, W, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int), ctypes.POINTER(W)]
 
 d = x.XOpenDisplay(None)
 if not d:
@@ -52,6 +55,8 @@ def walk(w):
         yield from walk(kids[i])
 
 pid = int(sys.argv[1])
+smallest = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+ABOVE, SKIP_TASKBAR = atom("_NET_WM_STATE_ABOVE"), atom("_NET_WM_STATE_SKIP_TASKBAR")
 active = (prop(root, ACTIVE) or [0])[0]
 def children(w):
     r, p, kids, n = W(), W(), ctypes.POINTER(W)(), ctypes.c_uint()
@@ -61,7 +66,7 @@ def children(w):
 
 def shown(w):
     a = Attr(); x.XGetWindowAttributes(d, w, ctypes.byref(a))
-    return a.map_state == 2 and a.w > 100 and a.h > 100
+    return a.map_state == 2 and a.w > smallest and a.h > smallest
 
 top = [w for w in children(root) if shown(w)]
 wm = bool(prop(root, atom("_NET_SUPPORTING_WM_CHECK"), 1))
@@ -71,5 +76,9 @@ for w in walk(root):
     managed = bool(prop(w, atom("WM_STATE"), 2))
     if prop(w, PID, 1) == [pid] and (managed or (not wm and w in top)):
         a = Attr(); x.XGetWindowAttributes(d, w, ctypes.byref(a))
-        out.append({"id": w, "width": a.w, "height": a.h, "mapped": a.map_state == 2, "minimized": HIDDEN in prop(w, STATE), "active": w == active})
+        rx, ry, child = ctypes.c_int(), ctypes.c_int(), W()
+        x.XTranslateCoordinates(d, w, root, 0, 0, ctypes.byref(rx), ctypes.byref(ry), ctypes.byref(child))
+        state = prop(w, STATE)
+        out.append({"id": w, "width": a.w, "height": a.h, "x": rx.value, "y": ry.value, "mapped": a.map_state == 2,
+                    "minimized": HIDDEN in state, "above": ABOVE in state, "skipTaskbar": SKIP_TASKBAR in state, "active": w == active})
 print(json.dumps(out))

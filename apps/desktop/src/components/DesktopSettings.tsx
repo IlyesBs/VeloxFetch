@@ -105,6 +105,14 @@ export function DesktopSettings() {
           (on) => void change({ notifyFinished: on }, on ? t("act.notifyOn") : t("act.notifyOff")),
           t("desk.notifyHint"),
         )}
+        {box(
+          "indicator-toggle",
+          prefs?.indicator ?? true,
+          false,
+          t("desk.indicator"),
+          (on) => void change({ indicator: on }, on ? t("act.indicatorOn") : t("act.indicatorOff")),
+          t("desk.indicatorHint"),
+        )}
       </div>
     </Panel>
   );

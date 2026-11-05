@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-download-details"
+description = "Enables the show_download_details command without any pre-configured scope."
+commands.allow = ["show_download_details"]
+
+[[permission]]
+identifier = "deny-show-download-details"
+description = "Denies the show_download_details command without any pre-configured scope."
+commands.deny = ["show_download_details"]
