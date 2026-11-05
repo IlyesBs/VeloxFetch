@@ -462,7 +462,7 @@ impl DownloadManager {
         if validate::url(&url).is_ok_and(|u| crate::is_stream_link(&u)) {
             return Err(ManagerError::invalid("this link is a video stream: use Stream download for it"));
         }
-        self.add_pending(NewDownload { url, ..Default::default() }, Default::default()).await
+        self.add_pending_from(NewDownload { url, ..Default::default() }, Default::default(), true).await
     }
 }
 

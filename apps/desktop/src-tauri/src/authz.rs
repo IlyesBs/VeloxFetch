@@ -9,6 +9,8 @@
 pub const MAIN: &str = "main";
 pub const SETTINGS: &str = "settings";
 pub const DOWNLOAD_DETAIL: &str = "download-detail";
+/// The small window that asks about a download the browser handed over (the main window stays as it is).
+pub const PROMPT: &str = "download-prompt";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -342,13 +344,30 @@ pub fn allowed(window: &str, cmd: Command) -> bool {
                     | SetSpeedLimit
             )
         }
+        // Only what the confirmation and the video dialog need for a download the browser handed over. The video
+        // and "use a new link" calls are further limited to that handed-over link (see `prompt_scope` in lib.rs); its
+        // window controls to minimize, close and the frame's theme (`window_control`).
+        PROMPT => matches!(
+            cmd,
+            ListPendingDownloads
+                | ConfirmPendingDownload
+                | DismissPendingDownload
+                | PreviewPendingFolder
+                | GetStorage
+                | PickFolder
+                | UseNewLink
+                | AnalyzeMedia
+                | StartMedia
+                | StartPlaylist
+                | WindowControl
+        ),
         _ => false,
     }
 }
 
 /// Which windows are sent download events.
 pub fn may_receive_events(window: &str) -> bool {
-    matches!(window, MAIN | DOWNLOAD_DETAIL)
+    matches!(window, MAIN | DOWNLOAD_DETAIL | PROMPT)
 }
 
 #[cfg(test)]
@@ -477,11 +496,41 @@ mod tests {
         assert!(allowed(SETTINGS, Command::SetSpeedLimit) && !allowed(SETTINGS, Command::CancelDownload));
     }
 
+    /// The download popup: the handed-over download only (confirm, cancel, its folder, its video), nothing else.
+    #[test]
+    fn the_download_popup_only_answers_the_browser() {
+        use Command::*;
+        let granted: BTreeSet<&str> = Command::ALL.iter().filter(|c| allowed(PROMPT, **c)).map(|c| c.name()).collect();
+        let expected: BTreeSet<&str> = [
+            ListPendingDownloads,
+            ConfirmPendingDownload,
+            DismissPendingDownload,
+            PreviewPendingFolder,
+            GetStorage,
+            PickFolder,
+            UseNewLink,
+            AnalyzeMedia,
+            StartMedia,
+            StartPlaylist,
+            WindowControl,
+        ]
+        .iter()
+        .map(|c| c.name())
+        .collect();
+        assert_eq!(granted, expected);
+        for cmd in
+            [CreateDownload, DeleteDownload, ListDownloads, CancelDownload, SetDesktopOptions, ChooseDownloadFolder, ChooseKindFolder]
+        {
+            assert!(!allowed(PROMPT, cmd), "{cmd:?}");
+        }
+        assert!(may_receive_events(PROMPT));
+    }
+
     /// The capability files and the Rust matrix must describe exactly the same access.
     #[test]
     fn capability_files_match_the_authorization_matrix() {
         let caps = capability_files();
-        assert_eq!(caps.len(), 3, "expected main / settings / download capability files");
+        assert_eq!(caps.len(), 4, "expected main / settings / download / download popup capability files");
         for cap in &caps {
             let windows: Vec<&str> = cap["windows"].as_array().unwrap().iter().map(|w| w.as_str().unwrap()).collect();
             assert_eq!(windows.len(), 1, "one capability per window: {}", cap["identifier"]);

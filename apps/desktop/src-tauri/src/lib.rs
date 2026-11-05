@@ -39,6 +39,8 @@ use tauri::{Emitter, EventTarget, Manager, RunEvent, State, WebviewWindow};
 pub const EVENT_CHANNEL: &str = "velox://event";
 /// The browser extension reached the app, or the first start waits for it (`bridge::ExtensionEvent`), main window only.
 pub const EXTENSION_EVENT: &str = "velox://extension";
+/// The download popup could not be opened: the main window shows the confirmation instead.
+pub const PENDING_IN_MAIN_EVENT: &str = "velox://pending-in-main";
 
 struct AppState {
     manager: DownloadManager,
@@ -60,6 +62,15 @@ fn guard(window: &WebviewWindow, cmd: Command) -> Result<(), ApiError> {
     }
 }
 
+/// `guard`, and in the download popup only for what the browser handed over (`handed_over`).
+fn prompt_scope(window: &WebviewWindow, cmd: Command, handed_over: bool) -> Result<(), ApiError> {
+    guard(window, cmd)?;
+    if window.label() == authz::PROMPT && !handed_over {
+        return Err(forbidden(window.label(), cmd));
+    }
+    Ok(())
+}
+
 macro_rules! command {
     ($(#[$m:meta])* $name:ident, $variant:ident, ($($arg:ident : $ty:ty),*) -> $ret:ty, |$mgr:ident| $body:expr) => {
         $(#[$m])*
@@ -79,7 +90,12 @@ command!(resume_download, ResumeDownload, (id: i64) -> DownloadDto, |m| m.resume
 command!(cancel_download, CancelDownload, (id: i64) -> DownloadDto, |m| m.cancel_download(id));
 command!(retry_download, RetryDownload, (id: i64) -> DownloadDto, |m| m.retry_download(id));
 command!(redownload, Redownload, (id: i64) -> DownloadDto, |m| m.redownload(id));
-command!(use_new_link, UseNewLink, (request: UseNewLink) -> NewLinkOutcome, |m| m.use_new_link(request));
+/// The download popup may only continue a stopped download with the link the browser handed over, never a typed one.
+#[tauri::command]
+async fn use_new_link(window: WebviewWindow, state: State<'_, AppState>, request: UseNewLink) -> Result<NewLinkOutcome, ApiError> {
+    prompt_scope(&window, Command::UseNewLink, request.pending.is_some() && request.url.is_none())?;
+    state.manager.use_new_link(request).await.map_err(ApiError::from)
+}
 command!(delete_download, DeleteDownload, (id: i64, delete_file: bool) -> (), |m| m.delete_download(id, delete_file));
 command!(get_download, GetDownload, (id: i64) -> DownloadDto, |m| m.get_download(id));
 command!(list_downloads, ListDownloads, (filter: ListFilter) -> Vec<DownloadDto>, |m| m.list_downloads(filter));
@@ -153,12 +169,24 @@ enum WindowAction {
     ThemeLight,
     ThemeDark,
     ThemeSystem,
+    /// The download popup only: its height follows what it shows (`height`, in CSS pixels).
+    Fit,
 }
 
 /// Minimize / maximize / close the calling window, or set its frame theme. Returns whether it is maximized.
 #[tauri::command]
-async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<bool, ApiError> {
+async fn window_control(window: WebviewWindow, action: WindowAction, height: Option<f64>) -> Result<bool, ApiError> {
     guard(&window, Command::WindowControl)?;
+    // The download popup: its own buttons, frame theme and height only (not the main window's start-up, nor
+    // maximize). The main window's size is the user's: it never fits itself.
+    let refused = if window.label() == authz::PROMPT {
+        matches!(action, WindowAction::Ready | WindowAction::ToggleMaximize)
+    } else {
+        matches!(action, WindowAction::Fit)
+    };
+    if refused {
+        return Err(forbidden(window.label(), Command::WindowControl));
+    }
     let failed = |e: tauri::Error| ApiError { code: "window", message: format!("the window could not do that: {e}") };
     match action {
         WindowAction::Ready => desktop::window_ready(&window),
@@ -193,6 +221,7 @@ async fn window_control(window: WebviewWindow, action: WindowAction) -> Result<b
             window.set_theme(None).map_err(failed)?;
             paint_behind(&window, None);
         }
+        WindowAction::Fit => fit_prompt(&window, height.unwrap_or(f64::NAN)).map_err(failed)?,
     }
     Ok(window.is_maximized().unwrap_or(false))
 }
@@ -207,9 +236,28 @@ command!(check_duplicate, CheckDuplicate, (request: CheckDuplicate) -> Option<Du
 
 // Stream (HLS / DASH) downloads: the UI sends a link and track ids from an earlier analysis, never a
 // segment address, a path, or anything for a command line.
-command!(analyze_media, AnalyzeMedia, (url: String, pending: Option<u64>, playlist: Option<bool>) -> MediaAnalysisDto, |m| m.analyze_media_with(url, pending, playlist.unwrap_or(false)));
-command!(start_media, StartMedia, (request: MediaRequest) -> MediaJobDto, |m| m.start_media(request));
-command!(start_playlist, StartPlaylist, (request: PlaylistRequest) -> Vec<MediaJobDto>, |m| m.start_playlist(request));
+// The download popup may use them only for the video the browser handed over (`pending`), never a typed link.
+#[tauri::command]
+async fn analyze_media(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    url: String,
+    pending: Option<u64>,
+    playlist: Option<bool>,
+) -> Result<MediaAnalysisDto, ApiError> {
+    prompt_scope(&window, Command::AnalyzeMedia, pending.is_some())?;
+    state.manager.analyze_media_with(url, pending, playlist.unwrap_or(false)).await.map_err(ApiError::from)
+}
+#[tauri::command]
+async fn start_media(window: WebviewWindow, state: State<'_, AppState>, request: MediaRequest) -> Result<MediaJobDto, ApiError> {
+    prompt_scope(&window, Command::StartMedia, request.pending.is_some())?;
+    state.manager.start_media(request).await.map_err(ApiError::from)
+}
+#[tauri::command]
+async fn start_playlist(window: WebviewWindow, state: State<'_, AppState>, request: PlaylistRequest) -> Result<Vec<MediaJobDto>, ApiError> {
+    prompt_scope(&window, Command::StartPlaylist, request.pending.is_some())?;
+    state.manager.start_playlist(request).await.map_err(ApiError::from)
+}
 command!(list_media_jobs, ListMediaJobs, () -> Vec<MediaJobDto>, |m| async { Ok::<_, download_manager::ManagerError>(m.list_media()) });
 command!(cancel_media_job, CancelMediaJob, (id: u64) -> (), |m| m.cancel_media(id));
 command!(pause_media_job, PauseMediaJob, (id: u64) -> (), |m| m.pause_media(id));
@@ -610,21 +658,7 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
 /// `VELOX_E2E_DEBUG_PORT` is set. Release builds never do this.
 fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let cfg = app.config().app.windows.first().cloned().ok_or("no window configured")?;
-    #[allow(unused_mut)]
-    let mut builder = tauri::WebviewWindowBuilder::from_config(app, &cfg)?;
-    #[cfg(all(debug_assertions, windows))]
-    if let Ok(port) = std::env::var("VELOX_E2E_DEBUG_PORT") {
-        if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) {
-            // The web view's language (the interface follows it on first start): the test's, else English.
-            let lang = std::env::var("VELOX_E2E_LANG")
-                .ok()
-                .filter(|l| !l.is_empty() && l.len() <= 16 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
-            builder = builder.additional_browser_args(&format!(
-                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port} --remote-allow-origins=* --lang={}",
-                lang.as_deref().unwrap_or("en-US")
-            ));
-        }
-    }
+    let builder = e2e_browser_args(tauri::WebviewWindowBuilder::from_config(app, &cfg)?);
     let window = window_chrome(builder).build()?;
     fit_to_screen(&window);
     // If the web view under the window dies (see webview_guard.rs), rebuild the window instead of leaving
@@ -643,6 +677,131 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::
         }
     });
     Ok(())
+}
+
+/// Debug builds only: the end-to-end test's WebView2 debugging port and language (`VELOX_E2E_DEBUG_PORT`). Every
+/// window of the app gets the same (WebView2 refuses a second window with other browser arguments).
+#[allow(unused_mut)]
+fn e2e_browser_args<'a>(
+    mut builder: tauri::WebviewWindowBuilder<'a, tauri::Wry, tauri::AppHandle>,
+) -> tauri::WebviewWindowBuilder<'a, tauri::Wry, tauri::AppHandle> {
+    #[cfg(all(debug_assertions, windows))]
+    if let Ok(port) = std::env::var("VELOX_E2E_DEBUG_PORT") {
+        if !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) {
+            // The web view's language (the interface follows it on first start): the test's, else English.
+            let lang = std::env::var("VELOX_E2E_LANG")
+                .ok()
+                .filter(|l| !l.is_empty() && l.len() <= 16 && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-'));
+            builder = builder.additional_browser_args(&format!(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port} --remote-allow-origins=* --lang={}",
+                lang.as_deref().unwrap_or("en-US")
+            ));
+        }
+    }
+    builder
+}
+
+/// The download popup's width, and its height until its page has measured what it shows (`fit_prompt`).
+const PROMPT_SIZE: (f64, f64) = (580.0, 480.0);
+/// The popup is never shorter than this (a link being looked up), nor taller than most of the screen.
+const PROMPT_MIN_HEIGHT: f64 = 200.0;
+/// If the page has not measured itself this long after loading, the popup is shown as it is: never hidden.
+const PROMPT_SHOW_ANYWAY: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// A browser download is waiting for a decision: ask in the small download window, in front, and leave the main
+/// window as it is (in the tray, minimised or open). If that window cannot be made, the main window asks, as before.
+fn ask_about_download(app: &tauri::AppHandle) {
+    // Debug builds only: the older end-to-end tests answer in the main window (the fallback below).
+    if dev_only("VELOX_PENDING_IN_MAIN").is_none() {
+        match show_prompt(app) {
+            Ok(()) => return,
+            Err(e) => tracing::warn!(error = %e, "could not open the download window; asking in the main window"),
+        }
+    }
+    let _ = app.emit_to(authz::MAIN, PENDING_IN_MAIN_EVENT, ());
+    bring_to_front(app);
+}
+
+/// Show the download popup (made the first time; created hidden and shown once its page has loaded, so no empty
+/// frame is seen).
+fn show_prompt(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(authz::PROMPT) {
+        if w.is_visible().unwrap_or(false) {
+            raise(&w);
+        }
+        return Ok(());
+    }
+    let builder = tauri::WebviewWindowBuilder::new(app, authz::PROMPT, tauri::WebviewUrl::App("index.html".into()))
+        .title("VeloxFetch")
+        .inner_size(PROMPT_SIZE.0, PROMPT_SIZE.1)
+        .min_inner_size(420.0, PROMPT_MIN_HEIGHT)
+        .center()
+        .visible(false)
+        .disable_drag_drop_handler()
+        .on_page_load(|w, payload| {
+            // Shown by its first `fit_prompt`, at the height of what it shows; this is the safety net.
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(PROMPT_SHOW_ANYWAY).await;
+                    if !w.is_visible().unwrap_or(true) {
+                        raise(&w);
+                    }
+                });
+            }
+        });
+    let window = window_chrome(e2e_browser_args(builder)).build()?;
+    paint_behind(&window, None);
+    fit_to_screen(&window);
+    Ok(())
+}
+
+/// The download popup takes the height of what it shows (`height`: CSS pixels, from its page), within
+/// `PROMPT_MIN_HEIGHT` and 92% of the screen; its width stays. The first time it is centred and shown; after that its
+/// middle stays where it was (it grows up and down evenly) and it stays on the screen.
+fn fit_prompt(w: &WebviewWindow, height: f64) -> tauri::Result<()> {
+    if !height.is_finite() {
+        return Ok(());
+    }
+    let scale = w.scale_factor()?;
+    let size = w.outer_size()?;
+    let first = !w.is_visible()?;
+    let area = w.current_monitor()?.map(|m| *m.work_area());
+    let max = area.map_or(f64::from(u32::MAX), |a| f64::from(a.size.height) * 0.92);
+    let min = (PROMPT_MIN_HEIGHT * scale).min(max);
+    let new_h = (height * scale).round().clamp(min, max) as u32;
+    if new_h.abs_diff(size.height) > 1 {
+        w.set_size(tauri::PhysicalSize::new(size.width, new_h))?;
+    }
+    if let Some(a) = area {
+        let (top, bottom) = (a.position.y, a.position.y + a.size.height as i32);
+        let x = if first { a.position.x + (a.size.width as i32 - size.width as i32) / 2 } else { w.outer_position()?.x };
+        let middle = if first { top + a.size.height as i32 / 2 } else { w.outer_position()?.y + size.height as i32 / 2 };
+        let y = (middle - new_h as i32 / 2).min(bottom - new_h as i32).max(top);
+        w.set_position(tauri::PhysicalPosition::new(x, y))?;
+    }
+    if first {
+        raise(w);
+    }
+    Ok(())
+}
+
+/// Show a window in front, even from the background.
+fn raise(w: &WebviewWindow) {
+    let _ = w.show();
+    let _ = w.unminimize();
+    // Windows refuses to focus a window from the background; a brief always-on-top forces it forward.
+    let _ = w.set_always_on_top(true);
+    let _ = w.set_focus();
+    let _ = w.set_always_on_top(false);
+}
+
+/// Nothing from the browser is waiting any more: the download popup goes away.
+fn close_prompt_when_done(app: &tauri::AppHandle, manager: &DownloadManager) {
+    if !manager.list_pending().iter().any(|p| !p.from_app) {
+        if let Some(w) = app.get_webview_window(authz::PROMPT) {
+            let _ = w.destroy();
+        }
+    }
 }
 
 /// The window opens at the dashboard's size (tauri.conf.json), but never larger than most of the screen it
@@ -987,6 +1146,11 @@ pub fn run() {
                 loop {
                     match rx.recv().await {
                         Ok(ev) => {
+                            if matches!(ev, download_manager::ManagerEvent::PendingRemoved { .. }) {
+                                if let Some(state) = handle.try_state::<AppState>() {
+                                    close_prompt_when_done(&handle, &state.manager);
+                                }
+                            }
                             let _ = handle.emit_filter(EVENT_CHANNEL, &ev, |target| match target {
                                 EventTarget::WebviewWindow { label } | EventTarget::Window { label } | EventTarget::Webview { label } => {
                                     authz::may_receive_events(label)
@@ -1008,7 +1172,7 @@ pub fn run() {
                 listener,
                 manager.clone(),
                 app.path().resource_dir().ok(),
-                Arc::new(move || bring_to_front(&front)),
+                Arc::new(move || ask_about_download(&front)),
                 // The extension reached the app, or the first start waits for it: the main window shows it.
                 Arc::new(move |event| {
                     let _ = told.emit_to(authz::MAIN, EXTENSION_EVENT, event);
@@ -1064,6 +1228,16 @@ pub fn run() {
         // The close button hides to the tray when the user wants that (and there is a tray).
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Closing the download popup answers "no" to the download it shows (like Cancel); the next one
+                // waiting, if any, is shown in its place. The window goes once nothing waits.
+                if window.label() == authz::PROMPT {
+                    if let Some(state) = window.try_state::<AppState>() {
+                        if let Some(first) = state.manager.list_pending().iter().find(|p| !p.from_app) {
+                            api.prevent_close();
+                            let _ = state.manager.dismiss_pending(first.token);
+                        }
+                    }
+                }
                 if window.label() == authz::MAIN {
                     if let Some(state) = window.try_state::<AppState>() {
                         if desktop::close_to_tray(window.app_handle(), &state.manager) {

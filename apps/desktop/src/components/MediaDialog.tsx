@@ -227,7 +227,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
   const separateAudio = tracks.length > 0 && audio !== "none";
 
   return (
-    <div className="fixed inset-0 z-40 grid place-items-center bg-black/45 p-4" data-testid="media-overlay">
+    <div className="modal-overlay fixed inset-0 z-40 grid place-items-center bg-black/45 p-4" data-testid="media-overlay">
       <div className="card rise flex max-h-[92vh] w-full max-w-xl flex-col p-5 shadow-xl" role="dialog" aria-modal="true" aria-labelledby="media-title" data-testid="media-dialog">
         <h2 id="media-title" className="text-[15px] font-semibold">
           {analysis?.playlist ? t("mdl.titlePlaylist") : pending !== undefined ? t("mdl.titlePending") : t("mdl.title")}
@@ -272,7 +272,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
         )}
 
         {analysis && (
-          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1" data-testid="media-options">
+          <div className="dialog-body mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pe-1" data-testid="media-options">
             {playlist ? (
               <PlaylistHeader playlist={playlist} onlyThis={whole ? () => void look(url, false) : undefined} />
             ) : (
@@ -434,7 +434,7 @@ export function MediaDialog({ initialUrl, pending, onClose }: { initialUrl: stri
           </div>
         )}
 
-        <div className="mt-4 flex items-center justify-end gap-2">
+        <div className="dialog-actions mt-4 flex items-center justify-end gap-2">
           <button className="btn" data-testid="media-cancel" disabled={busy} onClick={onClose}>
             {t("common.cancel")}
           </button>
