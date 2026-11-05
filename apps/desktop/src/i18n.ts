@@ -2,11 +2,14 @@
 // folder is picked up when the app is built, so a translation is changed, or a language added, by editing or adding
 // a file, without touching the code. Each file has a `_meta` entry: { "name": "Français", "short": "FR", "dir": "ltr" }
 // ("rtl" for right-to-left languages). en.json is the reference: a key missing from another file shows in English.
+// English is built in; another language's texts are loaded when it is used (before the first render for the saved
+// one, main.tsx), so the start does not read the texts of every language.
 //
 // A per-user cosmetic setting kept in localStorage, like the theme. Applied as <html lang dir>, which the CSS keys
 // off (fonts, mirrored layout). Components call `useT()` so they re-render when the language changes.
 
 import { useSyncExternalStore } from "react";
+import META from "virtual:locale-meta";
 import en from "./locales/en.json";
 
 type Meta = { name: string; short: string; dir?: "ltr" | "rtl" };
@@ -15,18 +18,21 @@ type File = Record<string, string> & { _meta?: Meta };
 export type Key = Exclude<keyof typeof en, "_meta">;
 export type Lang = string;
 
-const FILES: Record<string, File> = Object.fromEntries(
-  Object.entries(import.meta.glob<File>("./locales/*.json", { eager: true, import: "default" })).map(([p, d]) => [
+/** The texts of the languages loaded so far. */
+const FILES: Record<string, File> = { en: en as unknown as File };
+/** Each other language's file, loaded on first use. */
+const LOAD: Record<string, () => Promise<File>> = Object.fromEntries(
+  Object.entries(import.meta.glob<File>(["./locales/*.json", "!./locales/en.json"], { import: "default" })).map(([p, load]) => [
     p.replace(/^.*\/([^/]+)\.json$/, "$1"),
-    d,
+    load,
   ]),
 );
 
 /** The languages there are files for: English first, then by code. */
-export const LANGS: { lang: Lang; label: string; short: string; dir: "ltr" | "rtl" }[] = Object.entries(FILES)
-  .filter(([, d]) => d._meta?.name)
+export const LANGS: { lang: Lang; label: string; short: string; dir: "ltr" | "rtl" }[] = Object.entries(META)
+  .filter((e): e is [string, Meta] => !!e[1]?.name && (e[0] === "en" || e[0] in LOAD))
   .sort(([a], [b]) => (a === "en" ? -1 : b === "en" ? 1 : a.localeCompare(b)))
-  .map(([lang, d]) => ({ lang, label: d._meta!.name, short: d._meta!.short || lang.toUpperCase(), dir: d._meta!.dir === "rtl" ? "rtl" : "ltr" }));
+  .map(([lang, m]) => ({ lang, label: m.name, short: m.short || lang.toUpperCase(), dir: m.dir === "rtl" ? "rtl" : "ltr" }));
 
 const isLang = (l: string | null): l is Lang => !!l && LANGS.some((x) => x.lang === l);
 const dirOf = (l: Lang) => LANGS.find((x) => x.lang === l)?.dir ?? "ltr";
@@ -90,7 +96,22 @@ export function applyLang(lang: Lang = current): void {
   root.dir = dirOf(lang);
 }
 
-export function setLang(lang: Lang): void {
+/** Load a language's texts (English is always there). If that fails, its texts show in English. */
+export async function loadLang(lang: Lang): Promise<void> {
+  if (FILES[lang] || !LOAD[lang]) return;
+  try {
+    FILES[lang] = await LOAD[lang]();
+  } catch {
+    /* English for this language's texts */
+  }
+}
+
+let asked = 0;
+/** Switch the interface language, once its texts are loaded (the last choice wins). */
+export async function setLang(lang: Lang): Promise<void> {
+  const mine = ++asked;
+  await loadLang(lang);
+  if (mine !== asked) return;
   current = lang;
   try {
     localStorage.setItem(KEY, lang);

@@ -1,7 +1,7 @@
 // The details page of a video download: the numbers it shows, from the job the engine sends (pure functions).
 
 import type { Key } from "./i18n";
-import type { MediaJob } from "./types";
+import type { MediaJob, MediaStatus } from "./types";
 
 /** Time spent running (paused time not counted), in ms. */
 export function elapsedMs(j: MediaJob, now = Date.now()): number {
@@ -38,4 +38,13 @@ export function typeKey(j: MediaJob): Key {
 export function qualityText(q: string | null | undefined): string | null {
   if (!q) return null;
   return /^\d{3,4}$/.test(q) ? `${q}p` : q;
+}
+
+/** The tab of the download list a video download belongs to (the same tabs as the other downloads). */
+export function mediaGroup(status: MediaStatus): "active" | "queued" | "paused" | "failed" | "completed" {
+  if (status === "queued") return "queued";
+  if (status === "paused") return "paused";
+  if (status === "completed") return "completed";
+  if (status === "failed" || status === "cancelled") return "failed";
+  return "active";
 }

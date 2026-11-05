@@ -22,17 +22,17 @@ describe("a video page's subtitles", () => {
     expect(subtitlesFor(subs, "pt-br").map((s) => s.id)).toEqual(subs.map((s) => s.id));
   });
 
-  it("names each language in the app's language and says how it was made", () => {
-    setLang("en");
+  it("names each language in the app's language and says how it was made", async () => {
+    await setLang("en");
     expect(subtitleLabel(subs[0]!, "en")).toBe("Arabic");
     expect(subtitleLabel(subs[2]!, "en")).toBe("English · auto-generated");
-    setLang("fr");
+    await setLang("fr");
     expect(subtitleLabel(subs[0]!, "fr").toLowerCase()).toBe("arabe");
     expect(subtitleLabel(subs[4]!, "fr").toLowerCase()).toBe("allemand · traduction automatique");
-    setLang("ar");
+    await setLang("ar");
     expect(subtitleLabel(subs[1]!, "ar")).toBe("الفرنسية");
     expect(localLabel("English · auto-generated")).toBe("English · مُنشأة تلقائيًا");
-    setLang("en");
+    await setLang("en");
   });
 
   it("keeps the page's name when the language code is unknown", () => {
