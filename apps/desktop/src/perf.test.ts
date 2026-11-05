@@ -99,3 +99,53 @@ describe("Linux: no shadows (the costly part of every repaint there)", () => {
     expect(css).toMatch(/:where\(:root\[data-platform="linux"\]\) \.task,[\s\S]{0,600}border-top-color:/);
   });
 });
+
+describe("Linux: the first picture does not wait on font lookups", () => {
+  // The font lists of one `:root...` rule, by its selector.
+  const fonts = (selector: string) => {
+    const at = css.search(new RegExp(`(^|\n)${selector.replace(/[[\]()]/g, "\\$&")} \\{\\n  --font-ui`));
+    if (at < 0) return null;
+    const block = css.slice(at, css.indexOf("}", at));
+    return { ui: /--font-ui: ([^;]+);/.exec(block)?.[1] ?? "", display: /--font-display: ([^;]+);/.exec(block)?.[1] ?? "" };
+  };
+  const NOT_ON_LINUX = /Segoe|-apple-system|BlinkMacSystemFont|SF Pro|Geeza|YaHei|PingFang|Hiragino/;
+
+  it("names no Windows / macOS font in the Linux lists", () => {
+    for (const sel of [
+      ':root[data-platform="linux"]',
+      ':root[data-platform="linux"][data-ui-font="inter"]',
+      ':root[data-platform="linux"][data-ui-font="cantarell"]',
+      ':root[data-platform="linux"][data-ui-font="noto"]',
+      ':root[data-platform="linux"][data-ui-font="system"]',
+      ':root[data-platform="linux"][lang="ar"]',
+      ':root[data-platform="linux"][lang="zh-cn"]',
+    ]) {
+      const f = fonts(sel);
+      expect(f, sel).not.toBeNull();
+      expect(f!.ui, sel).not.toMatch(NOT_ON_LINUX);
+      expect(f!.display, sel).not.toMatch(NOT_ON_LINUX);
+    }
+  });
+
+  it("keeps the same fonts as the full lists, in the same order (what is drawn does not change)", () => {
+    const all = fonts(":root")!;
+    const linux = fonts(':root[data-platform="linux"]')!;
+    const without = (list: string) =>
+      list
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => !NOT_ON_LINUX.test(s))
+        .join(", ");
+    expect(linux.ui).toBe(without(all.ui));
+    expect(linux.display).toBe(without(all.display));
+    // Each learnt font is the first of the full list that is installed, then the generic one.
+    expect(fonts(':root[data-platform="linux"][data-ui-font="noto"]')!.ui).toBe('"Noto Sans", sans-serif');
+    expect(fonts(':root[data-platform="linux"][data-ui-font="noto"]')!.display).toBe("system-ui, sans-serif");
+    expect(fonts(':root[data-platform="linux"][data-ui-font="inter"]')!.display).toBe("Inter, sans-serif");
+  });
+
+  it("Arabic and Chinese keep their own fonts over the learnt one (declared after it)", () => {
+    expect(css.indexOf(':root[data-platform="linux"][lang="ar"] {')).toBeGreaterThan(css.indexOf(':root[data-platform="linux"][data-ui-font="system"] {'));
+    expect(fonts(':root[data-platform="linux"][lang="ar"]')!.ui.startsWith('"Cairo Variable"')).toBe(true);
+  });
+});

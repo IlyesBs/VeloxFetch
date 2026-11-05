@@ -7,7 +7,7 @@
 //
 // On Linux, VELOX_E2E_DISPLAY=:0 measures on the real screen (GPU); PERF_WAYLAND=1 there runs it on Wayland itself.
 
-import { check, createHarness, exe, fail, finish, path, sleep, startFileServer, waitFor } from "./harness.mjs";
+import { check, createHarness, exe, fail, finish, path, quitOnClose, sleep, startFileServer, waitFor } from "./harness.mjs";
 
 const APP = path.resolve(process.argv[2] ?? exe("target/debug/velox-desktop"));
 const MB = 1024 * 1024;
@@ -48,6 +48,24 @@ try {
   check("the window is asked to show as soon as the interface is on the page (< 150 ms after the script ran)", start.ready !== null && start.ready - start.script < 150, JSON.stringify(start));
   check("the interface is painted within a second of the page loading", start.firstPaint !== null && start.firstPaint < 1000, JSON.stringify(start));
 
+  // ---- the next start (Linux): straight to the interface font this computer has, the first picture without waiting
+  if ((await ev("document.documentElement.dataset.platform")) === "linux") {
+    const fontsOf = () => ev(`({ ui: document.documentElement.dataset.uiFont ?? null, body: getComputedStyle(document.body).fontFamily, stored: localStorage.getItem('velox.ui.font') })`);
+    await sleep(3000); // the font is checked again quietly after the start
+    const first = await fontsOf();
+    check("Linux: the interface font is found and kept for the next start", ["inter", "cantarell", "noto", "system"].includes(first.ui) && first.stored === first.ui, JSON.stringify(first));
+    await quitOnClose(h);
+    await h.closeWindow();
+    await waitFor(async () => h.app.exitCode !== null || h.app.signalCode !== null, "the app to quit", 15000);
+    await h.launch();
+    await waitFor(() => ev("!!document.querySelector('[data-testid=throttle-hud]')"), "the interface after a restart");
+    await sleep(800);
+    const again = await ev(`(() => { const p = performance.getEntriesByType('paint').find((e) => e.name === 'first-contentful-paint'); return { firstPaint: p ? Math.round(p.startTime) : null, script: Math.round(performance.getEntriesByType('navigation')[0].domContentLoadedEventEnd) }; })()`);
+    const next = await fontsOf();
+    console.log(`      next start: page ready ${again.script} ms, first paint ${again.firstPaint} ms, font ${next.ui}`);
+    check("the next start draws the same font", next.ui === first.ui && next.body === first.body, JSON.stringify({ first, next }));
+    check("the next start is painted within a second of the page loading", again.firstPaint !== null && again.firstPaint < 1000, JSON.stringify(again));
+  }
   // ---- IPC latency (Phase 20): 200 calls from the page, one after the other ---------------------------------------
   const ipc = (cmd, args = {}) =>
     ev(`(async () => { const t = []; for (let i = 0; i < 200; i++) { const s = performance.now(); await window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}); t.push(performance.now() - s); }
@@ -80,6 +98,8 @@ try {
     const shadows = await ev(`[...document.querySelectorAll('[data-testid^=download-], [data-testid=bento] > *, .panel')].filter((e) => getComputedStyle(e).boxShadow !== 'none').length`);
     check("Linux: no shadow is painted on the cards and panels (the costly part there)", shadows === 0, String(shadows));
   }
+
+
 } catch (e) {
   console.error("\nE2E ABORTED:", e);
   fail();

@@ -139,7 +139,7 @@ export function SettingsView() {
           </Panel>
           <Panel title={t("set.language")} hint={t("set.languageHint")}>
             {/* Each language named in itself, so anyone finds theirs whatever the current one. */}
-            <select className="input w-full max-w-xs" aria-label={t("set.language")} value={lang} data-testid="settings-lang" onChange={(e) => setLang(e.target.value)}>
+            <select className="input w-full max-w-xs" aria-label={t("set.language")} value={lang} data-testid="settings-lang" onChange={(e) => void setLang(e.target.value)}>
               {LANGS.map((l) => (
                 <option key={l.lang} value={l.lang} lang={l.lang}>
                   {l.label}
