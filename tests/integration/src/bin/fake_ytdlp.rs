@@ -33,6 +33,10 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
     }
+    // A slow look-up, for a test to see the dialog while the link is being looked at.
+    if url.contains("lookwait") && args.iter().any(|a| a == "--dump-single-json") {
+        std::thread::sleep(std::time::Duration::from_secs(3));
+    }
     if args.iter().any(|a| a == "--dump-single-json") && url.contains("/playlist?list=") {
         let list = url.split("list=").nth(1).unwrap_or_default();
         let n = if list.contains("slow") { 5 } else { 4 };

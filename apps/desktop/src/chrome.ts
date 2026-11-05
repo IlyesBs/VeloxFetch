@@ -40,12 +40,12 @@ export function applyChrome(): void {
 }
 
 /**
- * Ask Rust to act on this window (title bar buttons, frame theme). Through our own `window_control`
+ * Ask Rust to act on this window (title bar buttons, frame theme, the download popup's height). Through our own `window_control`
  * command, which only ever touches the calling window; resolves whether it is maximized, or null
  * outside Tauri.
  */
-export function windowControl(action: WindowAction): Promise<boolean | null> {
-  return api.windowControl(action).catch(() => null);
+export function windowControl(action: WindowAction, height?: number): Promise<boolean | null> {
+  return api.windowControl(action, height).catch(() => null);
 }
 
 /**

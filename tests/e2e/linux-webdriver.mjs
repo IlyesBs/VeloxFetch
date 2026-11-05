@@ -215,6 +215,7 @@ export function createLinuxHarness({ port, appPath, env = {}, captureStderr = fa
       VELOX_ORGANIZE: "0",
       VELOX_DRY_RUN_SHELL: "1",
       VELOX_BRIDGE_ENDPOINT: h.endpoint,
+      VELOX_PENDING_IN_MAIN: "1", // see harness.mjs
       ...env,
     };
     delete appEnv.VELOX_E2E_DEBUG_PORT;
@@ -265,6 +266,24 @@ ${COLLECTOR}
     return !r?.v || r.v.undef ? { ok: undefined } : r.v;
   };
   h.page = (expr) => evaluate(expr);
+  /** The labels of the app's open windows ("main", "download-prompt"...); the driven window is kept. */
+  h.windows = async () => {
+    const current = await wd("GET", `/session/${h.session}/window`).catch(() => null);
+    const labels = [];
+    for (const handle of await wd("GET", `/session/${h.session}/window/handles`)) {
+      await wd("POST", `/session/${h.session}/window`, { handle });
+      const r = await wd("POST", `/session/${h.session}/execute/sync`, { script: "return window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? null;", args: [] }).catch(() => null);
+      labels.push({ label: r, handle });
+    }
+    if (current) await wd("POST", `/session/${h.session}/window`, { handle: current }).catch(() => {});
+    return labels;
+  };
+  /** Drive another window of the app from now on (`h.page`, `h.invoke`...). */
+  h.useWindow = async (label) => {
+    const found = (await h.windows()).find((w) => w.label === label);
+    if (!found) throw new Error(`no window ${label}`);
+    await wd("POST", `/session/${h.session}/window`, { handle: found.handle });
+  };
   h.invoke = (cmd, args = {}) => h.page(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)})`);
   h.exited = () => new Promise((r) => (h.app.exitCode !== null ? r(h.app.exitCode) : h.app.once("exit", (code) => r(code))));
   h.closeWindow = async () => {

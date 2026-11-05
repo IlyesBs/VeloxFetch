@@ -1065,6 +1065,9 @@ pub struct PendingDto {
     pub probing: bool,
     pub incognito: bool,
     pub created_at_ms: u64,
+    /// Put in front of the user from inside the app (the clipboard's "Download…"), not handed over by the browser:
+    /// the main window asks about it; the browser's ones are asked about in the download popup.
+    pub from_app: bool,
     /// Set for a video from the browser's "Download video" bar: the UI opens the video dialog
     /// (quality choice) instead of the file confirmation.
     pub media: Option<PendingMedia>,

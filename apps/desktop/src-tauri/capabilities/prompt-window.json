@@ -1,0 +1,24 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "prompt-window",
+  "description": "The download popup: confirm or cancel a download the browser handed over, choose its folder, its video quality.",
+  "windows": [
+    "download-prompt"
+  ],
+  "permissions": [
+    "allow-list-pending-downloads",
+    "allow-confirm-pending-download",
+    "allow-dismiss-pending-download",
+    "allow-preview-pending-folder",
+    "allow-get-storage",
+    "allow-pick-folder",
+    "allow-use-new-link",
+    "allow-analyze-media",
+    "allow-start-media",
+    "allow-start-playlist",
+    "allow-window-control",
+    "core:window:allow-start-dragging",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

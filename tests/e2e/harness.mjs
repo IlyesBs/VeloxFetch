@@ -167,6 +167,9 @@ export function createHarness({ port, appPath, env = {}, captureStderr = false }
         VELOX_E2E_DEBUG_PORT: String(port),
         VELOX_ORGANIZE: "0", // files stay in the download folder itself unless a test asks for sorting
         VELOX_DRY_RUN_SHELL: "1", // "Show in folder" / "Open" only print what they would do: no Explorer windows
+        // A browser download is asked about in the main window (the tests written before the download popup); a
+        // test of the popup itself sets it to "".
+        VELOX_PENDING_IN_MAIN: "1",
         // A private browser link: the app is single-instance by this link, so a test app must never meet a
         // VeloxFetch the user is running (or another test's app).
         VELOX_BRIDGE_ENDPOINT: h.endpoint,
@@ -227,6 +230,32 @@ export function createHarness({ port, appPath, env = {}, captureStderr = false }
     }
   };
   h.invoke = (cmd, args = {}) => h.page(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)})`);
+  /** The labels of the app's open windows ("main", "download-prompt"...). */
+  h.windows = async () => {
+    const list = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(2000) })).json();
+    const labels = [];
+    for (const t of list.filter((t) => t.type === "page")) {
+      const ws = new WebSocket(t.webSocketDebuggerUrl);
+      await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
+      const c = new Cdp(ws);
+      const r = await c.send("Runtime.evaluate", { expression: "window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label ?? null", returnByValue: true });
+      labels.push({ label: r.result.value, target: t });
+      ws.close();
+    }
+    return labels;
+  };
+  /** Drive another window of the app from now on (`h.page`, `h.invoke`...). */
+  h.useWindow = async (label) => {
+    const found = (await h.windows()).find((w) => w.label === label);
+    if (!found) throw new Error(`no window ${label}`);
+    const ws = new WebSocket(found.target.webSocketDebuggerUrl);
+    await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)));
+    h.cdp = new Cdp(ws);
+    h.cdp.on((m) => h.events.push(m));
+    await h.cdp.send("Runtime.enable");
+    await h.cdp.send("Log.enable");
+    await h.cdp.send("Page.enable");
+  };
   h.exited = () => new Promise((r) => h.app.once("exit", (code) => r(code)));
   /** Close the main window the way a user would (the app must pause, save and exit cleanly). */
   h.closeWindow = async () => {
