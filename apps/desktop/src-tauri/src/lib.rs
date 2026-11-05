@@ -12,6 +12,7 @@ mod authz;
 mod bridge;
 mod clipboard;
 mod desktop;
+mod indicator;
 mod media_env;
 mod preview_server;
 mod smart_throttle;
@@ -41,6 +42,8 @@ pub const EVENT_CHANNEL: &str = "velox://event";
 pub const EXTENSION_EVENT: &str = "velox://extension";
 /// The download popup could not be opened: the main window shows the confirmation instead.
 pub const PENDING_IN_MAIN_EVENT: &str = "velox://pending-in-main";
+/// The download indicator asked to show a download's details: the main window opens them (`{ kind, id }`).
+pub const OPEN_DETAILS_EVENT: &str = "velox://open-details";
 
 struct AppState {
     manager: DownloadManager,
@@ -169,8 +172,10 @@ enum WindowAction {
     ThemeLight,
     ThemeDark,
     ThemeSystem,
-    /// The download popup only: its height follows what it shows (`height`, in CSS pixels).
+    /// The download popup and the download indicator only: the height follows what it shows (`height`, CSS pixels).
     Fit,
+    /// The download indicator only: hidden until the next downloads (its ×).
+    Dismiss,
 }
 
 /// Minimize / maximize / close the calling window, or set its frame theme. Returns whether it is maximized.
@@ -179,10 +184,11 @@ async fn window_control(window: WebviewWindow, action: WindowAction, height: Opt
     guard(&window, Command::WindowControl)?;
     // The download popup: its own buttons, frame theme and height only (not the main window's start-up, nor
     // maximize). The main window's size is the user's: it never fits itself.
-    let refused = if window.label() == authz::PROMPT {
-        matches!(action, WindowAction::Ready | WindowAction::ToggleMaximize)
-    } else {
-        matches!(action, WindowAction::Fit)
+    // The download indicator: its height and its × only (no frame, nothing else to control).
+    let refused = match window.label() {
+        authz::PROMPT => matches!(action, WindowAction::Ready | WindowAction::ToggleMaximize | WindowAction::Dismiss),
+        authz::INDICATOR => !matches!(action, WindowAction::Fit | WindowAction::Dismiss),
+        _ => matches!(action, WindowAction::Fit | WindowAction::Dismiss),
     };
     if refused {
         return Err(forbidden(window.label(), Command::WindowControl));
@@ -221,9 +227,30 @@ async fn window_control(window: WebviewWindow, action: WindowAction, height: Opt
             window.set_theme(None).map_err(failed)?;
             paint_behind(&window, None);
         }
+        WindowAction::Fit if window.label() == authz::INDICATOR => indicator::fit(&window, height.unwrap_or(f64::NAN)).map_err(failed)?,
         WindowAction::Fit => fit_prompt(&window, height.unwrap_or(f64::NAN)).map_err(failed)?,
+        WindowAction::Dismiss => indicator::dismiss(&window).map_err(failed)?,
     }
     Ok(window.is_maximized().unwrap_or(false))
+}
+
+/// Which details page the download indicator asks for.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum DetailsKind {
+    Download,
+    Media,
+}
+
+/// The download indicator: bring the main window to the front on a download's details page (the main window loads
+/// them itself; nothing is read or changed here).
+#[tauri::command]
+async fn show_download_details(window: WebviewWindow, kind: DetailsKind, id: i64) -> Result<(), ApiError> {
+    guard(&window, Command::ShowDownloadDetails)?;
+    let app = window.app_handle();
+    bring_to_front(app);
+    let _ = app.emit_to(authz::MAIN, OPEN_DETAILS_EVENT, serde_json::json!({ "kind": kind, "id": id }));
+    Ok(())
 }
 
 command!(preview_batch, PreviewBatch, (request: BatchRequest) -> BatchPreview, |m| m.preview_batch(request));
@@ -298,9 +325,14 @@ async fn set_desktop_options(
 ) -> Result<download_manager::DesktopPrefsDto, ApiError> {
     guard(&window, Command::SetDesktopOptions)?;
     let relabel = request.language.is_some();
+    let indicator = request.indicator.is_some();
     let prefs = state.manager.set_desktop_prefs(request).await.map_err(ApiError::from)?;
     if relabel {
         desktop::relabel_tray(window.app_handle(), &prefs.language);
+    }
+    // The download indicator turned on or off: shown or hidden now if something downloads.
+    if indicator && indicator::any_running() {
+        indicator::refresh(window.app_handle(), &state.manager, true);
     }
     Ok(prefs)
 }
@@ -657,6 +689,8 @@ fn dev_overrides(cfg: &mut ManagerConfig) {
 /// **debug builds only** can open a WebView2 debugging port for the end-to-end test when
 /// `VELOX_E2E_DEBUG_PORT` is set. Release builds never do this.
 fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    // Its UI has not painted yet (see the safety net below).
+    desktop::ui_not_ready();
     let cfg = app.config().app.windows.first().cloned().ok_or("no window configured")?;
     let builder = e2e_browser_args(tauri::WebviewWindowBuilder::from_config(app, &cfg)?);
     let window = window_chrome(builder).build()?;
@@ -669,10 +703,11 @@ fn create_main_window(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::
         let _ = owner.run_on_main_thread(move || rebuild_main_window(&app));
     });
     // The window is created hidden and shown by the UI once it has painted (no blank web-page
-    // frame). If the UI never gets there, show it anyway so the app can't stay invisible.
+    // frame). If the UI never gets there, show it anyway so the app can't stay invisible. Not when the UI did show it
+    // and the user then closed it to the tray in the first seconds: it would pop back up on its own.
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(6));
-        if !desktop::starts_hidden() && !window.is_visible().unwrap_or(true) {
+        if !desktop::starts_hidden() && !desktop::ui_ready() && !window.is_visible().unwrap_or(true) {
             let _ = window.show();
         }
     });
@@ -847,9 +882,26 @@ fn window_chrome<'a>(
     #[cfg(not(any(windows, target_os = "macos")))]
     let (builder, platform, surface) = (builder.decorations(false), "linux", "solid");
     let _ = SURFACE.set(surface);
-    builder.initialization_script(format!(
-        "Object.defineProperty(window,'__VELOX_CHROME__',{{value:Object.freeze({{platform:'{platform}',surface:'{surface}'}})}});"
-    ))
+    builder.initialization_script(chrome_constant(platform, surface))
+}
+
+/// `window.__VELOX_CHROME__` for a window without the main window's frame (the download indicator): the system, and
+/// the surface the main window chose (the page's colours follow it).
+fn chrome_script<'a>(
+    builder: tauri::WebviewWindowBuilder<'a, tauri::Wry, tauri::AppHandle>,
+) -> tauri::WebviewWindowBuilder<'a, tauri::Wry, tauri::AppHandle> {
+    let platform = if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    };
+    builder.initialization_script(chrome_constant(platform, SURFACE.get().copied().unwrap_or("solid")))
+}
+
+fn chrome_constant(platform: &str, surface: &str) -> String {
+    format!("Object.defineProperty(window,'__VELOX_CHROME__',{{value:Object.freeze({{platform:'{platform}',surface:'{surface}'}})}});")
 }
 
 /// The window surface chosen by [`window_chrome`] (`mica`, `glass` or `solid`).
@@ -1151,6 +1203,9 @@ pub fn run() {
                                     close_prompt_when_done(&handle, &state.manager);
                                 }
                             }
+                            if let Some(state) = handle.try_state::<AppState>() {
+                                indicator::on_event(&handle, &state.manager, &ev);
+                            }
                             let _ = handle.emit_filter(EVENT_CHANNEL, &ev, |target| match target {
                                 EventTarget::WebviewWindow { label } | EventTarget::Window { label } | EventTarget::Webview { label } => {
                                     authz::may_receive_events(label)
@@ -1227,6 +1282,12 @@ pub fn run() {
         })
         // The close button hides to the tray when the user wants that (and there is a tray).
         .on_window_event(|window, event| {
+            // The download indicator was dragged somewhere: remembered for next time.
+            if let tauri::WindowEvent::Moved(_) = event {
+                if window.label() == authz::INDICATOR {
+                    indicator::moved(window);
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // Closing the download popup answers "no" to the download it shows (like Cancel); the next one
                 // waiting, if any, is shown in its place. The window goes once nothing waits.
@@ -1339,6 +1400,7 @@ pub fn run() {
             answer_video_tools_update,
             get_desktop_options,
             set_desktop_options,
+            show_download_details,
             get_update_status,
             check_for_updates,
             download_update,
@@ -1357,6 +1419,9 @@ pub fn run() {
                     tracing::error!(error = %e, "could not rebuild the window");
                 }
                 REBUILDING.store(false, Ordering::SeqCst);
+            } else if label == authz::MAIN {
+                // The main window closed for good: the download indicator must not keep the app running.
+                indicator::close(handle);
             }
         }
         // macOS: a click on the Dock icon while the window is hidden in the tray brings it back.

@@ -233,7 +233,7 @@ export function Toasts() {
     return () => timers.forEach(clearTimeout);
   }, [toasts]);
   return (
-    <div className="toast-stack pointer-events-none fixed bottom-10 end-4 z-50 flex w-80 flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-10 end-4 z-50 flex w-80 flex-col gap-2" aria-live="polite">
       {toasts.map((t) => (
         <div
           key={t.id}

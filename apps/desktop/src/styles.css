@@ -1347,25 +1347,34 @@ dialog::backdrop {
   background: var(--line-strong);
 }
 
-/* The download indicator (components/DownloadIndicator.tsx): a floating glass bar above the status bar while
-   something downloads, centred on the page (App puts it in a zero-height box under <main>). Opaque (it floats over the list: nothing behind may show through), tinted and lit along
-   its top edge like the glass panels. It rises in, slides away when the last download ends; its list of the other downloads unfolds upwards. */
+/* The download indicator (components/DownloadIndicator.tsx, IndicatorApp.tsx): its own window on the desktop, over
+   the other programs. The window is see-through: the page draws only the bar, at the bottom of it (the list unfolds
+   upwards inside the window, which has already grown; it shrinks once the list has folded). Opaque, tinted and lit
+   along its top edge like the glass panels. It rises in and slides away. */
+:root.indicator-window,
+:root.indicator-window body,
+:root.indicator-window #root {
+  height: 100%;
+  overflow: hidden;
+  background: transparent !important;
+}
+.indicator-root {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  justify-content: flex-end;
+}
 .dl-ind {
-  position: absolute;
-  z-index: 40;
-  bottom: 0.75rem;
-  left: 50%;
-  width: min(30rem, calc(100% - 2rem));
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  cursor: default;
+  user-select: none;
   border: 1px solid var(--line-strong);
   border-top-color: color-mix(in srgb, var(--accent) 45%, var(--line-strong));
-  border-radius: 18px;
+  border-radius: 16px;
   background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 7%, var(--solid)), var(--solid) 60%);
-  box-shadow: inset 0 1px 0 0 var(--glass-edge), var(--shadow-lift);
-  transform: translateX(-50%);
-  animation: ind-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: ind-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 .dl-ind.is-leaving {
   pointer-events: none;
@@ -1374,30 +1383,31 @@ dialog::backdrop {
 @keyframes ind-in {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(16px) scale(0.97);
+    transform: translateY(10px) scale(0.97);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%);
+    transform: none;
   }
 }
 @keyframes ind-out {
   to {
     opacity: 0;
-    transform: translateX(-50%) translateY(16px) scale(0.97);
+    transform: translateY(10px) scale(0.97);
   }
 }
 .dl-ind-bar {
-  @apply flex items-center gap-1.5 p-1.5;
+  @apply flex items-center gap-1 p-1.5;
 }
 .dl-ind-line {
-  @apply flex min-w-0 flex-1 items-center gap-3 rounded-[13px] px-2.5 py-2 text-start transition-colors duration-150;
+  @apply flex min-w-0 flex-1 items-center gap-3 rounded-[11px] px-2.5 py-2 text-start transition-colors duration-150;
 }
 .dl-ind-line:hover {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 .dl-ind-line:focus-visible,
-.dl-ind-toggle:focus-visible {
+.dl-ind-toggle:focus-visible,
+.dl-ind-close:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -1408,6 +1418,13 @@ dialog::backdrop {
 .dl-ind-toggle:hover {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
+.dl-ind-close {
+  @apply grid h-7 w-7 shrink-0 place-items-center self-start rounded-full text-dim transition-colors duration-150;
+}
+.dl-ind-close:hover {
+  color: var(--fg);
+  background: var(--accent-soft);
+}
 /* The arrow points up (the list opens above the bar), and down to fold it again. */
 .dl-ind-chevron {
   transform: rotate(180deg);
@@ -1416,7 +1433,7 @@ dialog::backdrop {
 .dl-ind.is-open .dl-ind-chevron {
   transform: none;
 }
-/* The other downloads: folded to nothing, unfolding to their height (at most half the window, then it scrolls). */
+/* The other downloads: folded to nothing, unfolding to their height (at most 320 px, then the list scrolls). */
 .dl-ind-list {
   display: grid;
   grid-template-rows: 0fr;
@@ -1429,16 +1446,13 @@ dialog::backdrop {
   grid-template-rows: 1fr;
   opacity: 1;
 }
-.dl-ind-list-inner {
-  @apply flex min-h-0 flex-col gap-0.5 overflow-hidden px-1.5;
+.dl-ind-clip {
+  min-height: 0;
+  overflow: hidden;
 }
-.dl-ind.is-open .dl-ind-list-inner {
-  @apply overflow-y-auto border-b border-line pb-1.5 pt-1.5;
-  max-height: 50vh;
-}
-/* Toasts appear above the bar, never on it. */
-:root:has(.dl-ind) .toast-stack {
-  bottom: 9.5rem;
+.dl-ind-scroll {
+  @apply flex flex-col gap-0.5 overflow-y-auto border-b border-line px-1.5 py-1.5;
+  max-height: 320px;
 }
 :where(:root[data-platform="linux"]) .dl-ind {
   border-top-color: color-mix(in srgb, var(--accent) 45%, var(--glass-edge));

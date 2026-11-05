@@ -14,6 +14,9 @@ const START_AT_LOGIN_KEY: &str = "desktop.start_at_login";
 const NOTIFY_KEY: &str = "desktop.notify_finished";
 const LANGUAGE_KEY: &str = "desktop.language";
 const LOGIN_START_KEY: &str = "desktop.login_start";
+const INDICATOR_KEY: &str = "desktop.indicator";
+/// Where the user left the download indicator: its left edge and its bottom edge, in screen pixels (`x,bottom`).
+const INDICATOR_PLACE_KEY: &str = "desktop.indicator_place";
 
 /// `en`, `fr`, `pt-br`...: what a language file may be called. Anything else is refused.
 pub fn valid_language(code: &str) -> bool {
@@ -51,6 +54,25 @@ impl DownloadManager {
             tray_available: self.inner.tray_available.load(Ordering::Relaxed),
             start_at_login_available: launcher.is_some(),
             login_start: self.login_start(),
+            indicator: self.indicator_on(),
+        }
+    }
+
+    /// Is the download indicator turned on (Settings)? Just this switch: read often while downloads run.
+    pub fn indicator_on(&self) -> bool {
+        self.flag(INDICATOR_KEY, true)
+    }
+
+    /// Where the user left the download indicator (`x`, `bottom`), if they moved it. Not shown to any window.
+    pub fn indicator_place(&self) -> Option<(i32, i32)> {
+        let text = self.inner.store.get_setting(INDICATOR_PLACE_KEY).ok().flatten()?;
+        parse_place(&text)
+    }
+
+    /// Remember where the download indicator is (it was dragged there).
+    pub fn set_indicator_place(&self, x: i32, bottom: i32) {
+        if let Err(e) = self.inner.store.set_setting(INDICATOR_PLACE_KEY, &format!("{x},{bottom}")) {
+            tracing::warn!(error = %e, "could not remember where the download indicator is");
         }
     }
 
@@ -84,6 +106,7 @@ impl DownloadManager {
             req.notify_finished.map(|b| (NOTIFY_KEY, bool_text(b))),
             req.language.map(|l| (LANGUAGE_KEY, l)),
             req.login_start.map(|w| (LOGIN_START_KEY, w.as_str().to_string())),
+            req.indicator.map(|b| (INDICATOR_KEY, bool_text(b))),
         ]
         .into_iter()
         .flatten()
@@ -116,9 +139,17 @@ impl DownloadManager {
     }
 }
 
+/// `"120,-40"` -> `(120, -40)`: two whole numbers within any screen; anything else is ignored.
+fn parse_place(text: &str) -> Option<(i32, i32)> {
+    let (x, y) = text.split_once(',')?;
+    let (x, y) = (x.trim().parse::<i32>().ok()?, y.trim().parse::<i32>().ok()?);
+    let near = |v: i32| (-100_000..=100_000).contains(&v);
+    (near(x) && near(y)).then_some((x, y))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::valid_language;
+    use super::{parse_place, valid_language};
     use crate::api::LoginStart;
 
     #[test]
@@ -130,6 +161,15 @@ mod tests {
             assert_eq!(LoginStart::from_setting(bad), LoginStart::Tray, "{bad:?}");
         }
         assert_eq!(LoginStart::default(), LoginStart::Tray, "the behaviour before the choice existed");
+    }
+
+    #[test]
+    fn the_indicator_place_reads_back_and_ignores_anything_else() {
+        assert_eq!(parse_place("120,-40"), Some((120, -40)));
+        assert_eq!(parse_place(" 3840 , 2100 "), Some((3840, 2100)));
+        for bad in ["", "1", "1,", ",2", "a,b", "1,2,3", "1.5,2", "999999999,0", "0,-200000"] {
+            assert_eq!(parse_place(bad), None, "{bad:?}");
+        }
     }
 
     #[test]

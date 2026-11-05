@@ -7,7 +7,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getLang, t } from "./i18n";
 import { MESSAGES } from "./messages";
 
-export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem" | "fit";
+export type WindowAction = "ready" | "minimize" | "toggleMaximize" | "close" | "isMaximized" | "themeLight" | "themeDark" | "themeSystem" | "fit" | "dismiss";
 import type {
   ExtensionEvent,
   Analysis,
@@ -217,7 +217,17 @@ export const api = {
     call<ExtensionInstall>("install_browser_extension", { request: { browser } }),
   setBrowserIntegration: (browser: BrowserName, enabled: boolean) =>
     call<BrowserIntegration>("set_browser_integration", { request: { browser, enabled } }),
+  /** The download indicator: the main window comes to the front on this download's details page. */
+  showDownloadDetails: (kind: DetailsKind, id: number) => call<void>("show_download_details", { kind, id }),
 };
+
+/** Which details page: a download's or a video download's. */
+export type DetailsKind = "download" | "media";
+
+/** The download indicator asked for a download's details (main window). */
+export function onOpenDetails(handler: (kind: DetailsKind, id: number) => void): Promise<UnlistenFn> {
+  return listen<{ kind: DetailsKind; id: number }>("velox://open-details", (ev) => handler(ev.payload.kind, ev.payload.id));
+}
 
 /** Download links the user copied (only when clipboard detection is on). */
 export function onClipboardLinks(handler: (links: string[]) => void): Promise<UnlistenFn> {

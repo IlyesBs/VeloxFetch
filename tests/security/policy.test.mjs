@@ -654,7 +654,7 @@ test("Phases 16-18: tray, start at login and notifications stay per user, opt-in
   // Debug builds (and every test that runs them) never touch the machine's login items.
   assert.match(lib, /cfg\.app_launcher = if cfg!\(debug_assertions\) \{ None \} else \{ desktop::launcher\(\) \};/);
   // The settings command takes yes / no answers, a language code and one of three ways to start, nothing else (no path, no program).
-  assert.match(api, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct SetDesktopPrefs \{\s*pub close_to_tray: Option<bool>,\s*pub start_at_login: Option<bool>,\s*pub notify_finished: Option<bool>,[\s\S]{0,80}pub language: Option<String>,\s*pub login_start: Option<LoginStart>,\s*\}/);
+  assert.match(api, /#\[serde\(rename_all = "camelCase", deny_unknown_fields\)\]\s*pub struct SetDesktopPrefs \{\s*pub close_to_tray: Option<bool>,\s*pub start_at_login: Option<bool>,\s*pub notify_finished: Option<bool>,[\s\S]{0,80}pub language: Option<String>,\s*pub login_start: Option<LoginStart>,\s*pub indicator: Option<bool>,\s*\}/);
   assert.match(mgr, /if !valid_language\(lang\)/, "the language is checked before it is stored");
   assert.match(mgr, /if self\.flag\(START_AT_LOGIN_KEY, false\) && !system\.starts_at_login\(exe\)/, "start at login is only kept up to date once the user turned it on (off by default)");
   // How it starts at login is a closed list (no free text from the window), stored as one of three words.
@@ -1158,9 +1158,34 @@ test("download popup: answers the browser only, its video and new-link calls onl
   assert.match(lib, /prompt_scope\(&window, Command::StartPlaylist, request\.pending\.is_some\(\)\)\?/);
   assert.match(lib, /prompt_scope\(&window, Command::UseNewLink, request\.pending\.is_some\(\) && request\.url\.is_none\(\)\)\?/);
   // Its window controls: its own buttons and theme, not the main window's start-up nor maximize.
-  assert.match(lib, /if window\.label\(\) == authz::PROMPT \{\s*matches!\(action, WindowAction::Ready \| WindowAction::ToggleMaximize\)\s*\} else \{\s*matches!\(action, WindowAction::Fit\)\s*\};\s*if refused \{\s*return Err\(forbidden/);
+  assert.match(lib, /let refused = match window\.label\(\) \{\s*authz::PROMPT => matches!\(action, WindowAction::Ready \| WindowAction::ToggleMaximize \| WindowAction::Dismiss\),\s*authz::INDICATOR => !matches!\(action, WindowAction::Fit \| WindowAction::Dismiss\),\s*_ => matches!\(action, WindowAction::Fit \| WindowAction::Dismiss\),\s*\};\s*if refused \{\s*return Err\(forbidden/);
   // Its height only: within the screen, never the main window's size, never another window.
   assert.match(lib, /fn fit_prompt\(w: &WebviewWindow, height: f64\)[\s\S]*?if !height\.is_finite\(\)[\s\S]*?\.clamp\(min, max\)/);
   // The page is the app's own (index.html), made by Rust only; the UI cannot open windows.
   assert.match(lib, /WebviewWindowBuilder::new\(app, authz::PROMPT, tauri::WebviewUrl::App\("index\.html"\.into\(\)\)\)/);
+});
+
+test("download indicator: reads the list, opens a download's details, moves and hides itself; nothing else", () => {
+  const cap = JSON.parse(read("apps", "desktop", "src-tauri", "capabilities", "indicator-window.json"));
+  assert.deepEqual(cap.windows, ["download-indicator"]);
+  assert.deepEqual([...cap.permissions].sort(), [
+    "allow-list-downloads", "allow-list-media-jobs", "allow-show-download-details", "allow-window-control",
+    "core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-start-dragging",
+  ]);
+  // (The whole file: its first test-only line comes before the matrix.)
+  const authz = read("apps", "desktop", "src-tauri", "src", "authz.rs");
+  assert.match(authz, /INDICATOR => matches!\(cmd, ListDownloads \| ListMediaJobs \| ShowDownloadDetails \| WindowControl\),/);
+  const lib = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "lib.rs"));
+  // Opening the details only brings the main window forward and tells it which page: no data is read or changed.
+  assert.match(lib, /async fn show_download_details\(window: WebviewWindow, kind: DetailsKind, id: i64\) -> Result<\(\), ApiError> \{\s*guard\(&window, Command::ShowDownloadDetails\)\?;\s*let app = window\.app_handle\(\);\s*bring_to_front\(app\);\s*let _ = app\.emit_to\(authz::MAIN, OPEN_DETAILS_EVENT, serde_json::json!\(\{ "kind": kind, "id": id \}\)\);\s*Ok\(\(\)\)\s*\}/);
+  // The main window closes for good: the bar goes too, so it can never keep the app running.
+  assert.match(lib, /\} else if label == authz::MAIN \{\s*\/\/[^\n]*\n\s*indicator::close\(handle\);/);
+  const ind = withoutTestModules(read("apps", "desktop", "src-tauri", "src", "indicator.rs"));
+  // The app's own page, made by Rust only, without the keyboard, the taskbar or a frame.
+  assert.match(ind, /WebviewWindowBuilder::new\(app, authz::INDICATOR, tauri::WebviewUrl::App\("index\.html"\.into\(\)\)\)/);
+  assert.match(ind, /\.decorations\(false\)[\s\S]{0,400}\.always_on_top\(true\)[\s\S]{0,200}\.skip_taskbar\(true\)\s*\.focused\(false\)/);
+  // Its height only, within the screen; its place is two whole numbers, nothing else is read back.
+  assert.match(ind, /pub fn fit\(w: &WebviewWindow, height: f64\)[\s\S]*?if !height\.is_finite\(\)/);
+  const desk = withoutTestModules(read("crates", "download-manager", "src", "manager", "desktop.rs"));
+  assert.match(desk, /fn parse_place\(text: &str\) -> Option<\(i32, i32\)>/);
 });

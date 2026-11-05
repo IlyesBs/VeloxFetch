@@ -1,9 +1,8 @@
 import { getLang, subscribe as onLangChange, t } from "./i18n";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { api, normalizeError, onPendingInMain } from "./api";
+import { api, normalizeError, onOpenDetails, onPendingInMain } from "./api";
 import { FILL_LINK, OPEN_ADD } from "./components/AddDownload";
 import { BatchDialog } from "./components/BatchDialog";
-import { DownloadIndicator } from "./components/DownloadIndicator";
 import { ClipboardBanner } from "./components/ClipboardBanner";
 import { ExtensionBanner } from "./components/ExtensionBanner";
 import { MediaDialog } from "./components/MediaDialog";
@@ -19,7 +18,6 @@ import { bootstrap, store, useStore } from "./hooks";
 import { showWindowWhenReady } from "./nativeFeel";
 import { paintAurora } from "./aurora";
 import { onThemeChange } from "./theme";
-import { anyRunning } from "./indicator";
 import { useMedia, usePrefs } from "./prefs";
 import { watchThrottle } from "./throttle";
 import { Toasts } from "./ui/primitives";
@@ -89,8 +87,6 @@ export default function App() {
   const wide = useMedia("(min-width: 900px)", true);
   const { sideFolded } = usePrefs();
   const folded = !wide || sideFolded;
-  // The download indicator floats over the bottom of the page: the page leaves room for it to scroll past.
-  const indicating = useStore((s) => anyRunning(s.groups.active, s.media));
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -136,6 +132,11 @@ export default function App() {
     };
     window.addEventListener(OPEN_MEDIA, onMedia);
     return () => window.removeEventListener(OPEN_MEDIA, onMedia);
+  }, []);
+  // A download clicked on the desktop's download indicator: its details page (Rust brought this window forward).
+  useEffect(() => {
+    const off = onOpenDetails((kind, id) => setRoute(kind === "media" ? { name: "media", id } : { name: "detail", id }));
+    return () => void off.then((f) => f());
   }, []);
 
   /** Go to the Downloads view, then send it an event once it is mounted. */
@@ -229,7 +230,7 @@ export default function App() {
               if it were on the right, one bar too wide, which showed a stray sideways scrollbar (the side padding covers
               the overlap, so nothing is hidden). */}
           <main className="flex-1 overflow-y-auto overflow-x-hidden" data-testid="main">
-            <div className={`mx-auto px-4 pt-1 sm:px-6 ${indicating ? "pb-28" : "pb-6"} ${route.name === "downloads" ? "max-w-[1720px]" : route.name === "active" ? "max-w-[1400px]" : "max-w-6xl"}`}>
+            <div className={`mx-auto px-4 pb-6 pt-1 sm:px-6 ${route.name === "downloads" ? "max-w-[1720px]" : route.name === "active" ? "max-w-[1400px]" : "max-w-6xl"}`}>
               {route.name === "downloads" && (
                 <DownloadsView
                   onOpen={open}
@@ -252,10 +253,6 @@ export default function App() {
               {route.name === "media" && <MediaDetailView key={route.id} id={route.id} onBack={home} />}
             </div>
           </main>
-          {/* The download indicator floats over the bottom of the page, centred on it (not on the window). */}
-          <div className="relative h-0 shrink-0">
-            <DownloadIndicator onOpen={open} />
-          </div>
         </div>
       </div>
       <StatusBar

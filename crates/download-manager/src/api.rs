@@ -973,6 +973,8 @@ pub struct DesktopPrefsDto {
     pub start_at_login_available: bool,
     /// How the app shows itself when it was started at login.
     pub login_start: LoginStart,
+    /// A small bar on the desktop shows the downloads in progress (the download indicator).
+    pub indicator: bool,
 }
 
 /// How the app shows itself when the system starts it at login. Only these three values are accepted.
@@ -1017,6 +1019,7 @@ pub struct SetDesktopPrefs {
     /// A language code like `en`, `fr`, `ar`, `pt-br`.
     pub language: Option<String>,
     pub login_start: Option<LoginStart>,
+    pub indicator: Option<bool>,
 }
 
 /// What the live preview can play so far (see `manager/preview.rs`).

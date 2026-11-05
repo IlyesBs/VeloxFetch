@@ -29,6 +29,8 @@ static START_HIDDEN: AtomicBool = AtomicBool::new(false);
 static START_MINIMIZED: AtomicBool = AtomicBool::new(false);
 /// The window was hidden to the tray once already this run (the "still running" hint is shown once).
 static HINT_SHOWN: AtomicBool = AtomicBool::new(false);
+/// The UI has painted once and asked to be shown (`window_ready`): the start-up safety net has nothing to do.
+static UI_READY: AtomicBool = AtomicBool::new(false);
 /// Quit was chosen: closing the window must not hide it any more.
 static QUITTING: AtomicBool = AtomicBool::new(false);
 /// Game mode as the tray menu shows it (ticked), and that menu item.
@@ -90,10 +92,21 @@ pub fn starts_hidden() -> bool {
     START_HIDDEN.load(Ordering::SeqCst)
 }
 
+/// Has the UI painted and asked to be shown? A window hidden after that (closed to the tray) was hidden on purpose.
+pub fn ui_ready() -> bool {
+    UI_READY.load(Ordering::SeqCst)
+}
+
+/// A main window is being made (at start, or rebuilt): its UI has not painted yet.
+pub fn ui_not_ready() {
+    UI_READY.store(false, Ordering::SeqCst);
+}
+
 /// The UI has painted: show the window, unless this run started hidden in the tray (then only once it is opened).
 /// Staying hidden is only ended by the user opening the window (`show_main`): if it were ended here, the check
 /// in `create_main_window` that shows a window the UI never revealed would bring it up a few seconds later.
 pub fn window_ready(window: &tauri::WebviewWindow) {
+    UI_READY.store(true, Ordering::SeqCst);
     if START_HIDDEN.load(Ordering::SeqCst) {
         return;
     }
